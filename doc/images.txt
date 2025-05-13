@@ -1,0 +1,6 @@
+node
+nginx:alpine
+neo4j
+mysql
+python:3.8
+redis
