@@ -1,6 +1,15 @@
-# 文档
+# 2025.5.10
 
+github 学生认证白嫖 copilot
+搞了好几天，发现其实是机器认证，只需要拿张纸手写一下信息就可以了
+然后名字不要改掉，否则会 Revoked
+权限到账很慢，说三天之内，真的三天才到账
 
+# 2025.5.13
+
+使用 `https://github.com/tech-shrimp/docker_image_pusher` 部署docker镜像站
+
+前期工作的时候试着写了下文档，然后这次喂给 GPT-o4 mini 重写了文档
 
 ```
 阅读doc/document.md中的内容，并根据其中的内容撰写开发文档readme.md。
@@ -145,3 +154,21 @@ README.md
 如有问题或建议，请联系项目维护者或提交 Issue。
 ````
 
+
+写完文档之后建了 github 的仓库，添加 remote 然后 push 了一发，之后交给 Claude 3.7 Sonnet 开写
+
+
+```
+根据 `doc/readme.md` 中的内容完成前后端的开发。
+```
+
+
+写完之后用 docker 部署的时候遇到了点问题，交给 Claude 各种修理，比如：
+
+
+```
+请确保您在dockerfile中正确使用了我在doc/readme.md中提到的镜像站。如果需要指定库的版本，请修改doc/images.txt
+```
+
+
+貌似 docker 配好了，代码好不好不太清楚，之后再说

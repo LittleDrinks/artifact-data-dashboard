@@ -1,0 +1,94 @@
+﻿services:
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: artifact-dashboard-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - artifact-network
+    restart: unless-stopped
+  # 后端服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: artifact-dashboard-backend
+    ports:
+      - "13000:3000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mysql
+      - neo4j
+      - redis
+    networks:
+      - artifact-network
+    restart: unless-stopped
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/scripts:/app/scripts
+
+  # MySQL数据库
+  mysql:
+    image: mysql:8
+    container_name: artifact-dashboard-mysql
+    ports:
+      - "13306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: artifact_dashboard
+      MYSQL_USER: ${MYSQL_USER:-user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./backend/scripts/init-mysql.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - artifact-network
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Neo4j图数据库
+  neo4j:
+    image: neo4j:4.4
+    container_name: artifact-dashboard-neo4j
+    ports:
+      - "17474:7474"
+      - "17687:7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+      NEO4J_dbms_memory_heap_max__size: 2G
+      NEO4J_dbms_memory_pagecache_size: 1G
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    networks:
+      - artifact-network
+    restart: unless-stopped
+
+  # Redis缓存
+  redis:
+    image: redis:latest
+    container_name: artifact-dashboard-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-password}
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - artifact-network
+    restart: unless-stopped
+
+networks:
+  artifact-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  neo4j-data:
+  neo4j-logs:
+  redis-data:

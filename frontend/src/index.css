@@ -1,0 +1,167 @@
+/* Global styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Layout styles */
+.site-layout {
+  min-height: 100vh;
+}
+
+.site-layout-background {
+  background: #fff;
+}
+
+.logo {
+  height: 32px;
+  margin: 16px;
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-right {
+  float: right;
+  color: #fff;
+}
+
+.content-container {
+  padding: 24px;
+  background-color: #fff;
+  min-height: 360px;
+  border-radius: 2px;
+}
+
+/* Dashboard cards and charts */
+.dashboard-card {
+  margin-bottom: 24px;
+}
+
+.chart-container {
+  width: 100%;
+  height: 300px;
+}
+
+.full-height-chart {
+  height: 450px;
+}
+
+/* Profile styles */
+.profile-card {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Login/Register styles */
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f2f5;
+}
+
+.login-form {
+  max-width: 400px;
+  padding: 40px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.login-form-title {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.login-form-button {
+  width: 100%;
+}
+
+/* Knowledge Graph styles */
+.knowledge-graph {
+  width: 100%;
+  height: 600px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+/* Chatbot styles */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 500px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background-color: #f9f9f9;
+}
+
+.message {
+  margin-bottom: 16px;
+  max-width: 80%;
+}
+
+.user-message {
+  margin-left: auto;
+  background-color: #1890ff;
+  color: white;
+  padding: 10px 16px;
+  border-radius: 18px 18px 0 18px;
+}
+
+.bot-message {
+  margin-right: auto;
+  background-color: #f0f0f0;
+  padding: 10px 16px;
+  border-radius: 0 18px 18px 18px;
+}
+
+.chat-input {
+  display: flex;
+  padding: 10px;
+  border-top: 1px solid #eee;
+}
+
+.chat-input-field {
+  flex: 1;
+}
+
+/* Wordcloud styles */
+.wordcloud-controls {
+  margin-bottom: 16px;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .site-layout-content {
+    padding: 16px;
+  }
+  
+  .chart-container {
+    height: 250px;
+  }
+  
+  .knowledge-graph {
+    height: 400px;
+  }
+}
