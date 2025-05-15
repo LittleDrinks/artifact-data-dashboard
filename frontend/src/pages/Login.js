@@ -1,12 +1,13 @@
 ﻿import React, { useState } from 'react';
 import { Form, Input, Button, Card, Checkbox, message, Typography } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { login } from '../services/auth.service';
 
 const Login = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
+  const navigate = useNavigate();
 
   const onFinish = async (values) => {
     const { username, password } = values;
@@ -17,6 +18,7 @@ const Login = ({ onLoginSuccess }) => {
       const response = await login(username, password);
       message.success('登录成功！');
       onLoginSuccess(response.user);
+      navigate('/'); // 登录成功后跳转到首页
     } catch (error) {
       console.error('登录失败:', error);
       const errorResponse = error.response?.data;

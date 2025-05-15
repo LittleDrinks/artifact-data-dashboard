@@ -34,13 +34,17 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
   
-  // 在组件挂载时检查用户是否已登录
+  // 在组件挂载时检查用户是否已登录  // 检查用户登录状态和导航
   useEffect(() => {
     const checkUserLoggedIn = async () => {
       try {
         const currentUser = getCurrentUser();
         if (currentUser) {
           setUser(currentUser);
+          // 确保用户在登录后导航到首页
+          if (location.pathname === '/login' || location.pathname === '/register') {
+            navigate('/');
+          }
         }
       } catch (error) {
         console.error('验证用户状态失败:', error);
@@ -50,7 +54,7 @@ function App() {
     };
     
     checkUserLoggedIn();
-  }, []);
+  }, [navigate, location.pathname]);
   
   // 处理菜单项点击
   const handleMenuClick = (e) => {
@@ -94,18 +98,21 @@ function App() {
     message.success('已成功登出');
     navigate('/login');
   };
-  
-  // 获取当前激活的菜单项
+    // 获取当前激活的菜单项
   const getActiveMenuItem = () => {
     const path = location.pathname;
-    if (path === '/') return 'dashboard';
+    
+    // 处理根路径为 dashboard
+    if (path === '/' || path === '') return 'dashboard';
+    
+    // 处理其他路径
     if (path === '/search') return 'search';
     if (path === '/wordcloud') return 'wordcloud';
     if (path === '/knowledge-graph') return 'knowledge-graph';
     if (path === '/chat') return 'chat';
     if (path === '/profile') return 'profile';
-    if (path === '/login') return 'login';
-    if (path === '/register') return 'register';
+    
+    // 默认返回 dashboard
     return 'dashboard';
   };
   
