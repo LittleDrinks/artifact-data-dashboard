@@ -1,3 +1,4 @@
+// filepath: e:\shared\workplace\artifact-data-dashboard\backend\src\routes\artifact.routes.js
 const express = require('express');
 const { mysqlPool } = require('../config/database');
 
@@ -94,53 +95,6 @@ router.get('/', async (req, res) => {
 
 /**
  * @swagger
- * /api/artifacts/{id}:
- *   get:
- *     summary: 获取单个文物详情
- *     tags: [Artifacts]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: 文物ID
- *     responses:
- *       200:
- *         description: 返回文物详情
- *       404:
- *         description: 文物不存在
- */
-router.get('/:id', async (req, res) => {
-  try {
-    const artifactId = req.params.id;
-    
-    const [artifacts] = await mysqlPool.execute(
-      'SELECT * FROM artifacts WHERE id = ?',
-      [artifactId]
-    );
-    
-    if (artifacts.length === 0) {
-      return res.status(404).json({ message: '文物不存在' });
-    }
-    
-    // 记录查看日志
-    await mysqlPool.execute(
-      'INSERT INTO logs (user_id, action, target_id, timestamp) VALUES (?, ?, ?, ?)',
-      [req.user.id, 'view_artifact', artifactId, new Date()]
-    );
-    
-    res.status(200).json(artifacts[0]);
-  } catch (error) {
-    console.error('获取文物详情错误:', error);
-    res.status(500).json({ message: '服务器内部错误' });
-  }
-});
-
-/**
- * @swagger
  * /api/artifacts/search:
  *   get:
  *     summary: 搜索文物
@@ -180,55 +134,49 @@ router.get('/search', async (req, res) => {
     if (!keyword) {
       return res.status(400).json({ message: '搜索关键词为必填项' });
     }
+      // 搜索名称、描述和地域，避免使用参数绑定
+    const escapedKeyword = keyword.replace(/'/g, "''");
+    const searchPattern = `%${escapedKeyword}%`;
     
-    // 全文搜索
     const query = `
-      SELECT * FROM artifacts 
-      WHERE 
-        MATCH(name, description, tags) AGAINST(? IN NATURAL LANGUAGE MODE) 
-      OR name LIKE ? 
-      OR description LIKE ? 
-      OR category LIKE ? 
-      OR era LIKE ? 
-      OR location LIKE ? 
-      OR tags LIKE ?
-      ORDER BY 
-        CASE 
-          WHEN name LIKE ? THEN 1
-          WHEN description LIKE ? THEN 2
-          ELSE 3
-        END
-      LIMIT ? OFFSET ?
+      SELECT * 
+      FROM artifacts 
+      WHERE name LIKE '${searchPattern}' 
+      OR description LIKE '${searchPattern}'
+      OR location LIKE '${searchPattern}'
+      OR category LIKE '${searchPattern}'
+      OR era LIKE '${searchPattern}'
+      ORDER BY id DESC 
+      LIMIT ${limit} OFFSET ${offset}
     `;
     
-    const searchParam = `%${keyword}%`;
+    const [artifacts] = await mysqlPool.query(query);
     
-    const [artifacts] = await mysqlPool.execute(query, [
-      keyword, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam,
-      searchParam, searchParam, limit, offset
-    ]);
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM artifacts 
+      WHERE name LIKE '${searchPattern}' 
+      OR description LIKE '${searchPattern}'
+      OR location LIKE '${searchPattern}'
+      OR category LIKE '${searchPattern}'
+      OR era LIKE '${searchPattern}'
+    `;
     
-    const [countResult] = await mysqlPool.execute(
-      `SELECT COUNT(*) as total FROM artifacts 
-       WHERE 
-         MATCH(name, description, tags) AGAINST(? IN NATURAL LANGUAGE MODE) 
-       OR name LIKE ? 
-       OR description LIKE ? 
-       OR category LIKE ? 
-       OR era LIKE ? 
-       OR location LIKE ? 
-       OR tags LIKE ?`,
-      [keyword, searchParam, searchParam, searchParam, searchParam, searchParam, searchParam]
-    );
+    const [countResult] = await mysqlPool.query(countQuery);
     
     const total = countResult[0].total;
     const totalPages = Math.ceil(total / limit);
     
-    // 记录搜索日志
-    await mysqlPool.execute(
-      'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
-      [req.user.id, 'search', null, new Date(), JSON.stringify({ keyword })]
-    );
+    // 记录搜索日志 - 使用可选链操作符防止req.user为undefined时出错
+    try {
+      await mysqlPool.execute(
+        'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
+        [req.user?.id || null, 'search', null, new Date(), JSON.stringify({ keyword })]
+      );
+    } catch (logError) {
+      console.error('记录搜索日志错误:', logError);
+      // 不要因为日志错误影响主流程
+    }
     
     res.status(200).json({
       data: artifacts,
@@ -242,6 +190,58 @@ router.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('搜索文物错误:', error);
+    res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/artifacts/{id}:
+ *   get:
+ *     summary: 获取单个文物详情
+ *     tags: [Artifacts]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: 文物ID
+ *     responses:
+ *       200:
+ *         description: 返回文物详情
+ *       404:
+ *         description: 文物不存在
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const artifactId = req.params.id;
+    
+    const [artifacts] = await mysqlPool.execute(
+      'SELECT * FROM artifacts WHERE id = ?',
+      [artifactId]
+    );
+    
+    if (artifacts.length === 0) {
+      return res.status(404).json({ message: '文物不存在' });
+    }
+    
+    // 记录查看日志
+    try {
+      await mysqlPool.execute(
+        'INSERT INTO logs (user_id, action, target_id, timestamp) VALUES (?, ?, ?, ?)',
+        [req.user?.id || null, 'view_artifact', artifactId, new Date()]
+      );
+    } catch (logError) {
+      console.error('记录查看日志错误:', logError);
+      // 不要因为日志错误影响主流程
+    }
+    
+    res.status(200).json(artifacts[0]);
+  } catch (error) {
+    console.error('获取文物详情错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
