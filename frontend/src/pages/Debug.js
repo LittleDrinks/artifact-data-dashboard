@@ -17,14 +17,6 @@ const Debug = () => {
   const [apiUrl, setApiUrl] = useState('/api/stats/recent-activities?limit=5');
   const [apiErrorDetails, setApiErrorDetails] = useState(null);
 
-  // 关闭测试结果显示
-  const closeDbStatus = () => setDbStatus(null);
-  const closeActivitiesStatus = () => setActivitiesStatus(null);
-  const closeRawApiResponse = () => {
-    setRawApiResponse(null);
-    setApiErrorDetails(null);
-  };
-
   useEffect(() => {
     // 获取当前用户信息
     const user = getCurrentUser();
@@ -137,11 +129,11 @@ const Debug = () => {
           loading={loading}
         >
           测试数据库连接
-        </Button>        {dbStatus && (
-          <Card 
-            extra={<Button type="text" size="small" onClick={closeDbStatus}>×</Button>}
-          >
-            <Title level={4}>
+        </Button>
+
+        {dbStatus && (
+          <Card>
+            <Title level={6}>
               测试结果:{' '}
               <Text type={dbStatus.status === 'success' ? 'success' : 'danger'}>
                 {dbStatus.status === 'success' ? '成功' : '失败'}
@@ -167,12 +159,11 @@ const Debug = () => {
           loading={loading}
         >
           测试最近活动API
-        </Button>        {activitiesStatus && (
-          <Card 
-            title="数据库连接测试结果"
-            extra={<Button type="text" size="small" onClick={closeActivitiesStatus}>×</Button>}
-          >
-            <Title level={4}>
+        </Button>
+
+        {activitiesStatus && (
+          <Card>
+            <Title level={6}>
               测试结果:{' '}
               <Text type={activitiesStatus.status === 'success' ? 'success' : 'danger'}>
                 {activitiesStatus.status === 'success' ? '成功' : '失败'}
@@ -206,10 +197,10 @@ const Debug = () => {
           发送请求
         </Button>        {rawApiResponse && (
           <Card
-            title="最近活动API测试结果"
+            title="自定义API调用测试结果"
             extra={<Button type="text" size="small" onClick={closeRawApiResponse}>×</Button>}
           >
-            <Title level={4}>
+            <Title level={6}>
               请求结果:{' '}
               <Text type={rawApiResponse.status === 'success' ? 'success' : 'danger'}>
                 {rawApiResponse.statusCode} {rawApiResponse.status === 'success' ? '成功' : '失败'}

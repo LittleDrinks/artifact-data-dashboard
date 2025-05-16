@@ -138,11 +138,22 @@ function App() {
       </Routes>
     );
   }
-  
-  // 用户已登录，显示完整应用
+    // 用户已登录，显示完整应用
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed}>
+      <Sider 
+        collapsible 
+        collapsed={collapsed} 
+        onCollapse={setCollapsed}
+        style={{ 
+          overflow: 'auto', 
+          height: '100vh', 
+          position: 'fixed', 
+          left: 0,
+          top: 0,
+          bottom: 0 
+        }}
+      >
         <div className="logo">
           {!collapsed ? '文物数据系统' : '文物'}
         </div>
@@ -192,10 +203,9 @@ function App() {
               label: '退出登录',
             }
           ]}
-        />
-      </Sider>
-      <Layout className="site-layout">
-        <Header className="site-layout-background" style={{ padding: 0, background: '#fff' }}>
+        />      </Sider>
+      <Layout className="site-layout" style={{ marginLeft: collapsed ? 80 : 200 }}>
+        <Header className="site-layout-background" style={{ padding: 0, background: '#fff', position: 'sticky', top: 0, zIndex: 1 }}>
           <div style={{ marginLeft: 16 }}>
             <span style={{ fontSize: 18, fontWeight: 'bold' }}>文物大数据与人工智能集成系统</span>
           </div>
