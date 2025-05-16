@@ -1,0 +1,20 @@
+# 前端开发环境Dockerfile
+FROM crpi-kl2yo8a1hefddu65.cn-hangzhou.personal.cr.aliyuncs.com/csj_images/node:16-alpine
+
+# 安装构建依赖
+RUN apk add --no-cache python3 make g++ gcc
+
+WORKDIR /app
+
+# 复制package.json
+COPY package*.json ./
+
+# 安装依赖
+RUN npm install --registry=https://registry.npmmirror.com
+
+# 在开发模式下，代码会通过卷挂载进来，不需要COPY
+
+EXPOSE 3000
+
+# 启动开发服务器
+CMD ["npm", "start"]

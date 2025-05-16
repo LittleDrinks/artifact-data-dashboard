@@ -11,6 +11,7 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
   const [activitiesStatus, setActivitiesStatus] = useState(null);
   const [activitiesTesting, setActivitiesTesting] = useState(false);
   const [activeTestResult, setActiveTestResult] = useState(null); // 记录当前显示的测试结果类型
+  const [dbConnected, setDbConnected] = useState(false); // 记录数据库是否连接成功
   const [stats, setStats] = useState({
     total: 0,
     catalogedCount: 0,
@@ -25,6 +26,18 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
     const fetchData = async () => {
       try {
         setLoading(true);
+        
+        // 首先测试数据库连接
+        try {
+          const dbResponse = await testDbConnection();
+          if (dbResponse && dbResponse.data && dbResponse.data.connection === 'success') {
+            setDbConnected(true); // 设置数据库连接成功
+            console.log('数据库连接成功');
+          }
+        } catch (dbErr) {
+          console.error('自动测试数据库连接失败:', dbErr);
+          // 不设置错误，让用户通过按钮手动测试
+        }
         
         // 获取统计数据
         try {
@@ -212,11 +225,17 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
       setActiveTestResult('db');
       
       const response = await testDbConnection();
+      // 判断连接是否成功
+      const isSuccess = response && response.data && response.data.connection === 'success';
+      
       setDbStatus({
-        status: 'success',
-        message: '数据库连接正常',
+        status: isSuccess ? 'success' : 'error',
+        message: isSuccess ? '数据库连接正常' : '数据库连接异常',
         details: response.data
       });
+      
+      // 更新数据库连接状态
+      setDbConnected(isSuccess);
     } catch (err) {
       console.error('测试数据库连接失败:', err);
       setDbStatus({
@@ -224,6 +243,7 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
         message: '数据库连接失败',
         details: err.response?.data || { error: err.message }
       });
+      setDbConnected(false); // 设置数据库连接失败状态
     } finally {
       setDbTesting(false);
     }
@@ -325,62 +345,63 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
         )}
       </>
     );
-  }
-    return (
+  }    return (
     <div className="dashboard-container">
-      {/* 添加数据库测试按钮 */}
-      <div style={{ marginBottom: 16, textAlign: 'right' }}>
-        <Space>
-          <Button 
-            type="primary" 
-            icon={<DatabaseOutlined />} 
-            loading={dbTesting}
-            onClick={handleTestDbConnection}
-          >
-            测试数据库连接
-          </Button>
-          <Button 
-            type="primary" 
-            icon={<HistoryOutlined />} 
-            loading={activitiesTesting}
-            onClick={handleTestRecentActivities}
-          >
-            测试最近活动API
-          </Button>
-        </Space>
-        {dbStatus && (
-          <Alert
-            message={dbStatus.status === 'success' ? '连接成功' : '连接失败'}
-            description={
-              <div>
-                <p>{dbStatus.message}</p>
-                {dbStatus.details && (
-                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(dbStatus.details, null, 2)}</pre>
-                )}
-              </div>
-            }
-            type={dbStatus.status === 'success' ? 'success' : 'error'}
-            showIcon
-            style={{ marginTop: 16, marginBottom: 16 }}
-          />
-        )}
-        {activitiesStatus && (
-          <Alert
-            message={activitiesStatus.status === 'success' ? 'API测试成功' : 'API测试失败'}
-            description={
-              <div>
-                <p>{activitiesStatus.message}</p>
-                {activitiesStatus.details && (
-                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(activitiesStatus.details, null, 2)}</pre>
-                )}
-              </div>
-            }
-            type={activitiesStatus.status === 'success' ? 'success' : 'error'}
-            showIcon
-            style={{ marginTop: 16, marginBottom: 16 }}
-          />
-        )}
-      </div>
+      {/* 仅在数据库未连接时显示测试按钮 */}
+      {!dbConnected && (
+        <div style={{ marginBottom: 16, textAlign: 'right' }}>
+          <Space>
+            <Button 
+              type="primary" 
+              icon={<DatabaseOutlined />} 
+              loading={dbTesting}
+              onClick={handleTestDbConnection}
+            >
+              测试数据库连接
+            </Button>
+            <Button 
+              type="primary" 
+              icon={<HistoryOutlined />} 
+              loading={activitiesTesting}
+              onClick={handleTestRecentActivities}
+            >
+              测试最近活动API
+            </Button>
+          </Space>
+          {dbStatus && (
+            <Alert
+              message={dbStatus.status === 'success' ? '连接成功' : '连接失败'}
+              description={
+                <div>
+                  <p>{dbStatus.message}</p>
+                  {dbStatus.details && (
+                    <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(dbStatus.details, null, 2)}</pre>
+                  )}
+                </div>
+              }
+              type={dbStatus.status === 'success' ? 'success' : 'error'}
+              showIcon
+              style={{ marginTop: 16, marginBottom: 16 }}
+            />
+          )}
+          {activitiesStatus && (
+            <Alert
+              message={activitiesStatus.status === 'success' ? 'API测试成功' : 'API测试失败'}
+              description={
+                <div>
+                  <p>{activitiesStatus.message}</p>
+                  {activitiesStatus.details && (
+                    <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(activitiesStatus.details, null, 2)}</pre>
+                  )}
+                </div>
+              }
+              type={activitiesStatus.status === 'success' ? 'success' : 'error'}
+              showIcon
+              style={{ marginTop: 16, marginBottom: 16 }}
+            />
+          )}
+        </div>
+      )}
       
       <Row gutter={[16, 16]}>
         {/* 统计卡片 */}

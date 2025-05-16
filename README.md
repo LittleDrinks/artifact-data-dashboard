@@ -16,6 +16,30 @@
   - Redis：缓存和会话管理
 - **AI集成**：利用MCP大模型API实现智能问答功能
 
+## 开发与部署
+
+### 开发环境
+项目使用Docker Compose进行开发环境配置，开发模式下提供实时代码更新：
+
+```bash
+# 启动开发环境
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+```
+
+### 生产环境
+生产环境使用专用配置文件：
+
+```bash
+# 启动生产环境
+docker-compose -f docker-compose.prod.yml up -d
+
+# 查看生产环境日志
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
 ## 核心功能
 
 1. **文物数据管理**

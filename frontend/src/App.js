@@ -108,13 +108,13 @@ function App() {
     
     // 处理根路径为 dashboard
     if (path === '/' || path === '') return 'dashboard';
-    
-    // 处理其他路径
+      // 处理其他路径
     if (path === '/search') return 'search';
     if (path === '/wordcloud') return 'wordcloud';
     if (path === '/knowledge-graph') return 'knowledge-graph';
     if (path === '/chat') return 'chat';
     if (path === '/profile') return 'profile';
+    if (path === '/debug') return 'debug';
     
     // 默认返回 dashboard
     return 'dashboard';

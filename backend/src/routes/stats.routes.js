@@ -127,20 +127,37 @@ router.get('/timeline', async (req, res) => {
 router.get('/recent-activities', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
-    
-    // 获取最近的活动日志，使用LEFT JOIN关联用户信息，这样即使用户不存在也能返回日志
-    const [activities] = await mysqlPool.execute(`
-      SELECT 
-        l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
-        IFNULL(u.username, '未知用户') as username
-      FROM 
-        logs l
-      LEFT JOIN 
-        users u ON l.user_id = u.id
-      ORDER BY 
-        l.timestamp DESC
-      LIMIT ?
-    `, [limit]);
+      // 获取最近的活动日志，使用LEFT JOIN关联用户信息，这样即使用户不存在也能返回日志
+    let activities;
+    if (limit <= 100) { // 添加限制，防止过大的查询
+      // 使用模板字符串将limit直接嵌入SQL查询中
+      [activities] = await mysqlPool.execute(`
+        SELECT 
+          l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
+          IFNULL(u.username, '未知用户') as username
+        FROM 
+          logs l
+        LEFT JOIN 
+          users u ON l.user_id = u.id
+        ORDER BY 
+          l.timestamp DESC
+        LIMIT ${limit}
+      `);
+    } else {
+      // 如果limit过大，则使用默认值
+      [activities] = await mysqlPool.execute(`
+        SELECT 
+          l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
+          IFNULL(u.username, '未知用户') as username
+        FROM 
+          logs l
+        LEFT JOIN 
+          users u ON l.user_id = u.id
+        ORDER BY 
+          l.timestamp DESC
+        LIMIT 10
+      `);
+    }
     
     res.status(200).json({
       activities
@@ -172,31 +189,64 @@ router.get('/recent-activities', async (req, res) => {
  */
 router.get('/test-recent-activities', async (req, res) => {
   try {
-    const limit = 5;
+    // 记录环境信息，帮助诊断问题
+    const dbInfo = {
+      database: process.env.MYSQL_DATABASE || 'artifact_dashboard',
+      host: process.env.MYSQL_HOST || 'mysql',
+      user: process.env.MYSQL_USER || 'user',
+      port: process.env.MYSQL_PORT || '3306',
+      hasPassword: process.env.MYSQL_PASSWORD ? '已设置' : '未设置'
+    };
+    
+    console.log('测试最近活动API - 数据库信息:', dbInfo);
     
     // 检查logs表中是否有数据
-    const [logsCount] = await mysqlPool.execute('SELECT COUNT(*) as count FROM logs');
-    
-    // 检查users表中是否有数据
-    const [usersCount] = await mysqlPool.execute('SELECT COUNT(*) as count FROM users');
-    
-    // 尝试JOIN查询
+    let logsCount = 0;
+    try {
+      const [logsCountResult] = await mysqlPool.execute('SELECT COUNT(*) as count FROM logs');
+      logsCount = logsCountResult[0].count;
+    } catch (err) {
+      console.error('检查logs表数据失败:', err);
+      return res.status(500).json({
+        status: 'error',
+        message: '日志表不存在或无法访问',
+        error: err.message,
+        dbInfo
+      });
+    }
+      // 检查users表中是否有数据
+    let usersCount = 0;
+    let usersError = null;
+    try {
+      const [usersCountResult] = await mysqlPool.execute('SELECT COUNT(*) as count FROM users');
+      usersCount = usersCountResult[0].count;
+    } catch (err) {
+      console.error('检查users表数据失败:', err);
+      usersError = {
+        message: err.message,
+        code: err.code
+      };
+      // 不返回错误，继续执行
+    }
+
+    // 定义结果变量
     let joinResult = null;
     let error = null;
     
+    // 修改JOIN查询，使用LEFT JOIN，避免在没有匹配时出错
     try {
       const [activities] = await mysqlPool.execute(`
         SELECT 
           l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
-          u.username as username
+          IFNULL(u.username, '未知用户') as username
         FROM 
           logs l
-        JOIN 
+        LEFT JOIN 
           users u ON l.user_id = u.id
         ORDER BY 
           l.timestamp DESC
-        LIMIT ?
-      `, [limit]);
+        LIMIT 5
+      `);
       
       joinResult = activities;
     } catch (err) {
@@ -206,21 +256,25 @@ router.get('/test-recent-activities', async (req, res) => {
       };
       
       // 尝试不使用JOIN的查询
+      // 同样直接嵌入limit值
       const [logsOnly] = await mysqlPool.execute(`
-        SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?
-      `, [limit]);
-      
-      joinResult = {
+        SELECT * FROM logs ORDER BY timestamp DESC LIMIT 5
+      `);
+        joinResult = {
         logsOnly,
         note: "JOIN查询失败，只显示logs表数据"
       };
     }
     
     res.status(200).json({
-      logsCount: logsCount[0].count,
-      usersCount: usersCount[0].count,
+      status: 'success',
+      message: '最近活动API测试成功',
+      logsCount: logsCount,
+      usersCount: usersCount,
+      usersError: usersError,
       testResult: joinResult,
-      error
+      error,
+      dbInfo
     });
   } catch (error) {
     console.error('测试最近活动API失败:', error);
@@ -245,45 +299,59 @@ router.get('/test-recent-activities', async (req, res) => {
  *         description: 数据库连接失败
  */
 router.get('/test-db-connection', async (req, res) => {
-  try {    // 尝试执行一个简单的查询
+  try {
+    // 尝试执行一个简单的查询
     const [result] = await mysqlPool.execute('SELECT 1 as test');
     
     // 检查数据库中是否存在logs和users表
-    const [tables] = await mysqlPool.execute(`
-      SELECT table_name 
+    const [tables] = await mysqlPool.execute(`      SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = ? 
       AND table_name IN ('logs', 'users', 'artifacts')
-    `, [process.env.MYSQL_DATABASE]);
+    `, [process.env.MYSQL_DATABASE || 'artifact_dashboard']);
     
-    const existingTables = tables.map(t => t.table_name);
+    // 修复表名为null的问题
+    const existingTables = tables && tables.length > 0 
+      ? tables.filter(t => t && t.table_name).map(t => t.table_name) 
+      : [];
     
-    // 获取logs表结构
+    // 记录实际查询结果，用于调试
+    console.log('数据库名称:', process.env.MYSQL_DATABASE || 'artifact_dashboard');
+    console.log('表查询结果:', tables);    // 获取logs表结构
     let logsColumns = [];
     if (existingTables.includes('logs')) {
-      const [logsColumnsResult] = await mysqlPool.execute(`
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_schema = ? 
-        AND table_name = 'logs'
-      `, [process.env.MYSQL_DATABASE]);
-      logsColumns = logsColumnsResult;
+      try {
+        const [logsColumnsResult] = await mysqlPool.execute(`
+          SELECT column_name, data_type 
+          FROM information_schema.columns 
+          WHERE table_schema = ? 
+          AND table_name = 'logs'
+        `, [process.env.MYSQL_DATABASE || 'artifact_dashboard']);
+        logsColumns = logsColumnsResult || [];
+        console.log('logs表列:', logsColumns);
+      } catch (err) {
+        console.error('获取logs表结构出错:', err);
+      }
     }
     
     // 获取users表结构
     let usersColumns = [];
     if (existingTables.includes('users')) {
-      const [usersColumnsResult] = await mysqlPool.execute(`
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_schema = ? 
-        AND table_name = 'users'
-      `, [process.env.MYSQL_DATABASE]);
-      usersColumns = usersColumnsResult;
-    }
-    
-    // 检查logs和users表之间的关系
+      try {
+        const [usersColumnsResult] = await mysqlPool.execute(`
+          SELECT column_name, data_type 
+          FROM information_schema.columns 
+          WHERE table_schema = ? 
+          AND table_name = 'users'
+        `, [process.env.MYSQL_DATABASE || 'artifact_dashboard']);
+        usersColumns = usersColumnsResult || [];
+        console.log('users表列:', usersColumns);
+      } catch (err) {
+        console.error('获取users表结构出错:', err);
+      }
+    }    // 检查logs和users表之间的关系
     let relationValid = false;
+    let relationError = null;
     if (existingTables.includes('logs') && existingTables.includes('users')) {
       const logsUserIdCol = logsColumns.find(col => col.column_name === 'user_id');
       const usersIdCol = usersColumns.find(col => col.column_name === 'id');
@@ -294,23 +362,39 @@ router.get('/test-db-connection', async (req, res) => {
           const [joinTest] = await mysqlPool.execute(`
             SELECT COUNT(*) as count
             FROM logs l
-            JOIN users u ON l.user_id = u.id
+            LEFT JOIN users u ON l.user_id = u.id
             LIMIT 1
           `);
           relationValid = true;
         } catch (e) {
+          console.error('检查logs和users关系出错:', e);
           relationValid = false;
+          relationError = {
+            message: e.message,
+            code: e.code
+          };
         }
       }
     }
     
-    res.status(200).json({
+    // 获取数据库信息以及环境变量，帮助诊断问题
+    const dbInfo = {
+      database: process.env.MYSQL_DATABASE || 'artifact_dashboard',
+      host: process.env.MYSQL_HOST || 'mysql',
+      user: process.env.MYSQL_USER || 'user',
+      hasPassword: process.env.MYSQL_PASSWORD ? '已设置' : '未设置',
+      port: process.env.MYSQL_PORT || '3306'
+    };
+      res.status(200).json({
       connection: 'success',
       message: '数据库连接正常',
-      existingTables,
+      existingTables: existingTables.length > 0 ? existingTables : ['未找到表'],
+      tablesFound: tables ? tables.length : 0,
       logsColumns,
       usersColumns,
       relationValid,
+      relationError,
+      dbInfo,
       dbTest: result[0]
     });
   } catch (error) {

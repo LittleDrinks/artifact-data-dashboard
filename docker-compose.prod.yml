@@ -1,19 +1,18 @@
-﻿services:  # 前端服务
+services:  # 前端服务
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev  # 使用开发环境的Dockerfile
+      dockerfile: Dockerfile  # 使用生产环境的Dockerfile
     container_name: artifact-dashboard-frontend
     ports:
-      - "8080:3000"
+      - "8080:80"  # 生产环境使用80端口（nginx默认端口）
     depends_on:
       - backend
     networks:
       - artifact-network
     restart: unless-stopped
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    # 生产环境不需要卷挂载和npm命令
+  
   # 后端服务
   backend:
     build:
@@ -33,7 +32,6 @@
     restart: unless-stopped
     volumes:
       - ./backend/logs:/app/logs
-      - ./backend/scripts:/app/scripts
 
   # MySQL数据库
   mysql:
