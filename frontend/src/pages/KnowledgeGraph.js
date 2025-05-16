@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Input, Button, Spin, Alert, Modal, Descriptions, Empty } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import Cytoscape from 'cytoscape';
+// CytoscapeComponent 内部使用 Cytoscape 库，所以我们不需要直接导入 Cytoscape
 import CytoscapeComponent from 'react-cytoscapejs';
 import { getGraphData, getEntityDetails } from '../services/graph.service';
 

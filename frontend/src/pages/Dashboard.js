@@ -8,9 +8,7 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);  
   const [dbStatus, setDbStatus] = useState(null);
   const [dbTesting, setDbTesting] = useState(false);
-  const [activitiesStatus, setActivitiesStatus] = useState(null);
-  const [activitiesTesting, setActivitiesTesting] = useState(false);
-  const [activeTestResult, setActiveTestResult] = useState(null); // 记录当前显示的测试结果类型
+  const [activitiesStatus, setActivitiesStatus] = useState(null);  const [activitiesTesting, setActivitiesTesting] = useState(false);
   const [dbConnected, setDbConnected] = useState(false); // 记录数据库是否连接成功
   const [stats, setStats] = useState({
     total: 0,
@@ -218,11 +216,8 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
   // 测试数据库连接
   const handleTestDbConnection = async () => {
     try {
-      setDbTesting(true);
-      // 隐藏活动API测试结果
+      setDbTesting(true);      // 隐藏活动API测试结果
       setActivitiesStatus(null);
-      // 设置当前活动测试类型
-      setActiveTestResult('db');
       
       const response = await testDbConnection();
       // 判断连接是否成功
@@ -251,12 +246,9 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
   
   // 测试最近活动API
   const handleTestRecentActivities = async () => {
-    try {
-      setActivitiesTesting(true);
+    try {      setActivitiesTesting(true);
       // 隐藏数据库测试结果
       setDbStatus(null);
-      // 设置当前活动测试类型
-      setActiveTestResult('activities');
       
       const response = await testRecentActivities();
       setActivitiesStatus({

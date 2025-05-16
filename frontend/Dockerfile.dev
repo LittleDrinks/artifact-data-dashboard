@@ -14,6 +14,14 @@ RUN npm install --registry=https://registry.npmmirror.com
 
 # 在开发模式下，代码会通过卷挂载进来，不需要COPY
 
+# 设置环境变量以启用热重载
+ENV CHOKIDAR_USEPOLLING=true
+ENV WDS_SOCKET_PORT=3000
+ENV FAST_REFRESH=true
+ENV WATCHPACK_POLLING=true
+ENV REACT_APP_WDS_SOCKET_HOST=0.0.0.0
+ENV REACT_APP_WDS_SOCKET_PORT=8080
+
 EXPOSE 3000
 
 # 启动开发服务器

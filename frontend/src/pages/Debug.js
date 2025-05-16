@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Alert, Spin, Input, Space, Divider, Typography, Collapse, Table } from 'antd';
-import { DatabaseOutlined, UserOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons';
+import { Card, Button, Alert, Input, Space, Divider, Typography, Collapse } from 'antd';
+import { DatabaseOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { testDbConnection, testRecentActivities } from '../services/stats.service';
 import { getCurrentUser } from '../services/auth.service';
@@ -9,7 +9,11 @@ const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 
 const Debug = () => {
-  const [loading, setLoading] = useState(false);
+  // 为每个操作创建单独的loading状态
+  const [dbLoading, setDbLoading] = useState(false);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [apiLoading, setApiLoading] = useState(false);
+  
   const [userInfo, setUserInfo] = useState(null);
   const [dbStatus, setDbStatus] = useState(null);
   const [activitiesStatus, setActivitiesStatus] = useState(null);
@@ -21,11 +25,9 @@ const Debug = () => {
     // 获取当前用户信息
     const user = getCurrentUser();
     setUserInfo(user);
-  }, []);
-
-  const handleTestDbConnection = async () => {
+  }, []);  const handleTestDbConnection = async () => {
     try {
-      setLoading(true);
+      setDbLoading(true);
       const response = await testDbConnection();
       setDbStatus({
         status: 'success',
@@ -37,13 +39,16 @@ const Debug = () => {
         error: err.response?.data || err.message
       });
     } finally {
-      setLoading(false);
+      setDbLoading(false);
     }
   };
-
-  const handleTestActivities = async () => {
+  
+  // 清除数据库测试结果
+  const clearDbStatus = () => {
+    setDbStatus(null);
+  };  const handleTestActivities = async () => {
     try {
-      setLoading(true);
+      setActivitiesLoading(true);
       const response = await testRecentActivities();
       setActivitiesStatus({
         status: 'success',
@@ -55,13 +60,17 @@ const Debug = () => {
         error: err.response?.data || err.message
       });
     } finally {
-      setLoading(false);
+      setActivitiesLoading(false);
     }
   };
-
+  
+  // 清除活动测试结果
+  const clearActivitiesStatus = () => {
+    setActivitiesStatus(null);
+  };
   const handleRawApiCall = async () => {
     try {
-      setLoading(true);
+      setApiLoading(true);
       setApiErrorDetails(null);
       const response = await axios.get(apiUrl);
       setRawApiResponse({
@@ -85,9 +94,13 @@ const Debug = () => {
           stack: err.response.data.stack
         });
       }
-    } finally {
-      setLoading(false);
+    } finally {      setApiLoading(false);
     }
+  };
+  
+  // 清除API响应结果
+  const clearRawApiResponse = () => {
+    setRawApiResponse(null);
   };
 
   return (
@@ -121,24 +134,18 @@ const Debug = () => {
       </Card>
 
       <Divider orientation="left">数据库连接</Divider>
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Button
+      <Space direction="vertical" style={{ width: '100%' }}>        <Button
           type="primary"
           icon={<DatabaseOutlined />}
           onClick={handleTestDbConnection}
-          loading={loading}
+          loading={dbLoading}
         >
           测试数据库连接
-        </Button>
-
-        {dbStatus && (
-          <Card>
-            <Title level={6}>
-              测试结果:{' '}
-              <Text type={dbStatus.status === 'success' ? 'success' : 'danger'}>
-                {dbStatus.status === 'success' ? '成功' : '失败'}
-              </Text>
-            </Title>
+        </Button>        {dbStatus && (
+          <Card
+            title="数据库连接测试结果"
+            extra={<Button type="text" size="small" onClick={clearDbStatus}>×</Button>}
+          >            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={dbStatus.status === 'success' ? 'success' : 'danger'}>{dbStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
             <Collapse defaultActiveKey={['1']}>
               <Panel header="详细信息" key="1">
                 <pre style={{ maxHeight: 400, overflow: 'auto' }}>
@@ -151,24 +158,18 @@ const Debug = () => {
       </Space>
 
       <Divider orientation="left">最近活动API测试</Divider>
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Button
+      <Space direction="vertical" style={{ width: '100%' }}>        <Button
           type="primary"
           icon={<HistoryOutlined />}
           onClick={handleTestActivities}
-          loading={loading}
+          loading={activitiesLoading}
         >
           测试最近活动API
-        </Button>
-
-        {activitiesStatus && (
-          <Card>
-            <Title level={6}>
-              测试结果:{' '}
-              <Text type={activitiesStatus.status === 'success' ? 'success' : 'danger'}>
-                {activitiesStatus.status === 'success' ? '成功' : '失败'}
-              </Text>
-            </Title>
+        </Button>        {activitiesStatus && (
+          <Card
+            title="最近活动API测试结果"
+            extra={<Button type="text" size="small" onClick={clearActivitiesStatus}>×</Button>}
+          >            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={activitiesStatus.status === 'success' ? 'success' : 'danger'}>{activitiesStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
             <Collapse defaultActiveKey={['1']}>
               <Panel header="详细信息" key="1">
                 <pre style={{ maxHeight: 400, overflow: 'auto' }}>
@@ -192,20 +193,13 @@ const Debug = () => {
           value={apiUrl}
           onChange={(e) => setApiUrl(e.target.value)}
           style={{ width: '100%' }}
-        />
-        <Button type="primary" onClick={handleRawApiCall} loading={loading}>
+        />        <Button type="primary" onClick={handleRawApiCall} loading={apiLoading}>
           发送请求
-        </Button>        {rawApiResponse && (
+        </Button>{rawApiResponse && (
           <Card
             title="自定义API调用测试结果"
-            extra={<Button type="text" size="small" onClick={closeRawApiResponse}>×</Button>}
-          >
-            <Title level={6}>
-              请求结果:{' '}
-              <Text type={rawApiResponse.status === 'success' ? 'success' : 'danger'}>
-                {rawApiResponse.statusCode} {rawApiResponse.status === 'success' ? '成功' : '失败'}
-              </Text>
-            </Title>
+            extra={<Button type="text" size="small" onClick={clearRawApiResponse}>×</Button>}
+          ><Title level={4} style={{ margin: 0 }}>请求结果: <Text type={rawApiResponse.status === 'success' ? 'success' : 'danger'}>{rawApiResponse.statusCode} {rawApiResponse.status === 'success' ? '成功' : '失败'}</Text></Title>
             {apiErrorDetails && (
               <Alert
                 message="SQL错误详情"

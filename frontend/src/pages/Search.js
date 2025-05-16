@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert } from 'antd';
 import { SearchOutlined, EnvironmentOutlined, ClockCircleOutlined, TagOutlined } from '@ant-design/icons';
 import { searchArtifacts } from '../services/artifact.service';
