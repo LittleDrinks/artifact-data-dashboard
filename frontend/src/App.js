@@ -9,7 +9,8 @@ import {
   MessageOutlined,
   UserOutlined,
   LoginOutlined,
-  LogoutOutlined
+  LogoutOutlined,
+  BugOutlined
 } from '@ant-design/icons';
 
 // 导入页面组件
@@ -21,6 +22,7 @@ import Wordcloud from './pages/Wordcloud';
 import KnowledgeGraph from './pages/KnowledgeGraph';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
+import Debug from './pages/Debug'; // 导入调试页面
 
 // 导入服务和上下文
 import { getCurrentUser, logout } from './services/auth.service';
@@ -73,9 +75,11 @@ function App() {
         break;
       case 'chat':
         navigate('/chat');
-        break;
-      case 'profile':
+        break;      case 'profile':
         navigate('/profile');
+        break;
+      case 'debug':
+        navigate('/debug');
         break;
       case 'login':
         navigate('/login');
@@ -173,10 +177,14 @@ function App() {
               icon: <MessageOutlined />,
               label: '智能问答',
             },
-            {
-              key: 'profile',
+            {              key: 'profile',
               icon: <UserOutlined />,
               label: '个人信息',
+            },
+            {
+              key: 'debug',
+              icon: <BugOutlined />,
+              label: '系统调试',
             },
             {
               key: 'logout',
@@ -196,14 +204,14 @@ function App() {
             <span>{user.username}</span>
           </div>
         </Header>
-        <Content style={{ margin: '16px' }}>
-          <Routes>
+        <Content style={{ margin: '16px' }}>          <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/search" element={<Search />} />
             <Route path="/wordcloud" element={<Wordcloud />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/debug" element={<Debug />} />
             <Route path="*" element={<Dashboard />} />
           </Routes>
         </Content>

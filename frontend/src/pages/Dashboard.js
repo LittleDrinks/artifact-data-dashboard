@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Statistic, Spin, Table, Alert } from 'antd';
-import { FileTextOutlined, TagsOutlined, EnvironmentOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Row, Col, Card, Statistic, Spin, Table, Alert, Button, Space } from 'antd';
+import { FileTextOutlined, TagsOutlined, EnvironmentOutlined, ClockCircleOutlined, DatabaseOutlined, HistoryOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { getStatsOverview, getRecentActivities } from '../services/stats.service';
+import { getStatsOverview, getRecentActivities, testDbConnection, testRecentActivities } from '../services/stats.service';
 
-const Dashboard = () => {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const Dashboard = () => {  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);  
+  const [dbStatus, setDbStatus] = useState(null);
+  const [dbTesting, setDbTesting] = useState(false);
+  const [activitiesStatus, setActivitiesStatus] = useState(null);
+  const [activitiesTesting, setActivitiesTesting] = useState(false);
+  const [activeTestResult, setActiveTestResult] = useState(null); // 记录当前显示的测试结果类型
   const [stats, setStats] = useState({
     total: 0,
     catalogedCount: 0,
@@ -17,24 +21,33 @@ const Dashboard = () => {
     eraStats: []
   });
   const [activities, setActivities] = useState([]);
-  
-  useEffect(() => {
+    useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
         // 获取统计数据
-        const statsResponse = await getStatsOverview();
-        setStats(statsResponse.data);
+        try {
+          const statsResponse = await getStatsOverview();
+          setStats(statsResponse.data);
+        } catch (statsErr) {
+          console.error('获取统计数据失败:', statsErr);
+          throw new Error(`获取统计数据失败: ${statsErr.response?.data?.message || statsErr.message}`);
+        }
         
         // 获取最近活动
-        const activitiesResponse = await getRecentActivities(5);
-        setActivities(activitiesResponse.data.activities);
+        try {
+          const activitiesResponse = await getRecentActivities(5);
+          setActivities(activitiesResponse.data.activities);
+        } catch (activitiesErr) {
+          console.error('获取最近活动失败:', activitiesErr);
+          throw new Error(`获取最近活动失败: ${activitiesErr.response?.data?.message || activitiesErr.message}`);
+        }
         
         setError(null);
       } catch (err) {
         console.error('获取数据失败:', err);
-        setError('获取数据失败，请稍后重试');
+        setError(err.message || '获取数据失败，请稍后重试');
       } finally {
         setLoading(false);
       }
@@ -189,6 +202,60 @@ const Dashboard = () => {
     }
   ];
   
+  // 测试数据库连接
+  const handleTestDbConnection = async () => {
+    try {
+      setDbTesting(true);
+      // 隐藏活动API测试结果
+      setActivitiesStatus(null);
+      // 设置当前活动测试类型
+      setActiveTestResult('db');
+      
+      const response = await testDbConnection();
+      setDbStatus({
+        status: 'success',
+        message: '数据库连接正常',
+        details: response.data
+      });
+    } catch (err) {
+      console.error('测试数据库连接失败:', err);
+      setDbStatus({
+        status: 'error',
+        message: '数据库连接失败',
+        details: err.response?.data || { error: err.message }
+      });
+    } finally {
+      setDbTesting(false);
+    }
+  };
+  
+  // 测试最近活动API
+  const handleTestRecentActivities = async () => {
+    try {
+      setActivitiesTesting(true);
+      // 隐藏数据库测试结果
+      setDbStatus(null);
+      // 设置当前活动测试类型
+      setActiveTestResult('activities');
+      
+      const response = await testRecentActivities();
+      setActivitiesStatus({
+        status: 'success',
+        message: '最近活动API测试成功',
+        details: response.data
+      });
+    } catch (err) {
+      console.error('测试最近活动API失败:', err);
+      setActivitiesStatus({
+        status: 'error',
+        message: '最近活动API测试失败',
+        details: err.response?.data || { error: err.message }
+      });
+    } finally {
+      setActivitiesTesting(false);
+    }
+  };
+  
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '50px' }}>
@@ -196,20 +263,125 @@ const Dashboard = () => {
       </div>
     );
   }
-  
-  if (error) {
+    if (error) {
     return (
-      <Alert
-        message="错误"
-        description={error}
-        type="error"
-        showIcon
-      />
+      <>
+        <Alert
+          message="错误"
+          description={error}
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Space>
+          <Button 
+            type="primary" 
+            icon={<DatabaseOutlined />} 
+            loading={dbTesting}
+            onClick={handleTestDbConnection}
+          >
+            测试数据库连接
+          </Button>
+          <Button 
+            type="primary" 
+            icon={<HistoryOutlined />} 
+            loading={activitiesTesting}
+            onClick={handleTestRecentActivities}
+          >
+            测试最近活动API
+          </Button>
+        </Space>
+        {dbStatus && (
+          <Alert
+            message={dbStatus.status === 'success' ? '连接成功' : '连接失败'}
+            description={
+              <div>
+                <p>{dbStatus.message}</p>
+                {dbStatus.details && (
+                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(dbStatus.details, null, 2)}</pre>
+                )}
+              </div>
+            }
+            type={dbStatus.status === 'success' ? 'success' : 'error'}
+            showIcon
+            style={{ marginTop: 16 }}
+          />
+        )}
+        {activitiesStatus && (
+          <Alert
+            message={activitiesStatus.status === 'success' ? 'API测试成功' : 'API测试失败'}
+            description={
+              <div>
+                <p>{activitiesStatus.message}</p>
+                {activitiesStatus.details && (
+                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(activitiesStatus.details, null, 2)}</pre>
+                )}
+              </div>
+            }
+            type={activitiesStatus.status === 'success' ? 'success' : 'error'}
+            showIcon
+            style={{ marginTop: 16 }}
+          />
+        )}
+      </>
     );
   }
-  
-  return (
+    return (
     <div className="dashboard-container">
+      {/* 添加数据库测试按钮 */}
+      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+        <Space>
+          <Button 
+            type="primary" 
+            icon={<DatabaseOutlined />} 
+            loading={dbTesting}
+            onClick={handleTestDbConnection}
+          >
+            测试数据库连接
+          </Button>
+          <Button 
+            type="primary" 
+            icon={<HistoryOutlined />} 
+            loading={activitiesTesting}
+            onClick={handleTestRecentActivities}
+          >
+            测试最近活动API
+          </Button>
+        </Space>
+        {dbStatus && (
+          <Alert
+            message={dbStatus.status === 'success' ? '连接成功' : '连接失败'}
+            description={
+              <div>
+                <p>{dbStatus.message}</p>
+                {dbStatus.details && (
+                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(dbStatus.details, null, 2)}</pre>
+                )}
+              </div>
+            }
+            type={dbStatus.status === 'success' ? 'success' : 'error'}
+            showIcon
+            style={{ marginTop: 16, marginBottom: 16 }}
+          />
+        )}
+        {activitiesStatus && (
+          <Alert
+            message={activitiesStatus.status === 'success' ? 'API测试成功' : 'API测试失败'}
+            description={
+              <div>
+                <p>{activitiesStatus.message}</p>
+                {activitiesStatus.details && (
+                  <pre style={{ maxHeight: '300px', overflow: 'auto' }}>{JSON.stringify(activitiesStatus.details, null, 2)}</pre>
+                )}
+              </div>
+            }
+            type={activitiesStatus.status === 'success' ? 'success' : 'error'}
+            showIcon
+            style={{ marginTop: 16, marginBottom: 16 }}
+          />
+        )}
+      </div>
+      
       <Row gutter={[16, 16]}>
         {/* 统计卡片 */}
         <Col xs={24} sm={12} md={6}>

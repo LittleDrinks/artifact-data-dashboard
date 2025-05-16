@@ -28,3 +28,19 @@ export const getRecentActivities = async (limit = 10) => {
     params: { limit }
   });
 };
+
+/**
+ * 测试数据库连接状态
+ * @returns {Promise} 数据库连接状态
+ */
+export const testDbConnection = async () => {
+  return axios.get(API_URL + 'test-db-connection');
+};
+
+/**
+ * 测试最近活动API
+ * @returns {Promise} 最近活动API测试结果
+ */
+export const testRecentActivities = async () => {
+  return axios.get(API_URL + 'test-recent-activities');
+};

@@ -82,13 +82,18 @@ export const getCurrentUser = () => {
     // 检查token是否过期
     const decoded = jwtDecode(token);
     const currentTime = Date.now() / 1000;
+    const tokenIsValid = decoded.exp > currentTime;
     
-    if (decoded.exp < currentTime) {
+    if (!tokenIsValid) {
       logout();
       return null;
     }
     
-    return JSON.parse(localStorage.getItem('user'));
+    const user = JSON.parse(localStorage.getItem('user'));
+    return {
+      ...user,
+      tokenIsValid
+    };
   } catch (error) {
     console.error('Token解析失败:', error);
     logout();
