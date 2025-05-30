@@ -45,19 +45,39 @@ const swaggerOptions = {
       title: '文物数据管理系统 API',
       version: '1.0.0',
       description: '文物大数据与人工智能集成系统API文档',
-    },
-    servers: [
+    },    servers: [
       {
         url: `http://localhost:${PORT}`,
         description: '开发服务器',
       },
     ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
+    security: [
+      {
+        bearerAuth: [],
+      },
+    ],
   },
-  apis: ['./src/routes/*.js'], // 路径到API路由文件
+  apis: [
+    './src/routes/*.js',
+    __dirname + '/routes/*.js'
+  ], // 路径到API路由文件
 };
 
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+// 健康检查端点
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: '服务器运行正常' });
+});
 
 // 路由注册
 app.use('/api/auth', authRoutes);
@@ -67,7 +87,7 @@ app.use('/api/graph', authMiddleware, graphRoutes);
 app.use('/api/wordcloud', authMiddleware, wordcloudRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
 
-// API文档路由
+// API文档路由 - 必须在其他路由之后注册
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 // 处理404错误 - 必须放在所有路由之后
