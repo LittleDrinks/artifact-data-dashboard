@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Alert, Input, Space, Divider, Typography, Collapse } from 'antd';
-import { DatabaseOutlined, HistoryOutlined, ApiOutlined } from '@ant-design/icons';
+import { Card, Button, Alert, Input, Space, Divider, Typography, Collapse, Upload, Select, message } from 'antd';
+import { DatabaseOutlined, HistoryOutlined, ApiOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { testDbConnection, testRecentActivities } from '../services/stats.service';
+import { exportTableToExcel, importTableFromExcel } from '../services/debug.service';
 import { getCurrentUser } from '../services/auth.service';
 
 const { Title, Text, Paragraph } = Typography;
@@ -20,6 +21,11 @@ const Debug = () => {
   const [rawApiResponse, setRawApiResponse] = useState(null);
   const [apiUrl, setApiUrl] = useState('/api/stats/recent-activities?limit=5');
   const [apiErrorDetails, setApiErrorDetails] = useState(null);
+  const [selectedTable, setSelectedTable] = useState('artifacts');
+  const [importFileList, setImportFileList] = useState([]);
+  const [importResult, setImportResult] = useState(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   useEffect(() => {
     // 获取当前用户信息
@@ -101,6 +107,69 @@ const Debug = () => {
   // 清除API响应结果
   const clearRawApiResponse = () => {
     setRawApiResponse(null);
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setExportLoading(true);
+      const response = await exportTableToExcel(selectedTable);
+      const blob = new Blob([response.data], {
+        type:
+          response.headers['content-type'] ||
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      link.href = url;
+      link.download = `${selectedTable}-${timestamp}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      message.success('导出成功');
+    } catch (err) {
+      console.error('导出失败:', err);
+      message.error(err.response?.data?.message || '导出失败，请稍后重试');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleImportExcel = async () => {
+    if (!importFileList.length) {
+      message.warning('请先选择需要导入的Excel文件');
+      return;
+    }
+
+    try {
+      setImportLoading(true);
+  const uploadFile = importFileList[0];
+  const file = uploadFile.originFileObj || uploadFile;
+  const response = await importTableFromExcel(selectedTable, file);
+      setImportResult({ success: true, data: response.data });
+      message.success('导入成功');
+      setImportFileList([]);
+    } catch (err) {
+      console.error('导入失败:', err);
+      setImportResult({
+        success: false,
+        error: err.response?.data || { message: err.message }
+      });
+      message.error(err.response?.data?.message || '导入失败，请检查文件内容');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleUploadBefore = (file) => {
+    setImportFileList([file]);
+    setImportResult(null);
+    return false;
+  };
+
+  const handleUploadRemove = () => {
+    setImportFileList([]);
   };
 
   return (
@@ -229,6 +298,62 @@ const Debug = () => {
           </Card>
         )}
       </Space>
+
+      <Divider orientation="left">Excel 数据导入 / 导出</Divider>
+      <Card>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Space>
+            <Text strong>目标数据表：</Text>
+            <Select
+              value={selectedTable}
+              onChange={setSelectedTable}
+              options={[{ label: '文物信息（artifacts）', value: 'artifacts' }]}
+              style={{ minWidth: 200 }}
+            />
+          </Space>
+
+          <Space wrap>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={handleExportExcel}
+              loading={exportLoading}
+            >
+              导出当前数据
+            </Button>
+
+            <Upload
+              beforeUpload={handleUploadBefore}
+              onRemove={handleUploadRemove}
+              fileList={importFileList}
+              accept=".xlsx,.xls"
+              maxCount={1}
+            >
+              <Button icon={<UploadOutlined />}>选择Excel文件</Button>
+            </Upload>
+
+            <Button
+              type="primary"
+              onClick={handleImportExcel}
+              loading={importLoading}
+              disabled={!importFileList.length}
+            >
+              导入Excel
+            </Button>
+          </Space>
+
+          {importResult && (
+            <Card
+              size="small"
+              title={importResult.success ? '导入成功' : '导入失败'}
+              headStyle={{ color: importResult.success ? '#52c41a' : '#ff4d4f' }}
+            >
+              <pre style={{ maxHeight: 300, overflow: 'auto', margin: 0 }}>
+                {JSON.stringify(importResult.success ? importResult.data : importResult.error, null, 2)}
+              </pre>
+            </Card>
+          )}
+        </Space>
+      </Card>
     </div>
   );
 };

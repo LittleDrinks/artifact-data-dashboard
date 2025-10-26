@@ -72,7 +72,7 @@ services:  # 前端服务
 
   # Redis缓存
   redis:
-    image: redis:latest
+    image: redis:7.2-alpine
     container_name: artifact-dashboard-redis
     command: redis-server --requirepass ${REDIS_PASSWORD:-password}
     ports:

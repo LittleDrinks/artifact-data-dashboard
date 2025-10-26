@@ -46,3 +46,6 @@ Thumbs.db
 .pnp.cjs
 .pnp.js
 .yarnrc.yml
+
+# github-copilot
+.github/

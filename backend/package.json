@@ -21,7 +21,9 @@
     "neo4j-driver": "^5.7.0",
     "redis": "^4.6.6",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^4.6.3"
+    "swagger-ui-express": "^4.6.3",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "jest": "^29.5.0",

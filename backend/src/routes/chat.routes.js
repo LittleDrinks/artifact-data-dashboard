@@ -206,7 +206,7 @@ async function handleGraphQueries(question) {
       responseText = '唐三彩是盛唐时期的彩陶艺术品，以黄、绿、白三色为主，也有褐、蓝、黑等色彩。主要产地在河南洛阳和陕西西安附近，多用于陪葬品，展现了唐代的社会生活和艺术风貌。';
     } else if (question.includes('商代') && question.includes('文物')) {
       cypherQuery = `
-        MATCH (a:Artifact)-[:DATED_AS]->(e:Era {name: '商代'})
+        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: '商代'})
         OPTIONAL MATCH (a)-[r]-(n)
         WHERE n:Category OR n:Location
         RETURN a, r, n LIMIT 15
@@ -214,8 +214,8 @@ async function handleGraphQueries(question) {
       responseText = '商代(约前16世纪-前11世纪)的代表性文物主要有青铜礼器，如四羊方尊、司母戊鼎等；甲骨文；玉器和陶器等。这些文物体现了商代高度发达的青铜冶铸技术和礼制文化。';
     } else if (question.includes('西周') && question.includes('青铜器')) {
       cypherQuery = `
-        MATCH (a:Artifact)-[:DATED_AS]->(e:Era {name: '西周'})
-        MATCH (a)-[:BELONGS_TO]->(c:Category {name: '青铜器'})
+        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: '西周'})
+        MATCH (a)-[:HAS_CATEGORY]->(c:Category {name: '青铜器'})
         OPTIONAL MATCH (a)-[r]-(n)
         RETURN a, r, n LIMIT 15
       `;

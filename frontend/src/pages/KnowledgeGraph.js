@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, Input, Button, Spin, Alert, Modal, Descriptions, Empty } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 // CytoscapeComponent 内部使用 Cytoscape 库，所以我们不需要直接导入 Cytoscape
@@ -16,10 +16,36 @@ const KnowledgeGraph = () => {
   const [entityDetails, setEntityDetails] = useState(null);
   
   const cyRef = useRef(null);
+  const layoutRef = useRef(null);
+  const runLayoutRef = useRef(null);
   
   // 初始化加载图谱数据
   useEffect(() => {
     fetchGraphData();
+  }, []);
+
+  // 清理Cytoscape实例
+  useEffect(() => {
+    return () => {
+      if (layoutRef.current) {
+        try {
+          layoutRef.current.stop();
+        } catch (e) {
+          // ignore layout stop errors
+        }
+        layoutRef.current = null;
+      }
+      if (cyRef.current) {
+        try {
+          cyRef.current.stop?.();
+        } catch (e) {
+          // ignore stop errors
+        }
+        cyRef.current.destroy();
+        cyRef.current = null;
+      }
+      runLayoutRef.current = null;
+    };
   }, []);
   
   // 获取图谱数据
@@ -65,25 +91,23 @@ const KnowledgeGraph = () => {
   };
   
   // 配置cytoscape组件
-  const getCytoscapeElements = () => {
-    return [
-      ...graphData.nodes.map(node => ({
-        data: { 
-          id: node.id,
-          label: node.label,
-          type: node.type
-        }
-      })),
-      ...graphData.edges.map(edge => ({
-        data: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label
-        }
-      }))
-    ];
-  };
+  const cytoscapeElements = useMemo(() => ([
+    ...graphData.nodes.map(node => ({
+      data: {
+        id: node.id,
+        label: node.label,
+        type: node.type
+      }
+    })),
+    ...graphData.edges.map(edge => ({
+      data: {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label
+      }
+    }))
+  ]), [graphData]);
   
   // Cytoscape样式
   const cytoscapeStylesheet = [
@@ -166,7 +190,8 @@ const KnowledgeGraph = () => {
   // Cytoscape布局配置
   const layoutConfig = {
     name: 'cose',
-    animate: true,
+    animate: false,
+    refresh: 0,
     nodeDimensionsIncludeLabels: true,
     randomize: true,
     nodeRepulsion: 8000,
@@ -183,6 +208,92 @@ const KnowledgeGraph = () => {
   // 当图形组件初始化完成
   const onCytoscapeInit = (cy) => {
     cyRef.current = cy;
+
+    const cleanupLayout = () => {
+      if (layoutRef.current) {
+        try {
+          layoutRef.current.stop();
+        } catch (e) {
+          // ignore layout stop errors
+        }
+        layoutRef.current = null;
+      }
+    };
+
+    const runLayout = (shouldAnimate = true) => {
+      if (cy.destroyed()) {
+        return;
+      }
+      cleanupLayout();
+
+      const nodes = cy.nodes();
+      const previousPositions = {};
+
+      if (shouldAnimate) {
+        nodes.forEach(node => {
+          previousPositions[node.id()] = { ...node.position() };
+        });
+      }
+
+      const layout = cy.layout(layoutConfig);
+      layoutRef.current = layout;
+
+      layout.once('layoutstop', () => {
+        if (layoutRef.current === layout) {
+          layoutRef.current = null;
+        }
+        if (cy.destroyed()) {
+          return;
+        }
+
+        if (shouldAnimate) {
+          const targetPositions = {};
+          nodes.forEach(node => {
+            targetPositions[node.id()] = { ...node.position() };
+          });
+
+          cy.batch(() => {
+            nodes.forEach(node => {
+              const previous = previousPositions[node.id()];
+              if (previous) {
+                node.position(previous);
+              }
+            });
+          });
+
+          cy.batch(() => {
+            nodes.forEach(node => {
+              const target = targetPositions[node.id()];
+              if (!target) {
+                return;
+              }
+              node.animate({ position: target }, {
+                duration: 600,
+                easing: 'ease-out'
+              });
+            });
+          });
+        }
+
+        cy.fit(undefined, 50);
+      });
+
+      layout.run();
+    };
+
+    runLayoutRef.current = runLayout;
+
+    const handleDragFree = () => runLayout(true);
+    const handleDestroy = () => {
+      cy.off('dragfree', 'node', handleDragFree);
+      cleanupLayout();
+      runLayoutRef.current = null;
+      if (cyRef.current === cy) {
+        cyRef.current = null;
+      }
+    };
+
+    cy.on('destroy', handleDestroy);
     
     // 注册节点点击事件
     cy.on('tap', 'node', function(evt) {
@@ -202,8 +313,22 @@ const KnowledgeGraph = () => {
         'border-width': 0
       });
     });
+
+    runLayout(true);
+    cy.on('dragfree', 'node', handleDragFree);
+
   };
-  
+
+  useEffect(() => {
+    if (!cyRef.current || cyRef.current.destroyed()) {
+      return;
+    }
+    if (graphData.nodes.length === 0) {
+      return;
+    }
+    runLayoutRef.current?.(true);
+  }, [graphData]);
+
   return (
     <Card title="文物知识图谱">
       <div style={{ marginBottom: 16, display: 'flex' }}>
@@ -243,7 +368,7 @@ const KnowledgeGraph = () => {
           {graphData.nodes.length > 0 ? (
             <div className="knowledge-graph">
               <CytoscapeComponent
-                elements={getCytoscapeElements()}
+                elements={cytoscapeElements}
                 stylesheet={cytoscapeStylesheet}
                 layout={layoutConfig}
                 style={{ width: '100%', height: '600px' }}

@@ -1,4 +1,5 @@
 const express = require('express');
+const neo4j = require('neo4j-driver');
 const { neo4jDriver } = require('../config/database');
 
 const router = express.Router();
@@ -32,10 +33,13 @@ router.get('/artifacts', async (req, res) => {
   
   try {
     const keyword = req.query.keyword;
-    const limit = parseInt(req.query.limit) || 50;
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.floor(requestedLimit)
+      : 50;
     
     let query;
-    let params = { limit };
+    let params = { limit: neo4j.int(limit) };
     
     if (keyword) {
       // 带关键词的查询，查找与关键词匹配的节点及其关系
@@ -60,21 +64,39 @@ router.get('/artifacts', async (req, res) => {
     }
     
     const result = await session.run(query, params);
-    
+
     // 处理Neo4j结果为前端可用的图谱数据
     const nodes = new Map();
     const edges = new Map();
-    
+
+    const safeGet = (record, key) => (record.has(key) ? record.get(key) : null);
+    const resolveLabel = (node, fallback) => {
+      if (!node) return fallback;
+      const props = node.properties || {};
+      return (
+        props.name ||
+        props.label ||
+        props.title ||
+        props.id ||
+        fallback
+      );
+    };
+
     result.records.forEach(record => {
+      const artifact = safeGet(record, 'a');
+      const n1 = safeGet(record, 'n1');
+      const n2 = safeGet(record, 'n2');
+      const r1 = safeGet(record, 'r1');
+      const r2 = safeGet(record, 'r2');
+
       // 处理文物节点
-      if (record.get('a')) {
-        const artifact = record.get('a');
+      if (artifact) {
         const artifactId = artifact.identity.toString();
         
         if (!nodes.has(artifactId)) {
           nodes.set(artifactId, {
             id: artifactId,
-            label: artifact.properties.name,
+            label: resolveLabel(artifact, `artifact-${artifactId}`),
             type: 'artifact',
             properties: artifact.properties
           });
@@ -82,38 +104,35 @@ router.get('/artifacts', async (req, res) => {
       }
       
       // 处理一级关系节点
-      if (record.get('n1')) {
-        const n1 = record.get('n1');
+      if (n1) {
         const n1Id = n1.identity.toString();
         
         if (!nodes.has(n1Id)) {
           nodes.set(n1Id, {
             id: n1Id,
-            label: n1.properties.name,
-            type: n1.labels[0].toLowerCase(),
+            label: resolveLabel(n1, `node-${n1Id}`),
+            type: (n1.labels && n1.labels[0]) ? n1.labels[0].toLowerCase() : 'node',
             properties: n1.properties
           });
         }
       }
       
       // 处理二级关系节点
-      if (record.get('n2')) {
-        const n2 = record.get('n2');
+      if (n2) {
         const n2Id = n2.identity.toString();
         
         if (!nodes.has(n2Id)) {
           nodes.set(n2Id, {
             id: n2Id,
-            label: n2.properties.name,
-            type: n2.labels[0].toLowerCase(),
+            label: resolveLabel(n2, `node-${n2Id}`),
+            type: (n2.labels && n2.labels[0]) ? n2.labels[0].toLowerCase() : 'node',
             properties: n2.properties
           });
         }
       }
       
       // 处理一级关系
-      if (record.get('r1')) {
-        const r1 = record.get('r1');
+      if (r1) {
         const r1Id = r1.identity.toString();
         
         if (!edges.has(r1Id)) {
@@ -121,15 +140,14 @@ router.get('/artifacts', async (req, res) => {
             id: r1Id,
             source: r1.start.toString(),
             target: r1.end.toString(),
-            label: r1.type,
+            label: r1.type || '',
             properties: r1.properties
           });
         }
       }
       
       // 处理二级关系
-      if (record.get('r2')) {
-        const r2 = record.get('r2');
+      if (r2) {
         const r2Id = r2.identity.toString();
         
         if (!edges.has(r2Id)) {
@@ -137,7 +155,7 @@ router.get('/artifacts', async (req, res) => {
             id: r2Id,
             source: r2.start.toString(),
             target: r2.end.toString(),
-            label: r2.type,
+            label: r2.type || '',
             properties: r2.properties
           });
         }
@@ -170,7 +188,7 @@ router.get('/artifacts', async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: 实体类型 (Artifact, Author, Era, etc)
+ *         description: 实体类型 (Artifact, Era, Category, etc)
  *       - in: path
  *         name: id
  *         required: true
@@ -190,7 +208,20 @@ router.get('/entity/:type/:id', async (req, res) => {
     const { type, id } = req.params;
     
     // 验证类型
-    const validTypes = ['Artifact', 'Author', 'Era', 'Material', 'Location', 'Category'];
+    const validTypes = [
+      'Artifact',
+      'Era',
+      'Category',
+      'Dimension',
+      'Material',
+      'Location',
+      'DamageType',
+      'RestorationMethod',
+      'ReinforcementMethod',
+      'InspectionTechnique',
+      'ProtectiveMaterial',
+      'InspectionMetric'
+    ];
     if (!validTypes.includes(type)) {
       return res.status(400).json({ message: '无效的实体类型' });
     }

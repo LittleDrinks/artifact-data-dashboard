@@ -12,8 +12,7 @@ const mysqlPool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  charset: 'utf8mb4', // 明确指定字符集为utf8mb4
-  collation: 'utf8mb4_unicode_ci' // 指定排序规则
+  charset: 'utf8mb4' // 明确指定字符集为utf8mb4
 });
 
 // Neo4j驱动配置

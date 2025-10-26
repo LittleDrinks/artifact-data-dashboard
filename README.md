@@ -109,18 +109,40 @@ logs: id, user_id, action, target_id, timestamp, details
 
 ### Neo4j 知识图谱
 ```cypher
-// 节点类型
-(:Artifact) - 文物实体
-(:Era) - 历史朝代
-(:Location) - 地理位置
-(:Category) - 文物类别
-(:Material) - 制作材质
+// 节点标签与属性
+(:Artifact {
+   id,
+   name,
+   description,
+   tags,
+   isCataloged,
+   isDigitized,
+   needsRepair
+})
+(:Era {name, startYear, endYear})
+(:Category {name, description})
+(:Dimension {label, value, unit})
+(:Material {name, description})
+(:Location {name, region, longitude, latitude})
+(:DamageType {name, severity, description})
+(:RestorationMethod {name, description})
+(:ReinforcementMethod {name, description})
+(:InspectionTechnique {name, description})
+(:ProtectiveMaterial {name, description})
+(:InspectionMetric {name, unit, idealRange})
 
 // 关系类型
-(:Artifact)-[:BELONGS_TO]->(:Era)
-(:Artifact)-[:DISCOVERED_IN]->(:Location)
-(:Artifact)-[:CATEGORIZED_AS]->(:Category)
+(:Artifact)-[:BELONGS_TO_ERA]->(:Era)
+(:Artifact)-[:HAS_CATEGORY]->(:Category)
+(:Artifact)-[:HAS_DIMENSION]->(:Dimension)
 (:Artifact)-[:MADE_OF]->(:Material)
+(:Artifact)-[:STORED_AT]->(:Location)
+(:Artifact)-[:HAS_DAMAGE]->(:DamageType)
+(:Artifact)-[:USES_RESTORATION]->(:RestorationMethod)
+(:Artifact)-[:USES_REINFORCEMENT]->(:ReinforcementMethod)
+(:Artifact)-[:INSPECTED_BY]->(:InspectionTechnique)
+(:Artifact)-[:MEASURED_BY]->(:InspectionMetric)
+(:Artifact)-[:PROTECTED_WITH]->(:ProtectiveMaterial)
 ```
 
 ## 🚀 快速开始
@@ -160,7 +182,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 4. **访问应用**
 - **前端界面**: http://localhost:8080
-- **API文档**: http://localhost:13000/api-docs
+- **API文档**: http://localhost:3000/api-docs
 - **Neo4j浏览器**: http://localhost:7474
 
 ### 默认账户

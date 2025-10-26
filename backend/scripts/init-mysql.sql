@@ -1,5 +1,16 @@
 -- MySQL数据库初始化脚本
 
+-- 全局字符集设置
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+SET character_set_connection = utf8mb4;
+
+-- 确保数据库使用utf8mb4
+CREATE DATABASE IF NOT EXISTS artifact_dashboard
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+USE artifact_dashboard;
+
 -- 创建users表
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -9,7 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   role ENUM('admin', 'user') NOT NULL DEFAULT 'user',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 创建artifacts表
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -27,7 +38,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FULLTEXT INDEX idx_artifact_fulltext (name, description, tags)
-);
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 创建logs表
 CREATE TABLE IF NOT EXISTS logs (
@@ -38,11 +49,11 @@ CREATE TABLE IF NOT EXISTS logs (
   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   details TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 插入管理员账户
 INSERT INTO users (username, email, password_hash, role) VALUES
-('admin', 'admin@example.com', '$2b$10$NRs4KjIVgQKj7HX9Qs9KJ.eUmYzJ3Uh1JMiWJl9gDX.hbsFm9a4Ci', 'admin'); -- 密码: admin123
+('admin', 'admin@example.com', '$2a$10$myBxkYDPKMFPrwZG9psVUupG3hoX7W.TYp0moN.Ez0/4f573TW1sy', 'admin'); -- 密码: admin123
 
 -- 插入示例文物数据
 INSERT INTO artifacts (name, description, category, era, location, image_url, tags, is_cataloged, is_digitized, needs_repair) VALUES

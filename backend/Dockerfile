@@ -15,6 +15,9 @@ RUN npm uninstall jieba && npm install nodejieba axios --registry=https://regist
 # 复制源代码
 COPY . .
 
+# 统一shell脚本行结尾，防止Windows换行导致执行失败
+RUN sed -i 's/\r$//' start.sh
+
 # 设置环境变量
 ENV NODE_ENV=production
 
