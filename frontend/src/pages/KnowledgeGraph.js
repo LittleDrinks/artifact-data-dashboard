@@ -18,6 +18,28 @@ const KnowledgeGraph = () => {
   const cyRef = useRef(null);
   const layoutRef = useRef(null);
   const runLayoutRef = useRef(null);
+  const scheduleLayoutRef = useRef(null);
+  const draggingNodesRef = useRef(new Set());
+  const draggedPositionsRef = useRef(new Map());
+  const layoutFrameRef = useRef(null);
+  const layoutScheduledRef = useRef(false);
+  const pendingLayoutOptionsRef = useRef(null);
+  const neighborMapRef = useRef(new Map());
+  const velocitiesRef = useRef(new Map());
+  const physicsFrameRef = useRef(null);
+  const physicsActiveRef = useRef(false);
+  const lastDragTimeRef = useRef(0);
+  const physicsConfigRef = useRef({
+    springLength: 140,
+    springCoeff: 0.0006,
+    repulsionStrength: 60000,
+    damping: 0.85,
+    timeStep: 0.03,
+    maxDisplacement: 12,
+    maxRepulsionDistance: 450,
+    centerStrength: 0.002,
+    settleDuration: 260
+  });
   
   // 初始化加载图谱数据
   useEffect(() => {
@@ -27,6 +49,21 @@ const KnowledgeGraph = () => {
   // 清理Cytoscape实例
   useEffect(() => {
     return () => {
+      if (layoutFrameRef.current) {
+        cancelAnimationFrame(layoutFrameRef.current);
+        layoutFrameRef.current = null;
+      }
+      if (physicsFrameRef.current) {
+        cancelAnimationFrame(physicsFrameRef.current);
+        physicsFrameRef.current = null;
+      }
+      physicsActiveRef.current = false;
+      layoutScheduledRef.current = false;
+      pendingLayoutOptionsRef.current = null;
+      draggingNodesRef.current.clear();
+      draggedPositionsRef.current.clear();
+      velocitiesRef.current.clear();
+      neighborMapRef.current = new Map();
       if (layoutRef.current) {
         try {
           layoutRef.current.stop();
@@ -45,6 +82,7 @@ const KnowledgeGraph = () => {
         cyRef.current = null;
       }
       runLayoutRef.current = null;
+      scheduleLayoutRef.current = null;
     };
   }, []);
   
@@ -108,6 +146,27 @@ const KnowledgeGraph = () => {
       }
     }))
   ]), [graphData]);
+
+  const neighborMap = useMemo(() => {
+    const map = new Map();
+    graphData.edges.forEach(edge => {
+      const { source, target } = edge;
+      if (!map.has(source)) {
+        map.set(source, new Set());
+      }
+      if (!map.has(target)) {
+        map.set(target, new Set());
+      }
+      map.get(source).add(target);
+      map.get(target).add(source);
+    });
+    return map;
+  }, [graphData]);
+
+  useEffect(() => {
+    neighborMapRef.current = neighborMap;
+    velocitiesRef.current.clear();
+  }, [neighborMap]);
   
   // Cytoscape样式
   const cytoscapeStylesheet = [
@@ -193,7 +252,7 @@ const KnowledgeGraph = () => {
     animate: false,
     refresh: 0,
     nodeDimensionsIncludeLabels: true,
-    randomize: true,
+    randomize: false,
     nodeRepulsion: 8000,
     idealEdgeLength: 100,
     edgeElasticity: 100,
@@ -220,20 +279,196 @@ const KnowledgeGraph = () => {
       }
     };
 
-    const runLayout = (shouldAnimate = true) => {
+    const stopPhysicsLoop = () => {
+      if (physicsFrameRef.current) {
+        cancelAnimationFrame(physicsFrameRef.current);
+        physicsFrameRef.current = null;
+      }
+      physicsActiveRef.current = false;
+    };
+
+    const runPhysicsStep = () => {
+      const cyInstance = cyRef.current;
+      if (!cyInstance || cyInstance.destroyed()) {
+        return false;
+      }
+
+      const physicsConfig = physicsConfigRef.current;
+      const neighborSnapshot = neighborMapRef.current;
+      const velocities = velocitiesRef.current;
+      const dragging = draggingNodesRef.current;
+      const nodes = cyInstance.nodes();
+
+      if (!nodes || nodes.length === 0) {
+        return false;
+      }
+
+      const positions = new Map();
+      let sumX = 0;
+      let sumY = 0;
+      nodes.forEach(node => {
+        const pos = { ...node.position() };
+        positions.set(node.id(), pos);
+        sumX += pos.x;
+        sumY += pos.y;
+      });
+      const count = typeof nodes.length === 'number' ? nodes.length : nodes.size();
+      const centerX = count > 0 ? sumX / count : 0;
+      const centerY = count > 0 ? sumY / count : 0;
+
+      const updates = [];
+
+      nodes.forEach(node => {
+        const id = node.id();
+        const pos = positions.get(id);
+        if (!pos) {
+          return;
+        }
+
+        if (dragging.has(id) || node.grabbed()) {
+          velocities.set(id, { x: 0, y: 0 });
+          return;
+        }
+
+        let forceX = 0;
+        let forceY = 0;
+
+        nodes.forEach(other => {
+          if (other === node) {
+            return;
+          }
+          const otherPos = positions.get(other.id());
+          if (!otherPos) {
+            return;
+          }
+          const dx = pos.x - otherPos.x;
+          const dy = pos.y - otherPos.y;
+          let distSq = dx * dx + dy * dy;
+          if (distSq < 0.0001) {
+            distSq = 0.0001;
+          }
+          const dist = Math.sqrt(distSq);
+          if (dist > physicsConfig.maxRepulsionDistance) {
+            return;
+          }
+          const repulse = physicsConfig.repulsionStrength / distSq;
+          const normX = dx / dist;
+          const normY = dy / dist;
+          forceX += normX * repulse;
+          forceY += normY * repulse;
+        });
+
+        const neighbors = neighborSnapshot.get(id);
+        if (neighbors) {
+          neighbors.forEach(neighborId => {
+            const neighborPos = positions.get(neighborId);
+            if (!neighborPos) {
+              return;
+            }
+            const dx = neighborPos.x - pos.x;
+            const dy = neighborPos.y - pos.y;
+            let distSq = dx * dx + dy * dy;
+            if (distSq < 0.0001) {
+              distSq = 0.0001;
+            }
+            const dist = Math.sqrt(distSq);
+            const springForce = physicsConfig.springCoeff * (dist - physicsConfig.springLength);
+            const normX = dx / dist;
+            const normY = dy / dist;
+            forceX += normX * springForce;
+            forceY += normY * springForce;
+          });
+        }
+
+          if (physicsConfig.centerStrength) {
+            const centerForce = physicsConfig.centerStrength;
+            forceX += (centerX - pos.x) * centerForce;
+            forceY += (centerY - pos.y) * centerForce;
+          }
+
+        const velocity = velocities.get(id) || { x: 0, y: 0 };
+        velocity.x = (velocity.x + forceX * physicsConfig.timeStep) * physicsConfig.damping;
+        velocity.y = (velocity.y + forceY * physicsConfig.timeStep) * physicsConfig.damping;
+
+        if (!Number.isFinite(velocity.x)) {
+          velocity.x = 0;
+        }
+        if (!Number.isFinite(velocity.y)) {
+          velocity.y = 0;
+        }
+
+        const clampedX = Math.max(-physicsConfig.maxDisplacement, Math.min(physicsConfig.maxDisplacement, velocity.x));
+        const clampedY = Math.max(-physicsConfig.maxDisplacement, Math.min(physicsConfig.maxDisplacement, velocity.y));
+
+        velocity.x = clampedX;
+        velocity.y = clampedY;
+        velocities.set(id, velocity);
+
+        if (Math.abs(clampedX) > 0.01 || Math.abs(clampedY) > 0.01) {
+          updates.push({ node, x: pos.x + clampedX, y: pos.y + clampedY });
+        }
+      });
+
+      if (updates.length > 0) {
+        cyInstance.batch(() => {
+          updates.forEach(({ node, x, y }) => {
+            node.position({ x, y });
+          });
+        });
+        return true;
+      }
+
+      return false;
+    };
+
+    const physicsLoop = () => {
+      const cyInstance = cyRef.current;
+      if (!cyInstance || cyInstance.destroyed()) {
+        stopPhysicsLoop();
+        return;
+      }
+
+      const moved = runPhysicsStep();
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const draggingCount = draggingNodesRef.current.size;
+
+      if (draggingCount === 0 && !moved && now - lastDragTimeRef.current > physicsConfigRef.current.settleDuration) {
+        stopPhysicsLoop();
+        return;
+      }
+
+      physicsFrameRef.current = requestAnimationFrame(physicsLoop);
+    };
+
+    const ensurePhysicsLoop = () => {
+      if (physicsActiveRef.current) {
+        return;
+      }
+      physicsActiveRef.current = true;
+      physicsFrameRef.current = requestAnimationFrame(physicsLoop);
+    };
+
+    const runLayout = (options = {}) => {
       if (cy.destroyed()) {
         return;
       }
+
+      const {
+        animate = true,
+        excludeIds = new Set(),
+        fitView = false
+      } = options;
+
+      const excluded = new Set(excludeIds);
+
       cleanupLayout();
 
       const nodes = cy.nodes();
       const previousPositions = {};
 
-      if (shouldAnimate) {
-        nodes.forEach(node => {
-          previousPositions[node.id()] = { ...node.position() };
-        });
-      }
+      nodes.forEach(node => {
+        previousPositions[node.id()] = { ...node.position() };
+      });
 
       const layout = cy.layout(layoutConfig);
       layoutRef.current = layout;
@@ -246,7 +481,9 @@ const KnowledgeGraph = () => {
           return;
         }
 
-        if (shouldAnimate) {
+        velocitiesRef.current.clear();
+
+        if (animate) {
           const targetPositions = {};
           nodes.forEach(node => {
             targetPositions[node.id()] = { ...node.position() };
@@ -254,79 +491,210 @@ const KnowledgeGraph = () => {
 
           cy.batch(() => {
             nodes.forEach(node => {
-              const previous = previousPositions[node.id()];
-              if (previous) {
-                node.position(previous);
+              if (excluded.has(node.id()) && node.grabbed()) {
+                return;
+              }
+              const stored = draggedPositionsRef.current.get(node.id()) || previousPositions[node.id()];
+              if (stored) {
+                node.position(stored);
               }
             });
           });
 
-          cy.batch(() => {
-            nodes.forEach(node => {
-              const target = targetPositions[node.id()];
-              if (!target) {
-                return;
+          nodes.forEach(node => {
+            if (excluded.has(node.id())) {
+              const stored = draggedPositionsRef.current.get(node.id()) || previousPositions[node.id()];
+              if (stored && !node.grabbed()) {
+                node.stop();
+                node.position(stored);
               }
-              node.animate({ position: target }, {
-                duration: 600,
-                easing: 'ease-out'
-              });
+              return;
+            }
+            const target = targetPositions[node.id()];
+            if (!target) {
+              return;
+            }
+            node.stop();
+            node.animate({ position: target }, {
+              duration: 450,
+              easing: 'ease-out'
+            });
+          });
+        } else if (excluded.size > 0) {
+          cy.batch(() => {
+            excluded.forEach(id => {
+              const node = cy.getElementById(id);
+              const stored = draggedPositionsRef.current.get(id) || previousPositions[id];
+              if (node && stored && !node.grabbed()) {
+                node.position(stored);
+              }
             });
           });
         }
 
-        cy.fit(undefined, 50);
+        if (fitView) {
+          cy.fit(undefined, 50);
+        }
       });
 
       layout.run();
     };
 
-    runLayoutRef.current = runLayout;
+    const scheduleLayout = (options = {}) => {
+      const merged = {
+        animate: options.animate !== undefined ? options.animate : (pendingLayoutOptionsRef.current?.animate ?? true),
+        fitView: options.fitView !== undefined ? options.fitView : (pendingLayoutOptionsRef.current?.fitView ?? false),
+        excludeIds: options.excludeIds !== undefined
+          ? new Set(options.excludeIds)
+          : (pendingLayoutOptionsRef.current?.excludeIds
+            ? new Set(pendingLayoutOptionsRef.current.excludeIds)
+            : new Set())
+      };
 
-    const handleDragFree = () => runLayout(true);
+      pendingLayoutOptionsRef.current = merged;
+
+      if (layoutScheduledRef.current) {
+        return;
+      }
+
+      layoutScheduledRef.current = true;
+
+      if (layoutFrameRef.current) {
+        cancelAnimationFrame(layoutFrameRef.current);
+      }
+
+      layoutFrameRef.current = requestAnimationFrame(() => {
+        layoutScheduledRef.current = false;
+        const opts = pendingLayoutOptionsRef.current || {};
+        if (!opts.excludeIds) {
+          opts.excludeIds = new Set();
+        }
+        pendingLayoutOptionsRef.current = null;
+        layoutFrameRef.current = null;
+        runLayout(opts);
+      });
+    };
+
+    const updateDragTime = () => {
+      lastDragTimeRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    };
+
+    runLayoutRef.current = runLayout;
+    scheduleLayoutRef.current = scheduleLayout;
+
+    const handleGrab = (evt) => {
+      const node = evt.target;
+      const id = node.id();
+      draggingNodesRef.current.add(id);
+      draggedPositionsRef.current.set(id, { ...node.position() });
+      velocitiesRef.current.set(id, { x: 0, y: 0 });
+      updateDragTime();
+      ensurePhysicsLoop();
+    };
+
+    const handleDrag = (evt) => {
+      const node = evt.target;
+      const id = node.id();
+      draggedPositionsRef.current.set(id, { ...node.position() });
+      velocitiesRef.current.set(id, { x: 0, y: 0 });
+      updateDragTime();
+      ensurePhysicsLoop();
+    };
+
+    const handleFree = (evt) => {
+      const node = evt.target;
+      const id = node.id();
+      draggingNodesRef.current.delete(id);
+      draggedPositionsRef.current.set(id, { ...node.position() });
+      velocitiesRef.current.set(id, { x: 0, y: 0 });
+      updateDragTime();
+      ensurePhysicsLoop();
+    };
+
     const handleDestroy = () => {
-      cy.off('dragfree', 'node', handleDragFree);
+      cy.off('grab', 'node', handleGrab);
+      cy.off('drag', 'node', handleDrag);
+      cy.off('free', 'node', handleFree);
+      cy.off('tap', 'node');
+      cy.off('mouseover', 'node');
+      cy.off('mouseout', 'node');
+      if (layoutFrameRef.current) {
+        cancelAnimationFrame(layoutFrameRef.current);
+        layoutFrameRef.current = null;
+      }
+      stopPhysicsLoop();
+      layoutScheduledRef.current = false;
+      pendingLayoutOptionsRef.current = null;
       cleanupLayout();
       runLayoutRef.current = null;
+      scheduleLayoutRef.current = null;
+      draggingNodesRef.current.clear();
+      draggedPositionsRef.current.clear();
+      velocitiesRef.current.clear();
       if (cyRef.current === cy) {
         cyRef.current = null;
       }
     };
 
     cy.on('destroy', handleDestroy);
-    
-    // 注册节点点击事件
-    cy.on('tap', 'node', function(evt) {
+    cy.on('grab', 'node', handleGrab);
+    cy.on('drag', 'node', handleDrag);
+    cy.on('free', 'node', handleFree);
+
+    cy.on('tap', 'node', evt => {
       handleNodeClick(evt.target);
     });
-    
-    // 实现悬停效果
-    cy.on('mouseover', 'node', function(e) {
+
+    cy.on('mouseover', 'node', e => {
       e.target.style({
         'border-width': 2,
         'border-color': '#000'
       });
     });
-    
-    cy.on('mouseout', 'node', function(e) {
+
+    cy.on('mouseout', 'node', e => {
       e.target.style({
         'border-width': 0
       });
     });
 
-    runLayout(true);
-    cy.on('dragfree', 'node', handleDragFree);
+    scheduleLayout({
+      animate: true,
+      excludeIds: new Set(),
+      fitView: true
+    });
 
+    updateDragTime();
+    ensurePhysicsLoop();
   };
 
   useEffect(() => {
-    if (!cyRef.current || cyRef.current.destroyed()) {
+    const cy = cyRef.current;
+    if (!cy || cy.destroyed()) {
       return;
     }
     if (graphData.nodes.length === 0) {
+      draggingNodesRef.current.clear();
+      draggedPositionsRef.current.clear();
+      velocitiesRef.current.clear();
       return;
     }
-    runLayoutRef.current?.(true);
+    draggingNodesRef.current.clear();
+    draggedPositionsRef.current.clear();
+    velocitiesRef.current.clear();
+    if (scheduleLayoutRef.current) {
+      scheduleLayoutRef.current({
+        animate: true,
+        excludeIds: new Set(),
+        fitView: true
+      });
+    } else if (runLayoutRef.current) {
+      runLayoutRef.current({
+        animate: true,
+        excludeIds: new Set(),
+        fitView: true
+      });
+    }
   }, [graphData]);
 
   return (
