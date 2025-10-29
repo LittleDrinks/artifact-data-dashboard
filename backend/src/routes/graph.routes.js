@@ -33,10 +33,16 @@ router.get('/artifacts', async (req, res) => {
   
   try {
     const keyword = req.query.keyword;
+    const DEFAULT_LIMIT = Number(process.env.GRAPH_DEFAULT_LIMIT) || 200;
+    const MAX_LIMIT = Number(process.env.GRAPH_MAX_LIMIT) || 500;
     const requestedLimit = Number(req.query.limit);
-    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    let limit = Number.isFinite(requestedLimit) && requestedLimit > 0
       ? Math.floor(requestedLimit)
-      : 50;
+      : DEFAULT_LIMIT;
+
+    if (limit > MAX_LIMIT) {
+      limit = MAX_LIMIT;
+    }
     
     let query;
     let params = { limit: neo4j.int(limit) };
@@ -45,7 +51,7 @@ router.get('/artifacts', async (req, res) => {
       // 带关键词的查询，查找与关键词匹配的节点及其关系
       query = `
         MATCH (a:Artifact)
-        WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
+        WHERE coalesce(a.displayName, a.name) CONTAINS $keyword OR coalesce(a.description, '') CONTAINS $keyword
         OPTIONAL MATCH (a)-[r1]-(n1)
         OPTIONAL MATCH (n1)-[r2]-(n2)
         WHERE n2 <> a
@@ -74,6 +80,7 @@ router.get('/artifacts', async (req, res) => {
       if (!node) return fallback;
       const props = node.properties || {};
       return (
+        props.displayName ||
         props.name ||
         props.label ||
         props.title ||
@@ -239,9 +246,20 @@ router.get('/entity/:type/:id', async (req, res) => {
     }
     
     // 构建实体详情
-    const entity = result.records[0].get('n').properties;
-    entity.id = result.records[0].get('n').identity.toString();
-    entity.type = type;
+    const entityNode = result.records[0].get('n');
+    const entityProps = entityNode.properties || {};
+    const entityId = entityNode.identity.toString();
+    const displayName = entityProps.displayName || entityProps.name || entityProps.title || `entity-${entityId}`;
+    const canonicalName = entityProps.name || displayName;
+
+    const entity = {
+      ...entityProps,
+      id: entityId,
+      type,
+      name: displayName,
+      displayName,
+      canonicalName
+    };
     
     // 构建关系列表
     const relationships = [];
@@ -250,16 +268,21 @@ router.get('/entity/:type/:id', async (req, res) => {
       if (record.get('r') && record.get('related')) {
         const rel = record.get('r');
         const related = record.get('related');
+        const relatedProps = related.properties || {};
+        const relatedId = related.identity.toString();
+        const relatedDisplayName = relatedProps.displayName || relatedProps.name || relatedProps.title || `entity-${relatedId}`;
         
         relationships.push({
           id: rel.identity.toString(),
           type: rel.type,
           direction: rel.start.toString() === entity.id ? 'outgoing' : 'incoming',
           entity: {
-            id: related.identity.toString(),
+            id: relatedId,
             type: related.labels[0],
-            name: related.properties.name,
-            properties: related.properties
+            name: relatedDisplayName,
+            displayName: relatedDisplayName,
+            canonicalName: relatedProps.name || relatedDisplayName,
+            properties: relatedProps
           }
         });
       }

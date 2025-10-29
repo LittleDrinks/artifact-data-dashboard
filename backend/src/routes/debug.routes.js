@@ -138,6 +138,185 @@ const buildRelationMap = (rows, keyCandidates, valueCandidates) => {
   return map;
 };
 
+const splitTagValues = (value) => {
+  if (!value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map(item => (typeof item === 'string' ? item.trim() : String(item)))
+      .filter(Boolean);
+  }
+  return String(value)
+    .split(/[,;，；\n\r\t]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean);
+};
+
+const syncArtifactsToNeo4j = async () => {
+  const [artifactRows] = await mysqlPool.query(`
+    SELECT id, name, description, category, era, location, image_url, tags,
+           is_cataloged, is_digitized, needs_repair
+    FROM artifacts
+  `);
+
+  const artifacts = artifactRows.map(row => {
+    const mysqlId = row.id != null ? String(row.id) : null;
+    return {
+      id: mysqlId ? `artifact-${mysqlId}` : `artifact-${Date.now()}-${Math.random()}`,
+      mysqlId,
+      name: row.name || (mysqlId ? `文物-${mysqlId}` : '未命名文物'),
+      description: row.description || '',
+      tags: splitTagValues(row.tags),
+      isCataloged: !!row.is_cataloged,
+      isDigitized: !!row.is_digitized,
+      needsRepair: !!row.needs_repair,
+      imageUrl: row.image_url || null,
+      category: row.category || null,
+      era: row.era || null,
+      location: row.location || null
+    };
+  });
+
+  artifacts.forEach((artifact, index) => {
+    const baseName = artifact.name || `未命名文物-${artifact.mysqlId || index + 1}`;
+    artifact.displayName = baseName;
+    artifact.name = baseName;
+  });
+
+  const duplicateBuckets = new Map();
+  artifacts.forEach(artifact => {
+    const key = artifact.displayName;
+    if (!duplicateBuckets.has(key)) {
+      duplicateBuckets.set(key, []);
+    }
+    duplicateBuckets.get(key).push(artifact);
+  });
+
+  duplicateBuckets.forEach((bucket) => {
+    if (bucket.length <= 1) {
+      return;
+    }
+    bucket.forEach((artifact, idx) => {
+      const suffix = artifact.mysqlId || `${idx + 1}`;
+      artifact.name = `${artifact.displayName} (#${suffix})`;
+    });
+  });
+
+  const categoryRelations = [];
+  const eraRelations = [];
+  const locationRelations = [];
+  const tagRelations = [];
+
+  artifacts.forEach(artifact => {
+    if (artifact.category) {
+      categoryRelations.push({ artifactId: artifact.id, name: artifact.category });
+    }
+    if (artifact.era) {
+      eraRelations.push({ artifactId: artifact.id, name: artifact.era });
+    }
+    if (artifact.location) {
+      locationRelations.push({ artifactId: artifact.id, name: artifact.location });
+    }
+    if (artifact.tags.length) {
+      artifact.tags.forEach(tag => {
+        tagRelations.push({ artifactId: artifact.id, name: tag });
+      });
+    }
+  });
+
+  const session = neo4jDriver.session();
+  const tx = session.beginTransaction();
+
+  try {
+    await tx.run(`
+      MATCH (n)
+      WHERE n:Artifact OR n:Category OR n:Era OR n:Location OR n:Tag
+      DETACH DELETE n
+    `);
+
+    if (artifacts.length) {
+      await tx.run(
+        `
+          UNWIND $artifacts AS data
+          MERGE (a:Artifact {id: data.id})
+          SET a.name = data.name,
+              a.description = data.description,
+              a.tags = data.tags,
+              a.isCataloged = data.isCataloged,
+              a.isDigitized = data.isDigitized,
+              a.needsRepair = data.needsRepair,
+              a.imageUrl = data.imageUrl,
+              a.mysqlId = data.mysqlId,
+              a.category = data.category,
+              a.era = data.era,
+              a.location = data.location,
+              a.displayName = data.displayName,
+              a.searchName = data.displayName,
+              a.syncedAt = datetime()
+        `,
+        { artifacts }
+      );
+    }
+
+    if (categoryRelations.length) {
+      await tx.run(
+        `
+          UNWIND $relations AS rel
+          MATCH (a:Artifact {id: rel.artifactId})
+          MERGE (c:Category {name: rel.name})
+          MERGE (a)-[:HAS_CATEGORY]->(c)
+        `,
+        { relations: categoryRelations }
+      );
+    }
+
+    if (eraRelations.length) {
+      await tx.run(
+        `
+          UNWIND $relations AS rel
+          MATCH (a:Artifact {id: rel.artifactId})
+          MERGE (e:Era {name: rel.name})
+          MERGE (a)-[:BELONGS_TO_ERA]->(e)
+        `,
+        { relations: eraRelations }
+      );
+    }
+
+    if (locationRelations.length) {
+      await tx.run(
+        `
+          UNWIND $relations AS rel
+          MATCH (a:Artifact {id: rel.artifactId})
+          MERGE (l:Location {name: rel.name})
+          MERGE (a)-[:STORED_AT]->(l)
+        `,
+        { relations: locationRelations }
+      );
+    }
+
+    if (tagRelations.length) {
+      await tx.run(
+        `
+          UNWIND $relations AS rel
+          MATCH (a:Artifact {id: rel.artifactId})
+          MERGE (t:Tag {name: rel.name})
+          MERGE (a)-[:HAS_TAG]->(t)
+        `,
+        { relations: tagRelations }
+      );
+    }
+
+    await tx.commit();
+    console.log(`Neo4j同步完成: ${artifacts.length} 条文物节点, ${categoryRelations.length} 条类别关系, ${eraRelations.length} 条年代关系, ${locationRelations.length} 条地点关系, ${tagRelations.length} 条标签关系。`);
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    await session.close();
+  }
+};
+
 // Graph export definitions describe each worksheet we want to produce.
 const GRAPH_NODE_EXPORTS = [
   {
@@ -529,16 +708,18 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
     );
 
     const connection = await mysqlPool.getConnection();
+    let transactionStarted = false;
+    let inserted = 0;
+    let updated = 0;
 
     try {
       await ensureArtifactsTable(connection);
       await connection.beginTransaction();
+      transactionStarted = true;
 
       await connection.query('DELETE FROM artifacts');
       await connection.query('ALTER TABLE artifacts AUTO_INCREMENT = 1');
 
-      let inserted = 0;
-      let updated = 0;
       const processedKeys = new Set();
 
       for (const row of rows) {
@@ -636,19 +817,37 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
       }
 
       await connection.commit();
-
-      return res.json({
-        message: '导入成功',
-        total: rows.length,
-        inserted,
-        updated
-      });
+      transactionStarted = false;
     } catch (error) {
-      await connection.rollback();
+      if (transactionStarted) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error('回滚导入事务失败:', rollbackError);
+        }
+      }
       throw error;
     } finally {
       connection.release();
     }
+
+    try {
+      await syncArtifactsToNeo4j();
+    } catch (error) {
+      console.error('同步Neo4j数据失败:', error);
+      return res.status(500).json({
+        message: '数据已导入MySQL，但同步Neo4j失败',
+        error: error.message
+      });
+    }
+
+    return res.json({
+      message: '导入成功',
+      total: rows.length,
+      inserted,
+      updated,
+      neo4jSynced: true
+    });
   } catch (error) {
     return next(error);
   }

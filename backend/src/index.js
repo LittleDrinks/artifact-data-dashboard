@@ -24,6 +24,20 @@ const { authMiddleware } = require('./middleware/auth.middleware');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// honor proxy headers issued by Docker/NGINX so rate limiting can resolve client IPs
+const rawTrustProxy = process.env.TRUST_PROXY;
+if (rawTrustProxy === undefined) {
+  app.set('trust proxy', 1);
+} else if (rawTrustProxy === 'true') {
+  app.set('trust proxy', true);
+} else if (rawTrustProxy === 'false') {
+  app.set('trust proxy', false);
+} else if (!Number.isNaN(Number(rawTrustProxy))) {
+  app.set('trust proxy', Number(rawTrustProxy));
+} else {
+  app.set('trust proxy', rawTrustProxy);
+}
+
 // 基本中间件
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

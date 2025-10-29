@@ -8,7 +8,7 @@ const API_URL = '/api/graph/';
  * @param {number} limit 节点数量限制
  * @returns {Promise} 知识图谱数据
  */
-export const getGraphData = async (keyword = '', limit = 50) => {
+export const getGraphData = async (keyword = '', limit = 200) => {
   return axios.get(API_URL + 'artifacts', {
     params: { keyword, limit }
   });
