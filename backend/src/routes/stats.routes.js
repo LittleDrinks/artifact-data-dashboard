@@ -34,19 +34,31 @@ router.get('/overview', async (req, res) => {
     const needsRepairCount = needsRepairResult[0].total;
     
     // 按类别统计
-    const [categoryStats] = await mysqlPool.execute(
+    const [rawCategoryStats] = await mysqlPool.execute(
       'SELECT category, COUNT(*) as count FROM artifacts GROUP BY category ORDER BY count DESC'
     );
-    
+    const categoryStats = rawCategoryStats.map(row => ({
+      ...row,
+      category: row.category && row.category.trim() ? row.category : '未分类'
+    }));
+
     // 按地域统计
-    const [locationStats] = await mysqlPool.execute(
+    const [rawLocationStats] = await mysqlPool.execute(
       'SELECT location, COUNT(*) as count FROM artifacts GROUP BY location ORDER BY count DESC'
     );
+    const locationStats = rawLocationStats.map(row => ({
+      ...row,
+      location: row.location && row.location.trim() ? row.location : '未知地点'
+    }));
     
     // 按年代统计
-    const [eraStats] = await mysqlPool.execute(
+    const [rawEraStats] = await mysqlPool.execute(
       'SELECT era, COUNT(*) as count FROM artifacts GROUP BY era ORDER BY era'
     );
+    const eraStats = rawEraStats.map(row => ({
+      ...row,
+      era: row.era && row.era.trim() ? row.era : '未知年代'
+    }));
     
     res.status(200).json({
       total,
@@ -78,7 +90,7 @@ router.get('/overview', async (req, res) => {
 router.get('/timeline', async (req, res) => {
   try {
     // 按年代统计文物数量，并按时间顺序排列
-    const [timelineData] = await mysqlPool.execute(`
+    const [timelineRaw] = await mysqlPool.execute(`
       SELECT era, COUNT(*) as count 
       FROM artifacts 
       GROUP BY era 
@@ -95,6 +107,11 @@ router.get('/timeline', async (req, res) => {
         ELSE 10
       END
     `);
+
+    const timelineData = timelineRaw.map(row => ({
+      ...row,
+      era: row.era && row.era.trim() ? row.era : '未知年代'
+    }));
     
     res.status(200).json({
       timeline: timelineData

@@ -247,6 +247,13 @@ docker exec -i artifact-dashboard-mysql mysql -u root -p[密码] artifact_db < b
 docker exec artifact-dashboard-backend node /app/scripts/init-neo4j.js
 ```
 
+### Excel导入格式要求
+- Excel 工作簿需要使用 `backend/src/routes/debug.routes.js` 导出的结构，以确保节点与关系表字段一致。
+- **工作表命名**：保留系统预期的多表结构，其中包括 `Artifacts`、`Categories`、`Eras`、`Materials`、`Locations` 等节点表，以及 `REL_HAS_CATEGORY`、`REL_BELONGS_TO_ERA` 等关系表；名称长度建议≤31字符。
+- **字段列名**：每个工作表必须保持固定列顺序，例如 `Artifacts` 需要包含 `artifact_id`、`name`、`description`、`tags`、`isCataloged`、`isDigitized`、`needsRepair`；关系表应使用 `artifact_id` 与关联实体字段（如 `category_name`）。
+- **值约定**：布尔值采用 `TRUE`/`FALSE`；多值字段使用英文分号分隔；空值留空即可，无需填充 `NULL`。
+- 推荐通过 `build_kg/convert_artifact_to_excel.py` 将原始 JSON 自动转换为符合要求的 Excel 文件，避免手工格式错误。
+
 ## 📋 API文档
 
 系统提供完整的RESTful API，支持Swagger在线文档：

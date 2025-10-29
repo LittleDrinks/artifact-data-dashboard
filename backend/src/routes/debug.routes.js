@@ -1,7 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const XLSX = require('xlsx');
-const { mysqlPool } = require('../config/database');
+const neo4j = require('neo4j-driver');
+const { mysqlPool, neo4jDriver } = require('../config/database');
 
 const router = express.Router();
 const upload = multer({
@@ -37,6 +38,412 @@ const normaliseTags = (value) => {
   return '';
 };
 
+const MAX_UNSIGNED_BIGINT = BigInt('18446744073709551615');
+
+const ensureArtifactsTable = async (connection) => {
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      name VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+      description TEXT COLLATE utf8mb4_unicode_ci,
+      category VARCHAR(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+      era VARCHAR(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+      location VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+      image_url VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+      tags TEXT COLLATE utf8mb4_unicode_ci,
+      is_cataloged TINYINT(1) DEFAULT 0,
+      is_digitized TINYINT(1) DEFAULT 0,
+      needs_repair TINYINT(1) DEFAULT 0,
+      created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      FULLTEXT KEY idx_artifact_fulltext (name, description, tags),
+      FULLTEXT KEY name (name, description, tags)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const [columns] = await connection.query(`
+    SELECT DATA_TYPE, COLUMN_TYPE
+    FROM information_schema.COLUMNS
+    WHERE table_schema = DATABASE()
+      AND table_name = 'artifacts'
+      AND column_name = 'id'
+  `);
+
+  const columnInfo = columns && columns[0];
+  if (columnInfo && columnInfo.DATA_TYPE !== 'bigint') {
+    await connection.query(`
+      ALTER TABLE artifacts
+      MODIFY id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT
+    `);
+  }
+};
+
+const normalizeNumericId = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const raw = String(value).trim();
+  if (!raw || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  try {
+    const candidate = BigInt(raw);
+    if (candidate < 1n || candidate > MAX_UNSIGNED_BIGINT) {
+      return null;
+    }
+    return raw;
+  } catch (err) {
+    return null;
+  }
+};
+
+const toSheetNameMap = (workbook) => {
+  return workbook.SheetNames.reduce((acc, sheetName) => {
+    acc[sheetName.toLowerCase()] = sheetName;
+    return acc;
+  }, {});
+};
+
+const pickValue = (row, candidates) => {
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) {
+      const raw = row[key];
+      if (raw === null || raw === undefined) {
+        continue;
+      }
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      } else if (raw !== '') {
+        return raw;
+      }
+    }
+  }
+  return null;
+};
+
+const buildRelationMap = (rows, keyCandidates, valueCandidates) => {
+  const map = new Map();
+  for (const row of rows) {
+    const key = pickValue(row, keyCandidates);
+    const value = pickValue(row, valueCandidates);
+    if (!key || !value || map.has(String(key))) {
+      continue;
+    }
+    map.set(String(key), value);
+  }
+  return map;
+};
+
+// Graph export definitions describe each worksheet we want to produce.
+const GRAPH_NODE_EXPORTS = [
+  {
+    sheet: 'Artifacts',
+    headers: ['artifact_id', 'name', 'description', 'tags', 'isCataloged', 'isDigitized', 'needsRepair'],
+    query: `
+      MATCH (a:Artifact)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             a.name AS name,
+             a.description AS description,
+             a.tags AS tags,
+             a.isCataloged AS isCataloged,
+             a.isDigitized AS isDigitized,
+             a.needsRepair AS needsRepair
+      ORDER BY artifact_id
+    `
+  },
+  {
+    sheet: 'Categories',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (c:Category)
+      RETURN c.name AS name,
+             c.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'Eras',
+    headers: ['name', 'startYear', 'endYear'],
+    query: `
+      MATCH (e:Era)
+      RETURN e.name AS name,
+             e.startYear AS startYear,
+             e.endYear AS endYear
+      ORDER BY startYear, name
+    `
+  },
+  {
+    sheet: 'Locations',
+    headers: ['name', 'region', 'longitude', 'latitude'],
+    query: `
+      MATCH (l:Location)
+      RETURN l.name AS name,
+             l.region AS region,
+             l.longitude AS longitude,
+             l.latitude AS latitude
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'Materials',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (m:Material)
+      RETURN m.name AS name,
+             m.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'Dimensions',
+    headers: ['label', 'value', 'unit'],
+    query: `
+      MATCH (d:Dimension)
+      RETURN d.label AS label,
+             d.value AS value,
+             d.unit AS unit
+      ORDER BY label
+    `
+  },
+  {
+    sheet: 'DamageTypes',
+    headers: ['name', 'severity', 'description'],
+    query: `
+      MATCH (dg:DamageType)
+      RETURN dg.name AS name,
+             dg.severity AS severity,
+             dg.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'RestorationMethods',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (rm:RestorationMethod)
+      RETURN rm.name AS name,
+             rm.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'ReinforcementMethods',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (rf:ReinforcementMethod)
+      RETURN rf.name AS name,
+             rf.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'InspectionTechniques',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (it:InspectionTechnique)
+      RETURN it.name AS name,
+             it.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'ProtectiveMaterials',
+    headers: ['name', 'description'],
+    query: `
+      MATCH (pm:ProtectiveMaterial)
+      RETURN pm.name AS name,
+             pm.description AS description
+      ORDER BY name
+    `
+  },
+  {
+    sheet: 'InspectionMetrics',
+    headers: ['name', 'unit', 'idealRange'],
+    query: `
+      MATCH (im:InspectionMetric)
+      RETURN im.name AS name,
+             im.unit AS unit,
+             im.idealRange AS idealRange
+      ORDER BY name
+    `
+  }
+];
+
+const GRAPH_REL_EXPORTS = [
+  {
+    sheet: 'REL_HAS_CATEGORY',
+    headers: ['artifact_id', 'category_name'],
+    query: `
+      MATCH (a:Artifact)-[:HAS_CATEGORY]->(c:Category)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             c.name AS category_name
+      ORDER BY artifact_id, category_name
+    `
+  },
+  {
+    sheet: 'REL_BELONGS_TO_ERA',
+    headers: ['artifact_id', 'era_name'],
+    query: `
+      MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             e.name AS era_name
+      ORDER BY artifact_id, era_name
+    `
+  },
+  {
+    sheet: 'REL_STORED_AT',
+    headers: ['artifact_id', 'location_name'],
+    query: `
+      MATCH (a:Artifact)-[:STORED_AT]->(l:Location)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             l.name AS location_name
+      ORDER BY artifact_id, location_name
+    `
+  },
+  {
+    sheet: 'REL_MADE_OF',
+    headers: ['artifact_id', 'material_name'],
+    query: `
+      MATCH (a:Artifact)-[:MADE_OF]->(m:Material)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             m.name AS material_name
+      ORDER BY artifact_id, material_name
+    `
+  },
+  {
+    sheet: 'REL_HAS_DIMENSION',
+    headers: ['artifact_id', 'dimension_label'],
+    query: `
+      MATCH (a:Artifact)-[:HAS_DIMENSION]->(d:Dimension)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             d.label AS dimension_label
+      ORDER BY artifact_id, dimension_label
+    `
+  },
+  {
+    sheet: 'REL_HAS_DAMAGE',
+    headers: ['artifact_id', 'damage_name'],
+    query: `
+      MATCH (a:Artifact)-[:HAS_DAMAGE]->(dg:DamageType)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             dg.name AS damage_name
+      ORDER BY artifact_id, damage_name
+    `
+  },
+  {
+    sheet: 'REL_USES_RESTORATION',
+    headers: ['artifact_id', 'restoration_name'],
+    query: `
+      MATCH (a:Artifact)-[:USES_RESTORATION]->(rm:RestorationMethod)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             rm.name AS restoration_name
+      ORDER BY artifact_id, restoration_name
+    `
+  },
+  {
+    sheet: 'REL_USES_REINFORCEMENT',
+    headers: ['artifact_id', 'reinforcement_name'],
+    query: `
+      MATCH (a:Artifact)-[:USES_REINFORCEMENT]->(rf:ReinforcementMethod)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             rf.name AS reinforcement_name
+      ORDER BY artifact_id, reinforcement_name
+    `
+  },
+  {
+    sheet: 'REL_INSPECTED_BY',
+    headers: ['artifact_id', 'technique_name'],
+    query: `
+      MATCH (a:Artifact)-[:INSPECTED_BY]->(it:InspectionTechnique)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             it.name AS technique_name
+      ORDER BY artifact_id, technique_name
+    `
+  },
+  {
+    sheet: 'REL_PROTECTED_WITH',
+    headers: ['artifact_id', 'protective_material_name'],
+    query: `
+      MATCH (a:Artifact)-[:PROTECTED_WITH]->(pm:ProtectiveMaterial)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             pm.name AS protective_material_name
+      ORDER BY artifact_id, protective_material_name
+    `
+  },
+  {
+    sheet: 'REL_MEASURED_BY',
+    headers: ['artifact_id', 'metric_name'],
+    query: `
+      MATCH (a:Artifact)-[:MEASURED_BY]->(im:InspectionMetric)
+      RETURN coalesce(a.id, toString(id(a))) AS artifact_id,
+             im.name AS metric_name
+      ORDER BY artifact_id, metric_name
+    `
+  }
+];
+
+const safeSheetName = (name) => {
+  const cleaned = name.replace(/[\\/?*\[\]:]/g, '_').trim();
+  if (!cleaned) {
+    return 'Sheet';
+  }
+  return cleaned.length > 31 ? cleaned.slice(0, 31) : cleaned;
+};
+
+const toNativeValue = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (neo4j.isInt(value)) {
+    if (typeof value.inSafeRange === 'function' && !value.inSafeRange()) {
+      return value.toString();
+    }
+    return value.toNumber();
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => toNativeValue(item));
+  }
+  return value;
+};
+
+const formatExportValue = (value) => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => formatExportValue(item)).join('; ');
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return value;
+};
+
+const mapRecordToRow = (record, headers) => {
+  const row = {};
+  headers.forEach(header => {
+    const raw = record.has(header) ? record.get(header) : null;
+    row[header] = formatExportValue(toNativeValue(raw));
+  });
+  return row;
+};
+
+const runStructuredQuery = async (session, config) => {
+  const result = await session.run(config.query);
+  return result.records.map(record => mapRecordToRow(record, config.headers));
+};
+
+const buildWorksheet = (rows, headers) => {
+  if (!rows.length) {
+    return XLSX.utils.aoa_to_sheet([headers]);
+  }
+  return XLSX.utils.json_to_sheet(rows, { header: headers });
+};
+
 router.get('/export', async (req, res, next) => {
   const table = req.query.table || 'artifacts';
 
@@ -44,20 +451,32 @@ router.get('/export', async (req, res, next) => {
     return res.status(400).json({ message: '暂不支持导出该数据表' });
   }
 
-  try {
-    const [rows] = await mysqlPool.query(`SELECT * FROM ${table}`);
+  const session = neo4jDriver.session();
 
-    const worksheet = XLSX.utils.json_to_sheet(rows);
+  try {
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, table);
+
+    for (const config of GRAPH_NODE_EXPORTS) {
+      const rows = await runStructuredQuery(session, config);
+      const worksheet = buildWorksheet(rows, config.headers);
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(config.sheet));
+    }
+
+    for (const config of GRAPH_REL_EXPORTS) {
+      const rows = await runStructuredQuery(session, config);
+      const worksheet = buildWorksheet(rows, config.headers);
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(config.sheet));
+    }
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
 
-    res.setHeader('Content-Disposition', `attachment; filename=${table}-${Date.now()}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=knowledge-graph-${Date.now()}.xlsx`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     return res.send(buffer);
   } catch (error) {
     return next(error);
+  } finally {
+    await session.close();
   }
 });
 
@@ -74,37 +493,92 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
 
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    const sheetNameMap = toSheetNameMap(workbook);
+    const getRows = (target) => {
+      const resolvedName = sheetNameMap[target.toLowerCase()];
+      if (!resolvedName) {
+        return [];
+      }
+      const worksheet = workbook.Sheets[resolvedName];
+      return XLSX.utils.sheet_to_json(worksheet, { defval: null });
+    };
+
+    const artifactRows = getRows('artifacts');
+    const rows = artifactRows.length
+      ? artifactRows
+      : XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: null });
 
     if (!rows.length) {
       return res.status(400).json({ message: 'Excel文件为空或无法解析' });
     }
 
+    const categoryMap = buildRelationMap(
+      getRows('rel_has_category'),
+      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
+      ['category_name', 'categoryName', 'name']
+    );
+    const eraMap = buildRelationMap(
+      getRows('rel_belongs_to_era'),
+      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
+      ['era_name', 'eraName', 'name']
+    );
+    const locationMap = buildRelationMap(
+      getRows('rel_stored_at'),
+      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
+      ['location_name', 'locationName', 'name']
+    );
+
     const connection = await mysqlPool.getConnection();
 
     try {
+      await ensureArtifactsTable(connection);
       await connection.beginTransaction();
+
+      await connection.query('DELETE FROM artifacts');
+      await connection.query('ALTER TABLE artifacts AUTO_INCREMENT = 1');
 
       let inserted = 0;
       let updated = 0;
+      const processedKeys = new Set();
 
       for (const row of rows) {
+        const artifactKey = pickValue(row, ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id']);
         const normalized = {
-          name: row.name || row.名称 || '',
-          description: row.description || row.描述 || '',
-          category: row.category || row.类别 || null,
-          era: row.era || row.年代 || null,
-          location: row.location || row.地点 || null,
-          image_url: row.image_url || row.imageUrl || row.图片 || null,
+          name: pickValue(row, ['name', '名称']) || '',
+          description: pickValue(row, ['description', '描述']) || '',
+          category:
+            pickValue(row, ['category', '类别', 'category_name', 'categoryName']) ||
+            (artifactKey ? categoryMap.get(String(artifactKey)) : null),
+          era:
+            pickValue(row, ['era', '年代', 'era_name', 'eraName']) ||
+            (artifactKey ? eraMap.get(String(artifactKey)) : null),
+          location:
+            pickValue(row, ['location', '地点', 'location_name', 'locationName']) ||
+            (artifactKey ? locationMap.get(String(artifactKey)) : null),
+          image_url: pickValue(row, ['image_url', 'imageUrl', '图片']) || null,
           tags: normaliseTags(row.tags || row.标签),
           is_cataloged: parseBoolean(row.is_cataloged ?? row.已入藏 ?? row.已編目 ?? row.已编目),
           is_digitized: parseBoolean(row.is_digitized ?? row.已数字化 ?? row.已數字化),
           needs_repair: parseBoolean(row.needs_repair ?? row.需修复 ?? row.需修復)
         };
 
-        const id = row.id || row.ID || row.Id;
+        let id = normalizeNumericId(pickValue(row, ['id', 'ID', 'Id']));
+        if (!id && artifactKey) {
+          id = normalizeNumericId(artifactKey);
+        }
+
+        const dedupeKey = artifactKey
+          ? `artifact:${artifactKey}`
+          : normalized.name
+            ? `name:${normalized.name}|${normalized.location || ''}|${normalized.era || ''}`
+            : null;
+
+        if (dedupeKey && processedKeys.has(dedupeKey)) {
+          continue;
+        }
+        if (dedupeKey) {
+          processedKeys.add(dedupeKey);
+        }
 
         if (id) {
           const [result] = await connection.query(

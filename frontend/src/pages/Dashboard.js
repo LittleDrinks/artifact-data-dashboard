@@ -101,44 +101,63 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
     };
   };
   
-  const getLocationChartOption = () => {
-    return {
-      tooltip: {
-        trigger: 'item'
-      },
-      legend: {
-        orient: 'vertical',
-        left: 'left'
-      },
-      series: [
-        {
-          name: '文物地域分布',
-          type: 'pie',
-          radius: ['30%', '70%'],
-          center: ['60%', '50%'],
-          roseType: 'area',
-          data: stats.locationStats.map(item => ({
-            name: item.location,
-            value: item.count
-          }))
-        }
-      ]
-    };
-  };
-  
   const getEraChartOption = () => {
     const eraOrder = [
-      '新石器时代', '夏商周', '春秋战国', '秦汉', 
-      '三国两晋', '南北朝', '隋唐', '宋元', '明清'
+      '新石器时代',
+      '夏商周',
+      '春秋战国',
+      '秦汉',
+      '三国两晋',
+      '南北朝',
+      '隋唐',
+      '宋元',
+      '明清'
     ];
-    
-    // 按照历史顺序排序
-    const sortedEraStats = [...stats.eraStats].sort((a, b) => {
-      const indexA = eraOrder.indexOf(a.era);
-      const indexB = eraOrder.indexOf(b.era);
-      return indexA - indexB;
+
+    const orderTokens = eraOrder.map(label => label.replace(/(时代|时期|代)/g, ''));
+    const orderMap = new Map();
+    eraOrder.forEach((label, index) => {
+      orderMap.set(label, index);
+      orderMap.set(orderTokens[index], index);
     });
-    
+
+    const normalise = (value) => (value || '').trim();
+    const stripSuffix = (value) => normalise(value).replace(/(时代|时期|代)/g, '');
+    const fallbackBase = eraOrder.length * 10;
+
+    const sortedEraStats = stats.eraStats
+      .map((item, index) => {
+        const trimmed = normalise(item.era);
+        const stripped = stripSuffix(item.era);
+        let priority = fallbackBase + index;
+
+        if (orderMap.has(trimmed)) {
+          priority = orderMap.get(trimmed);
+        } else if (orderMap.has(stripped)) {
+          priority = orderMap.get(stripped);
+        } else {
+          const fuzzyIndex = orderTokens.findIndex(token => token && (trimmed.includes(token) || token.includes(trimmed)));
+          if (fuzzyIndex !== -1) {
+            priority = fuzzyIndex;
+          }
+        }
+
+        return {
+          ...item,
+          _priority: priority,
+          _label: trimmed || '未知年代'
+        };
+      })
+      .sort((a, b) => {
+        if (a._priority !== b._priority) {
+          return a._priority - b._priority;
+        }
+        return a._label.localeCompare(b._label);
+      });
+
+    const axisLabels = sortedEraStats.map(item => item._label);
+    const seriesData = sortedEraStats.map(item => item.count);
+
     return {
       tooltip: {
         trigger: 'axis'
@@ -154,7 +173,7 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
       },
       xAxis: {
         type: 'category',
-        data: sortedEraStats.map(item => item.era)
+        data: axisLabels
       },
       yAxis: {
         type: 'value'
@@ -163,7 +182,7 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
         {
           name: '文物数量',
           type: 'line',
-          data: sortedEraStats.map(item => item.count),
+          data: seriesData,
           markPoint: {
             data: [
               { type: 'max', name: '最大值' },
@@ -435,20 +454,10 @@ const Dashboard = () => {  const [loading, setLoading] = useState(true);
         </Col>
         
         {/* 分类饼图 */}
-        <Col xs={24} md={12}>
+        <Col xs={24}>
           <Card title="文物分类分布" className="dashboard-card">
             <ReactECharts 
               option={getCategoryChartOption()} 
-              style={{ height: '300px' }} 
-            />
-          </Card>
-        </Col>
-        
-        {/* 地域分布图 */}
-        <Col xs={24} md={12}>
-          <Card title="文物地域分布" className="dashboard-card">
-            <ReactECharts 
-              option={getLocationChartOption()} 
               style={{ height: '300px' }} 
             />
           </Card>

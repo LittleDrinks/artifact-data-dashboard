@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card, Radio, Spin, Alert, Select, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
+import 'echarts-wordcloud';
 import { getWordcloudData, getCategoriesWordcloud } from '../services/wordcloud.service';
 
 const { Option } = Select;

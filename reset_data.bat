@@ -1,0 +1,2 @@
+docker exec -i artifact-dashboard-mysql mysql -uroot -ppassword -e "DROP DATABASE IF EXISTS artifact_dashboard; CREATE DATABASE artifact_dashboard CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+docker exec -i artifact-dashboard-mysql mysql -uroot -ppassword artifact_dashboard < backend/scripts/init-mysql.sql
