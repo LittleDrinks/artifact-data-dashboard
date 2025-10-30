@@ -6,6 +6,53 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
+const MAX_FIELD_LENGTH = {
+  username: 50,
+  title: 100,
+  organization: 150,
+  bio: 500
+};
+
+const sanitizeField = (value, limit) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.length > limit ? trimmed.slice(0, limit) : trimmed;
+};
+
+let userProfileColumnsEnsured = false;
+
+const ensureUserProfileColumns = async () => {
+  if (userProfileColumnsEnsured) {
+    return;
+  }
+
+  const connection = await mysqlPool.getConnection();
+  try {
+    const ensureColumn = async (name, definition) => {
+      const [rows] = await connection.query('SHOW COLUMNS FROM users LIKE ?', [name]);
+      if (!rows.length) {
+        await connection.query(`ALTER TABLE users ADD COLUMN ${definition}`);
+      }
+    };
+
+    await ensureColumn('organization', 'organization VARCHAR(150) NULL AFTER role');
+    await ensureColumn('title', 'title VARCHAR(100) NULL AFTER organization');
+    await ensureColumn('bio', 'bio TEXT NULL AFTER title');
+
+    userProfileColumnsEnsured = true;
+  } catch (error) {
+    console.error('确保用户资料字段失败:', error);
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
 /**
  * @swagger
  * /api/auth/register:
@@ -196,9 +243,11 @@ router.get('/profile', authMiddleware, async (req, res) => {
     }
 
     const userId = req.user.id;
+
+    await ensureUserProfileColumns();
     
     const [users] = await mysqlPool.execute(
-      'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?',
+      'SELECT id, username, email, role, created_at, updated_at, organization, title, bio FROM users WHERE id = ?',
       [userId]
     );
 
@@ -206,7 +255,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: '未找到用户' });
     }
 
-  const user = users[0];
+    const user = users[0];
 
     const [activityRows] = await mysqlPool.execute(
       `SELECT action, timestamp, details
@@ -240,6 +289,156 @@ router.get('/profile', authMiddleware, async (req, res) => {
     res.status(200).json(profile);
   } catch (error) {
     console.error('获取用户信息错误:', error);
+    res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/profile:
+ *   put:
+ *     summary: 更新当前用户信息
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 maxLength: 50
+ *               organization:
+ *                 type: string
+ *                 maxLength: 150
+ *               title:
+ *                 type: string
+ *                 maxLength: 100
+ *               bio:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               confirmPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: 更新成功
+ *       400:
+ *         description: 请求参数错误
+ *       401:
+ *         description: 未授权
+ */
+router.put('/profile', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: '未授权访问' });
+    }
+
+    const userId = req.user.id;
+
+    await ensureUserProfileColumns();
+    const {
+      username,
+      organization,
+      title,
+      bio,
+      password,
+      confirmPassword
+    } = req.body || {};
+
+    if (password && password !== confirmPassword) {
+      return res.status(400).json({ message: '两次输入的密码不一致' });
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (username !== undefined) {
+      const sanitizedUsername = sanitizeField(username, MAX_FIELD_LENGTH.username);
+      if (!sanitizedUsername) {
+        return res.status(400).json({ message: '用户名不能为空' });
+      }
+      updates.push('username = ?');
+      params.push(sanitizedUsername);
+    }
+
+    if (organization !== undefined) {
+      updates.push('organization = ?');
+      params.push(sanitizeField(organization, MAX_FIELD_LENGTH.organization));
+    }
+
+    if (title !== undefined) {
+      updates.push('title = ?');
+      params.push(sanitizeField(title, MAX_FIELD_LENGTH.title));
+    }
+
+    if (bio !== undefined) {
+      updates.push('bio = ?');
+      params.push(sanitizeField(bio, MAX_FIELD_LENGTH.bio));
+    }
+
+    if (password) {
+      if (password.length < 8) {
+        return res.status(400).json({ message: '密码长度至少为8位' });
+      }
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+      updates.push('password_hash = ?');
+      params.push(hashedPassword);
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ message: '没有检测到需要更新的字段' });
+    }
+
+    updates.push('updated_at = ?');
+    params.push(new Date());
+    params.push(userId);
+
+    await mysqlPool.execute(
+      `UPDATE users
+       SET ${updates.join(', ')}
+       WHERE id = ?`,
+      params
+    );
+
+    if (req.user && updates.some(field => field.startsWith('username'))) {
+      req.user.username = params[updates.findIndex(field => field.startsWith('username'))];
+    }
+
+    if (req.user && updates.some(field => field.startsWith('password_hash'))) {
+      req.user.tokenVersion = (req.user.tokenVersion || 0) + 1;
+    }
+
+    const [users] = await mysqlPool.execute(
+      'SELECT id, username, email, role, created_at, updated_at, organization, title, bio FROM users WHERE id = ?',
+      [userId]
+    );
+
+    const updatedUser = users[0];
+
+    res.status(200).json({
+      message: '资料更新成功',
+      user: {
+        id: updatedUser.id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        createdAt: updatedUser.created_at,
+        updatedAt: updatedUser.updated_at,
+        organization: updatedUser.organization,
+        title: updatedUser.title,
+        bio: updatedUser.bio
+      }
+    });
+  } catch (error) {
+    console.error('更新用户信息错误:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: '用户名或邮箱已存在' });
+    }
     res.status(500).json({ message: '服务器内部错误' });
   }
 });

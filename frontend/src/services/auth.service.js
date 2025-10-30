@@ -88,10 +88,14 @@ export const getCurrentUser = () => {
       logout();
       return null;
     }
-    
-    const user = JSON.parse(localStorage.getItem('user'));
+
+    const storedUser = localStorage.getItem('user');
+    const parsedUser = storedUser ? JSON.parse(storedUser) : {};
+    const { exp, iat, ...tokenUser } = decoded;
+
     return {
-      ...user,
+      ...tokenUser,
+      ...parsedUser,
       tokenIsValid
     };
   } catch (error) {
@@ -107,6 +111,10 @@ export const getCurrentUser = () => {
  */
 export const getUserProfile = async () => {
   return axios.get(API_URL + 'profile');
+};
+
+export const updateUserProfile = async (payload) => {
+  return axios.put(API_URL + 'profile', payload);
 };
 
 /**

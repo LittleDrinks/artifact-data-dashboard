@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { Layout, Menu, Spin, message } from 'antd';
 import {
   DashboardOutlined,
@@ -59,6 +59,8 @@ function App() {
   }, [navigate, location.pathname]);
   
   // 处理菜单项点击
+  const isAdmin = user?.role === 'admin';
+
   const handleMenuClick = (e) => {
     switch (e.key) {
       case 'dashboard':
@@ -75,11 +77,14 @@ function App() {
         break;
       case 'chat':
         navigate('/chat');
-        break;      case 'profile':
+        break;
+      case 'profile':
         navigate('/profile');
         break;
       case 'debug':
-        navigate('/debug');
+        if (isAdmin) {
+          navigate('/debug');
+        }
         break;
       case 'login':
         navigate('/login');
@@ -102,6 +107,53 @@ function App() {
     message.success('已成功登出');
     navigate('/login');
   };
+
+  const menuItems = [
+    {
+      key: 'dashboard',
+      icon: <DashboardOutlined />,
+      label: '数据大屏',
+    },
+    {
+      key: 'search',
+      icon: <SearchOutlined />,
+      label: '关键词搜索',
+    },
+    {
+      key: 'wordcloud',
+      icon: <CloudOutlined />,
+      label: '词云分析',
+    },
+    {
+      key: 'knowledge-graph',
+      icon: <ShareAltOutlined />,
+      label: '知识图谱',
+    },
+    {
+      key: 'chat',
+      icon: <MessageOutlined />,
+      label: '智能问答',
+    },
+    {
+      key: 'profile',
+      icon: <UserOutlined />,
+      label: '个人信息',
+    }
+  ];
+
+  if (isAdmin) {
+    menuItems.push({
+      key: 'debug',
+      icon: <BugOutlined />,
+      label: '系统调试',
+    });
+  }
+
+  menuItems.push({
+    key: 'logout',
+    icon: <LogoutOutlined />,
+    label: '退出登录',
+  });
     // 获取当前激活的菜单项
   const getActiveMenuItem = () => {
     const path = location.pathname;
@@ -114,7 +166,9 @@ function App() {
     if (path === '/knowledge-graph') return 'knowledge-graph';
     if (path === '/chat') return 'chat';
     if (path === '/profile') return 'profile';
-    if (path === '/debug') return 'debug';
+    if (path === '/debug') {
+      return isAdmin ? 'debug' : 'dashboard';
+    }
     
     // 默认返回 dashboard
     return 'dashboard';
@@ -162,48 +216,9 @@ function App() {
           mode="inline"
           selectedKeys={[getActiveMenuItem()]}
           onClick={handleMenuClick}
-          items={[
-            {
-              key: 'dashboard',
-              icon: <DashboardOutlined />,
-              label: '数据大屏',
-            },
-            {
-              key: 'search',
-              icon: <SearchOutlined />,
-              label: '关键词搜索',
-            },
-            {
-              key: 'wordcloud',
-              icon: <CloudOutlined />,
-              label: '词云分析',
-            },
-            {
-              key: 'knowledge-graph',
-              icon: <ShareAltOutlined />,
-              label: '知识图谱',
-            },
-            {
-              key: 'chat',
-              icon: <MessageOutlined />,
-              label: '智能问答',
-            },
-            {              key: 'profile',
-              icon: <UserOutlined />,
-              label: '个人信息',
-            },
-            {
-              key: 'debug',
-              icon: <BugOutlined />,
-              label: '系统调试',
-            },
-            {
-              key: 'logout',
-              icon: <LogoutOutlined />,
-              label: '退出登录',
-            }
-          ]}
-        />      </Sider>
+          items={menuItems}
+        />
+      </Sider>
       <Layout className="site-layout" style={{ marginLeft: collapsed ? 80 : 200 }}>
         <Header className="site-layout-background" style={{ padding: 0, background: '#fff', position: 'sticky', top: 0, zIndex: 1 }}>
           <div style={{ marginLeft: 16 }}>
@@ -221,7 +236,10 @@ function App() {
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
-            <Route path="/debug" element={<Debug />} />
+            <Route
+              path="/debug"
+              element={isAdmin ? <Debug /> : <Navigate to="/" replace />}
+            />
             <Route path="*" element={<Dashboard />} />
           </Routes>
         </Content>
