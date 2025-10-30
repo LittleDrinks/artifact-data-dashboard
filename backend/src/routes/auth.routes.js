@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { mysqlPool } = require('../config/database');
+const { authMiddleware } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
@@ -188,20 +189,55 @@ router.post('/login', async (req, res) => {
  *       401:
  *         description: 未授权
  */
-router.get('/profile', async (req, res) => {
+router.get('/profile', authMiddleware, async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: '未授权访问' });
+    }
+
     const userId = req.user.id;
     
     const [users] = await mysqlPool.execute(
-      'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
+      'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ?',
       [userId]
     );
-    
+
     if (users.length === 0) {
       return res.status(404).json({ message: '未找到用户' });
     }
-    
-    res.status(200).json(users[0]);
+
+  const user = users[0];
+
+    const [activityRows] = await mysqlPool.execute(
+      `SELECT action, timestamp, details
+       FROM logs
+       WHERE user_id = ?
+       ORDER BY timestamp DESC
+       LIMIT 30`,
+      [userId]
+    );
+
+    const lastLoginRecord = activityRows.find(row => row.action === 'login');
+
+    const profile = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+      organization: user.organization ?? null,
+      title: user.title ?? null,
+      bio: user.bio ?? null,
+      lastLogin: lastLoginRecord ? lastLoginRecord.timestamp : null,
+      activities: activityRows.map(row => ({
+        action: row.action,
+        timestamp: row.timestamp,
+        details: row.details || null
+      }))
+    };
+
+    res.status(200).json(profile);
   } catch (error) {
     console.error('获取用户信息错误:', error);
     res.status(500).json({ message: '服务器内部错误' });

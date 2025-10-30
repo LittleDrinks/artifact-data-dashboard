@@ -1,7 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Avatar, Descriptions, Spin, Alert, message, Divider, List, Empty } from 'antd';
+import { Card, Form, Input, Button, Avatar, Descriptions, Spin, Alert, message, Divider, List, Empty, Tag, Space } from 'antd';
 import { UserOutlined, LockOutlined, EditOutlined, SaveOutlined } from '@ant-design/icons';
 import { getUserProfile } from '../services/auth.service';
+
+const activityLabelMap = {
+  login: '登录系统',
+  view_artifact: '查看文物',
+  search: '搜索操作',
+  export: '导出数据',
+  import: '导入数据'
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return '暂无记录';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '暂无记录';
+  }
+  return date.toLocaleString();
+};
 
 const Profile = () => {
   const [loading, setLoading] = useState(true);
@@ -164,8 +183,8 @@ const Profile = () => {
               <Descriptions.Item label="所属机构">{userProfile?.organization || '未设置'}</Descriptions.Item>
               <Descriptions.Item label="职称/职位">{userProfile?.title || '未设置'}</Descriptions.Item>
               <Descriptions.Item label="个人简介">{userProfile?.bio || '未设置个人简介'}</Descriptions.Item>
-              <Descriptions.Item label="注册时间">{new Date(userProfile?.createdAt).toLocaleString()}</Descriptions.Item>
-              <Descriptions.Item label="上次登录">{new Date(userProfile?.lastLogin).toLocaleString()}</Descriptions.Item>
+              <Descriptions.Item label="注册时间">{formatDateTime(userProfile?.createdAt)}</Descriptions.Item>
+              <Descriptions.Item label="上次登录">{formatDateTime(userProfile?.lastLogin)}</Descriptions.Item>
             </Descriptions>
             
             <div style={{ marginTop: 16, textAlign: 'right' }}>
@@ -185,8 +204,13 @@ const Profile = () => {
             renderItem={item => (
               <List.Item>
                 <List.Item.Meta
-                  title={`${item.action}`}
-                  description={new Date(item.timestamp).toLocaleString()}
+                  title={
+                    <Space size="small">
+                      <Tag color="blue">{activityLabelMap[item.action] || item.action}</Tag>
+                      <span>{formatDateTime(item.timestamp)}</span>
+                    </Space>
+                  }
+                  description={item.details || '无附加信息'}
                 />
               </List.Item>
             )}
