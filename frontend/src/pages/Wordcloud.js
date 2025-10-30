@@ -1,8 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Radio, Spin, Alert, Select, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import 'echarts-wordcloud';
 import { getWordcloudData, getCategoriesWordcloud } from '../services/wordcloud.service';
+
+const DEFAULT_ERAS = [
+  '新石器时代',
+  '商代',
+  '西周',
+  '春秋',
+  '战国',
+  '秦汉',
+  '隋唐',
+  '宋元',
+  '明清'
+];
 
 const { Option } = Select;
 
@@ -10,69 +22,140 @@ const Wordcloud = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [wordcloudData, setWordcloudData] = useState([]);
-  const [categoriesData, setCategoriesData] = useState({});
   const [filter, setFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [eraFilter, setEraFilter] = useState('');
   const [categories, setCategories] = useState([]);
-  const [eras, setEras] = useState([]);
-  
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  const eras = DEFAULT_ERAS;
+  const categoryWordcloudCache = useRef({});
+  const defaultWordcloudRef = useRef([]);
+  const hasSkippedInitialFilterEffect = useRef(false);
   // 加载所有类别和年代数据
   useEffect(() => {
-    const fetchFilters = async () => {
+    let isMounted = true;
+
+    const initialize = async () => {
       try {
-        const response = await getCategoriesWordcloud();
-        setCategoriesData(response.data);
-        
-        // 提取所有类别
-        setCategories(Object.keys(response.data));
-        
-        // 假设通过另一个API获取年代，这里模拟一些年代数据
-        setEras([
-          '新石器时代', '商代', '西周', '春秋', '战国',
-          '秦汉', '隋唐', '宋元', '明清'
+        setLoading(true);
+        setError(null);
+
+        const [filtersResult, wordcloudResult] = await Promise.allSettled([
+          getCategoriesWordcloud(),
+          getWordcloudData('', '')
         ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (filtersResult.status === 'fulfilled') {
+          const categoryMap = filtersResult.value?.data || {};
+          categoryWordcloudCache.current = categoryMap;
+          setCategories(Object.keys(categoryMap));
+        } else {
+          console.error('获取过滤选项失败:', filtersResult.reason);
+        }
+
+        if (wordcloudResult.status === 'fulfilled') {
+          const initialWordcloud = wordcloudResult.value?.data?.wordcloudData || [];
+          setWordcloudData(initialWordcloud);
+          defaultWordcloudRef.current = initialWordcloud;
+          setError(null);
+        } else {
+          console.error('初始化词云数据失败:', wordcloudResult.reason);
+          const errorMessage = wordcloudResult.reason?.response?.data?.message || '加载词云数据失败，请稍后重试';
+          setError(errorMessage);
+          setWordcloudData([]);
+        }
       } catch (err) {
-        console.error('获取过滤选项失败:', err);
-        setError('获取过滤选项失败，请稍后重试');
+        if (!isMounted) {
+          return;
+        }
+        console.error('初始化词云数据失败:', err);
+        const errorMessage = err.response?.data?.message || '加载词云数据失败，请稍后重试';
+        setError(errorMessage);
+        setWordcloudData([]);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+          setInitialDataLoaded(true);
+        }
       }
     };
-    
-    fetchFilters();
+
+    initialize();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
-  
-  // 根据筛选获取词云数据
-  const fetchWordcloudData = useCallback(async () => {
-    setLoading(true);
-    
-    try {
-      if (filter === 'all') {
-        const response = await getWordcloudData(categoryFilter, eraFilter);
-        setWordcloudData(response.data.wordcloudData);
-      } else if (filter === 'category' && categoriesData[categoryFilter]) {
-        // 使用预加载的类别词云数据
-        setWordcloudData(categoriesData[categoryFilter]);
-      } else {
-        // 如果选择特定类别但数据未加载，重新请求
-        const response = await getWordcloudData(categoryFilter, eraFilter);
-        setWordcloudData(response.data.wordcloudData);
-      }
-      
-      setError(null);
-    } catch (err) {
-      console.error('获取词云数据失败:', err);
-      setError('获取词云数据失败，请稍后重试');
-      setWordcloudData([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filter, categoryFilter, eraFilter, categoriesData]);
-  
-  // 当筛选条件变化时重新获取数据
+
   useEffect(() => {
-    fetchWordcloudData();
-  }, [fetchWordcloudData]);
-  
+    if (!initialDataLoaded) {
+      return;
+    }
+
+    if (!hasSkippedInitialFilterEffect.current) {
+      hasSkippedInitialFilterEffect.current = true;
+      if (filter === 'all' && !categoryFilter && !eraFilter) {
+        return;
+      }
+    }
+
+    if (filter === 'category' && !categoryFilter) {
+      if (categories.length > 0) {
+        setCategoryFilter(categories[0]);
+      }
+      return;
+    }
+
+    if (filter === 'era' && !eraFilter) {
+      if (eras.length > 0) {
+        setEraFilter(eras[0]);
+      }
+      return;
+    }
+
+    const fetchData = async () => {
+      if (filter === 'category' && categoryFilter && categoryWordcloudCache.current[categoryFilter]) {
+        setWordcloudData(categoryWordcloudCache.current[categoryFilter]);
+        setError(null);
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const response = await getWordcloudData(
+          filter === 'category' ? categoryFilter : '',
+          filter === 'era' ? eraFilter : ''
+        );
+        const data = response?.data?.wordcloudData || [];
+        setWordcloudData(data);
+        setError(null);
+
+        if (filter === 'category' && categoryFilter) {
+          categoryWordcloudCache.current = {
+            ...categoryWordcloudCache.current,
+            [categoryFilter]: data
+          };
+        }
+
+        if (filter === 'all' && !categoryFilter && !eraFilter) {
+          defaultWordcloudRef.current = data;
+        }
+      } catch (err) {
+        console.error('获取词云数据失败:', err);
+        setError('获取词云数据失败，请稍后重试');
+        setWordcloudData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [filter, categoryFilter, eraFilter, initialDataLoaded, categories, eras]);
   // 筛选类型变化处理
   const handleFilterChange = (e) => {
     setFilter(e.target.value);
@@ -81,6 +164,10 @@ const Wordcloud = () => {
     if (e.target.value === 'all') {
       setCategoryFilter('');
       setEraFilter('');
+      if (defaultWordcloudRef.current && defaultWordcloudRef.current.length) {
+        setWordcloudData(defaultWordcloudRef.current);
+        setError(null);
+      }
     } else if (e.target.value === 'category') {
       setCategoryFilter(categories[0] || '');
       setEraFilter('');
