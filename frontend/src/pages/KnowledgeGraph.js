@@ -13,10 +13,10 @@ const KnowledgeGraph = () => {
   const [entityDetailsVisible, setEntityDetailsVisible] = useState(false);
   const [entityDetailsLoading, setEntityDetailsLoading] = useState(false);
   const [entityDetails, setEntityDetails] = useState(null);
-  
+
   const svgRef = useRef(null);
   const simulationRef = useRef(null);
-  
+
   // 初始化加载图谱数据
   useEffect(() => {
     fetchGraphData();

@@ -8,6 +8,7 @@ class MCPService {
   constructor() {
     this.apiEndpoint = process.env.AI_API_ENDPOINT;
     this.apiKey = process.env.AI_API_KEY;
+    this.model = process.env.AI_MODEL || 'deepseek-r1'; // 默认使用 deepseek-r1
     this.headers = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.apiKey}`
@@ -18,9 +19,10 @@ class MCPService {
    * 发送问题到MCP大模型并获取回答
    * @param {string} question 用户问题
    * @param {Array} history 对话历史 [{role: 'user|assistant', content: '内容'}]
+   * @param {string} context 知识库上下文
    * @returns {Promise<Object>} 大模型回答
    */
-  async ask(question, history = []) {
+  async ask(question, history = [], context = '') {
     try {
       // 检查API配置
       if (!this.apiEndpoint || !this.apiKey) {
@@ -28,12 +30,31 @@ class MCPService {
         return this.simulateResponse(question, history);
       }
 
+      const messages = [];
+      
+      // 添加系统提示词和上下文
+      if (context) {
+        messages.push({ 
+          role: 'system', 
+          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。\n\n${context}` 
+        });
+      } else {
+        messages.push({
+          role: 'system',
+          content: '你是一个文物领域的智能助手。'
+        });
+      }
+
+      // 添加历史记录
+      messages.push(...history);
+      
+      // 添加当前问题
+      messages.push({ role: 'user', content: question });
+
       // 构建请求体
       const requestBody = {
-        messages: [
-          ...history,
-          { role: 'user', content: question }
-        ],
+        model: this.model,
+        messages: messages,
         temperature: 0.7,
         max_tokens: 800
       };
@@ -53,6 +74,116 @@ class MCPService {
       console.error('MCP API 调用失败:', error.message);
       // 如果API调用失败，使用模拟响应
       return this.simulateResponse(question, history);
+    }
+  }
+
+  /**
+   * 流式发送问题到MCP大模型
+   * @param {string} question 用户问题
+   * @param {Array} history 对话历史
+   * @param {string} context 知识库上下文
+   * @param {Function} onData 接收数据回调
+   * @param {Function} onEnd 结束回调
+   * @param {Function} onError 错误回调
+   */
+  async askStream(question, history = [], context = '', onData, onEnd, onError) {
+    try {
+      // 检查API配置
+      if (!this.apiEndpoint || !this.apiKey) {
+        console.warn('MCP API 配置缺失，使用模拟回答');
+        const response = this.simulateResponse(question, history);
+        onData(response.content);
+        onEnd();
+        return;
+      }
+
+      const messages = [];
+      
+      // 添加系统提示词和上下文
+      if (context) {
+        messages.push({ 
+          role: 'system', 
+          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。\n\n${context}` 
+        });
+      } else {
+        messages.push({
+          role: 'system',
+          content: '你是一个文物领域的智能助手。'
+        });
+      }
+
+      // 添加历史记录
+      messages.push(...history);
+      
+      // 添加当前问题
+      messages.push({ role: 'user', content: question });
+
+      // 构建请求体
+      const requestBody = {
+        model: this.model,
+        messages: messages,
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 2000
+      };
+
+      // 发送请求到MCP API
+      const response = await axios.post(this.apiEndpoint, requestBody, {
+        headers: this.headers,
+        responseType: 'stream',
+        timeout: 60000 // 60秒超时
+      });
+
+      let buffer = '';
+
+      response.data.on('data', chunk => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        // 保留最后一行，因为它可能是不完整的
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.trim() === '') continue;
+          if (line.startsWith('data: ')) {
+            const dataStr = line.replace('data: ', '').trim();
+            if (dataStr === '[DONE]') continue;
+            try {
+              const json = JSON.parse(dataStr);
+              const content = json.choices[0].delta.content;
+              if (content) onData(content);
+            } catch (e) {
+              // 忽略解析错误，可能是因为数据不完整（虽然我们已经处理了buffer，但仍需防范）
+              console.warn('JSON解析失败:', e.message, dataStr);
+            }
+          }
+        }
+      });
+
+      response.data.on('end', () => {
+        // 处理缓冲区中剩余的数据
+        if (buffer.trim() !== '') {
+           const line = buffer;
+           if (line.startsWith('data: ')) {
+            const dataStr = line.replace('data: ', '').trim();
+            if (dataStr !== '[DONE]') {
+              try {
+                const json = JSON.parse(dataStr);
+                const content = json.choices[0].delta.content;
+                if (content) onData(content);
+              } catch (e) {
+                console.warn('JSON解析失败(end):', e.message, dataStr);
+              }
+            }
+           }
+        }
+        onEnd();
+      });
+      
+      response.data.on('error', (err) => onError(err));
+
+    } catch (error) {
+      console.error('MCP API 流式调用失败:', error.message);
+      onError(error);
     }
   }
 

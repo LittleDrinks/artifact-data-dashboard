@@ -39,6 +39,11 @@ router.post('/ask', async (req, res) => {
       return res.status(400).json({ message: '问题不能为空' });
     }
     
+    // 设置SSE响应头
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
     // 生成会话ID或使用现有ID
     const sessionId = conversationId || `chat_${req.user.id}_${Date.now()}`;
     
@@ -60,34 +65,80 @@ router.post('/ask', async (req, res) => {
       }
     }
     
-    // 检查是否为知识图谱查询
+    // 尝试获取知识图谱数据
     const graphResponse = await handleGraphQueries(question);
+    let context = '';
+    let graphData = null;
+
     if (graphResponse) {
-      await saveConversation(sessionId, question, graphResponse.text, req.user.id);
-      return res.status(200).json({
-        answer: graphResponse.text,
+      graphData = graphResponse.data;
+      
+      // 构建上下文供大模型使用
+      const nodes = graphResponse.data.nodes;
+      const edges = graphResponse.data.edges;
+      
+      if (nodes.length > 0) {
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n.label);
+        
+        const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
+        const relations = edges.map(e => {
+          const source = nodeMap[e.source] || '未知';
+          const target = nodeMap[e.target] || '未知';
+          return `${source} ${e.label} ${target}`;
+        }).join('；');
+        
+        context = `检索到的相关信息：\n实体：${entities}\n关系：${relations}\n\n参考说明：${graphResponse.text}`;
+      }
+      
+      // 发送元数据
+      res.write(`event: metadata\n`);
+      res.write(`data: ${JSON.stringify({
         conversationId: sessionId,
-        source: 'knowledge_graph',
-        data: graphResponse.data
-      });
+        source: 'knowledge_graph_enhanced',
+        data: graphData
+      })}\n\n`);
+    } else {
+      // 发送元数据
+      res.write(`event: metadata\n`);
+      res.write(`data: ${JSON.stringify({
+        conversationId: sessionId,
+        source: 'mcp_model'
+      })}\n\n`);
     }
     
-    // 调用MCP大模型服务
-    const mcpResponse = await mcpService.ask(question, history);
+    let fullAnswer = '';
     
-    // 保存对话
-    await saveConversation(sessionId, question, mcpResponse.content, req.user.id);
+    // 调用MCP大模型服务，流式返回
+    await mcpService.askStream(question, history, context,
+      (content) => {
+        res.write(`event: message\n`);
+        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        fullAnswer += content;
+      },
+      async () => {
+        // 保存对话
+        await saveConversation(sessionId, question, fullAnswer, req.user.id);
+        res.write(`event: done\n`);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+      },
+      (error) => {
+        console.error('流式响应错误:', error);
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ message: '生成回答时出错' })}\n\n`);
+        res.end();
+      }
+    );
     
-    // 返回响应
-    res.status(200).json({
-      answer: mcpResponse.content,
-      conversationId: sessionId,
-      source: mcpResponse.metadata?.source || 'mcp_model',
-      intent: mcpResponse.intent
-    });
   } catch (error) {
     console.error('问答系统错误:', error);
-    res.status(500).json({ message: '服务器内部错误' });
+    // 如果还没发送过响应头，发送JSON错误
+    if (!res.headersSent) {
+      res.status(500).json({ message: '服务器内部错误' });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -143,19 +194,36 @@ router.get('/history', async (req, res) => {
       
       history = [];
       for (const key of keys) {
-        const owner = await redisClient.hGet(key, 'userId');
-        
-        // 仅包含属于该用户的会话
-        if (parseInt(owner) === userId) {
-          const convId = key.split(':')[1];
-          const createdAt = await redisClient.hGet(key, 'createdAt');
-          const messagesCount = await redisClient.lLen(`${key}:messages`);
+        // 跳过消息列表键，只处理会话元数据键
+        if (key.endsWith(':messages')) {
+          continue;
+        }
+
+        try {
+          // 检查键类型，确保是Hash
+          const type = await redisClient.type(key);
+          if (type !== 'hash') {
+            continue;
+          }
+
+          const owner = await redisClient.hGet(key, 'userId');
           
-          history.push({
-            conversationId: convId,
-            createdAt,
-            messagesCount
-          });
+          // 仅包含属于该用户的会话
+          if (owner && parseInt(owner) === userId) {
+            const convId = key.split(':')[1];
+            const createdAt = await redisClient.hGet(key, 'createdAt');
+            const messagesCount = await redisClient.lLen(`${key}:messages`);
+            
+            history.push({
+              conversationId: convId,
+              createdAt,
+              messagesCount
+            });
+          }
+        } catch (err) {
+          // 忽略类型错误或其他读取错误，继续处理下一个键
+          console.warn(`Skipping key ${key} due to error: ${err.message}`);
+          continue;
         }
       }
       
@@ -179,11 +247,11 @@ async function handleGraphQueries(question) {
   const session = neo4jDriver.session();
   
   try {
-    // 分析问题意图
-    const intent = mcpService.analyzeIntent(question);
-    if (intent !== 'knowledge_graph') {
-      return null;
-    }
+    // 移除严格的意图检查，让更多查询尝试检索图谱
+    // const intent = mcpService.analyzeIntent(question);
+    // if (intent !== 'knowledge_graph') {
+    //   return null;
+    // }
     
     // 根据问题中的关键词构建Cypher查询
     let cypherQuery = null;

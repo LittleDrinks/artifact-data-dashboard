@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input, Button, Card, List, Avatar, Spin, Divider, Empty, Alert } from 'antd';
+import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert } from 'antd';
 import { UserOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons';
-import { askQuestion, getChatHistory } from '../services/chat.service';
+import { getChatHistory } from '../services/chat.service';
 
 const { TextArea } = Input;
 
@@ -12,7 +12,8 @@ const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [conversationId, setConversationId] = useState(null);
-  const messagesEndRef = useRef(null);
+  const [streamingMessageId, setStreamingMessageId] = useState(null);
+  const chatMessagesRef = useRef(null);
   
   // 加载聊天历史
   useEffect(() => {
@@ -39,73 +40,175 @@ const Chat = () => {
   
   // 自动滚动到最新消息
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = chatMessagesRef.current;
+    if (!container) return;
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight <= 60;
+    if (isNearBottom) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages]);
   
-  // 发送问题
+  // 发送问题（流式）
   const handleSendQuestion = async () => {
     if (!inputValue.trim()) {
       return;
     }
-    
+
     const question = inputValue;
     setInputValue('');
-    
-    // 添加用户消息到列表
-    setMessages(prev => [
+
+    // 添加用户消息
+    setMessages(prev => ([
       ...prev,
       { role: 'user', content: question, timestamp: new Date().toISOString() }
-    ]);
-    
+    ]));
+
     setLoading(true);
-    
-    try {
-      const response = await askQuestion(question, conversationId);
-        // 添加系统回复到列表
-      setMessages(prev => [
-        ...prev,
-        { 
-          role: 'assistant', 
-          content: response.data.answer, 
-          timestamp: new Date().toISOString(),
-          source: response.data.source,
-          intent: response.data.intent,
-          // 如果有知识图谱数据，添加到消息中
-          data: response.data.data || null
-        }
-      ]);
-      
-      // 保存会话ID
-      if (response.data.conversationId) {
-        setConversationId(response.data.conversationId);
+
+    const assistantMessageId = `assistant_${Date.now()}`;
+    setMessages(prev => ([
+      ...prev,
+      {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        source: 'mcp_model'
       }
-      
+    ]));
+    setStreamingMessageId(assistantMessageId);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/chat/ask', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ question, conversationId })
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('无法建立流式连接');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentEvent = 'message';
+      let fullContent = '';
+      let currentSource = 'mcp_model';
+      let currentData = null;
+
+      const processEvent = (eventBlock) => {
+        const lines = eventBlock.split('\n');
+        lines.forEach(line => {
+          if (line.startsWith('event:')) {
+            currentEvent = line.replace('event:', '').trim();
+          } else if (line.startsWith('data:')) {
+            const dataStr = line.replace('data:', '').trim();
+            if (dataStr === '[DONE]') {
+              return;
+            }
+            try {
+              const data = JSON.parse(dataStr);
+              if (currentEvent === 'metadata') {
+                if (data.conversationId) {
+                  setConversationId(data.conversationId);
+                }
+                if (data.source) currentSource = data.source;
+                if (data.data) currentData = data.data;
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, source: currentSource, data: currentData }
+                    : msg
+                ));
+              } else if (currentEvent === 'message') {
+                if (data.content) {
+                  fullContent += data.content;
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  ));
+                }
+              } else if (currentEvent === 'error') {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: data.message || '生成回答时出错', isError: true }
+                    : msg
+                ));
+              }
+            } catch (e) {
+              console.error('解析流数据失败', e);
+            }
+          }
+        });
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let separatorIndex;
+        while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
+          const eventChunk = buffer.slice(0, separatorIndex);
+          buffer = buffer.slice(separatorIndex + 2);
+          if (eventChunk.trim()) {
+            processEvent(eventChunk.trim());
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        processEvent(buffer.trim());
+      }
+
       setError(null);
     } catch (err) {
       console.error('发送问题失败:', err);
       setError('发送问题失败，请稍后重试');
-      
-      // 添加错误消息
-      setMessages(prev => [
-        ...prev,
-        { 
-          role: 'assistant', 
-          content: '抱歉，我暂时无法回答您的问题，请稍后再试。', 
-          timestamp: new Date().toISOString(),
-          isError: true
-        }
-      ]);
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? { ...msg, content: '抱歉，我暂时无法回答您的问题，请稍后再试。', isError: true }
+          : msg
+      ));
     } finally {
+      setStreamingMessageId(null);
       setLoading(false);
     }
   };
   
   // 处理按键事件
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendQuestion();
     }
+  };
+
+  // 解析消息内容，分离思考过程（支持流式未闭合的思考段）
+  const parseMessageContent = (content) => {
+      if (!content) return { answer: '', isThinking: false };
+    const start = content.indexOf('<think>');
+    if (start === -1) {
+        return { answer: content.trim(), isThinking: false };
+    }
+    const end = content.indexOf('</think>');
+    if (end !== -1) {
+        const before = content.slice(0, start);
+        const after = content.slice(end + 8);
+        return {
+          answer: `${before}${after}`.trim(),
+          isThinking: false
+        };
+    }
+    return {
+        answer: content.slice(0, start).trim(),
+        isThinking: true
+    };
   };
   
   // 聊天消息列表
@@ -120,50 +223,65 @@ const Chat = () => {
     }
     
     return (
-      <List
-        itemLayout="horizontal"
-        dataSource={messages}
-        renderItem={(message, index) => (
-          <List.Item key={index} className={message.role === 'user' ? 'user-message' : 'assistant-message'}>
-            <List.Item.Meta
-              avatar={
-                message.role === 'user' ? (
-                  <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />
-                ) : (
-                  <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />
-                )
-              }
-              title={message.role === 'user' ? '我' : '智能助手'}              description={
-                <div>
-                  <div 
-                    className={`message-content ${message.isError ? 'message-error' : ''}`}
-                    style={{ whiteSpace: 'pre-wrap' }}
-                  >
-                    {message.content}
-                  </div>
-                  {message.source && (
-                    <div className="message-source" style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-                      {message.source === 'knowledge_graph' && '来源: 知识图谱'}
-                      {message.source === 'mcp_model' && '来源: 大模型'}
-                      {message.source === 'simulation' && '来源: 本地知识库'}
+      <div className="message-list">
+        {messages.map((message, index) => {
+          const isUser = message.role === 'user';
+          const { answer, isThinking } = parseMessageContent(message.content);
+          const isStreaming = !isUser && streamingMessageId === message.id && !message.isError;
+          
+          return (
+            <div key={message.id || index} className={`message-wrapper ${isUser ? 'message-wrapper-user' : 'message-wrapper-assistant'}`}>
+              {!isUser && (
+                <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a', marginRight: 8, flexShrink: 0 }} />
+              )}
+              
+              <div className={`message-bubble ${isUser ? 'user-bubble' : 'assistant-bubble'}`}>
+                <div className="message-header">
+                  <span className="message-sender">{isUser ? '我' : '智能助手'}</span>
+                  <span className="message-time">{new Date(message.timestamp).toLocaleTimeString()}</span>
+                </div>
+                
+                <div className={`message-content ${message.isError ? 'message-error' : ''}`}>
+                  {!isUser && isThinking && (
+                    <div className="think-spinner">
+                      <Spin size="small" />
                     </div>
                   )}
-                  {message.data && message.data.nodes && (
-                    <div className="message-graph-data" style={{ fontSize: '12px', color: '#1890ff', marginTop: '4px', cursor: 'pointer' }}>
-                      <a onClick={() => window.location.href = '/knowledge-graph'}>
-                        查看相关知识图谱 ({message.data.nodes.length}个实体, {message.data.edges.length}个关系)
-                      </a>
+                  {answer && (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{answer}</div>
+                  )}
+                  {isStreaming && (
+                    <div className="typing-indicator">
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
                     </div>
                   )}
                 </div>
-              }
-            />
-            <div className="message-time">
-              {new Date(message.timestamp).toLocaleString()}
+                
+                {!isUser && message.source && (
+                  <div className="message-footer">
+                    <span className="message-source">
+                      {message.source === 'knowledge_graph' && '来源: 知识图谱'}
+                      {message.source === 'mcp_model' && '来源: 大模型'}
+                      {message.source === 'simulation' && '来源: 本地知识库'}
+                    </span>
+                    {message.data && message.data.nodes && (
+                      <a className="message-link" onClick={() => window.location.href = '/knowledge-graph'}>
+                        查看图谱 ({message.data.nodes.length}节点)
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {isUser && (
+                <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff', marginLeft: 8, flexShrink: 0 }} />
+              )}
             </div>
-          </List.Item>
-        )}
-      />
+          );
+        })}
+      </div>
     );
   };
   
@@ -181,7 +299,7 @@ const Chat = () => {
       )}
       
       <div className="chat-container">
-        <div className="chat-messages">
+        <div className="chat-messages" ref={chatMessagesRef}>
           {initialLoading ? (
             <div style={{ textAlign: 'center', padding: '50px 0' }}>
               <Spin size="large" tip="加载对话历史中..." />
@@ -189,7 +307,6 @@ const Chat = () => {
           ) : (
             renderMessages()
           )}
-          <div ref={messagesEndRef} />
         </div>
         
         <Divider style={{ margin: '0' }} />
@@ -200,7 +317,7 @@ const Chat = () => {
             autoSize={{ minRows: 1, maxRows: 4 }}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             disabled={loading}
             className="chat-input-field"
           />
