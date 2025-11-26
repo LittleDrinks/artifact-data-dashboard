@@ -10,7 +10,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # 安装依赖
-RUN npm install --registry=https://registry.npmmirror.com
+RUN npm config set fetch-retry-maxtimeout 600000 \
+    && npm config set fetch-retry-mintimeout 10000 \
+    && npm install --registry=https://registry.npmmirror.com
 
 # 在开发模式下，代码会通过卷挂载进来，不需要COPY
 

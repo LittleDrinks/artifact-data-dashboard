@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Input, Button, Spin, Alert, Modal, Descriptions, Empty } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-// CytoscapeComponent 内部使用 Cytoscape 库，所以我们不需要直接导入 Cytoscape
-import CytoscapeComponent from 'react-cytoscapejs';
+import * as d3 from 'd3';
 import { getGraphData, getEntityDetails } from '../services/graph.service';
 
 const KnowledgeGraph = () => {
@@ -15,74 +14,20 @@ const KnowledgeGraph = () => {
   const [entityDetailsLoading, setEntityDetailsLoading] = useState(false);
   const [entityDetails, setEntityDetails] = useState(null);
   
-  const cyRef = useRef(null);
-  const layoutRef = useRef(null);
-  const runLayoutRef = useRef(null);
-  const scheduleLayoutRef = useRef(null);
-  const draggingNodesRef = useRef(new Set());
-  const draggedPositionsRef = useRef(new Map());
-  const layoutFrameRef = useRef(null);
-  const layoutScheduledRef = useRef(false);
-  const pendingLayoutOptionsRef = useRef(null);
-  const neighborMapRef = useRef(new Map());
-  const velocitiesRef = useRef(new Map());
-  const physicsFrameRef = useRef(null);
-  const physicsActiveRef = useRef(false);
-  const lastDragTimeRef = useRef(0);
-  const physicsConfigRef = useRef({
-    springLength: 140,
-    springCoeff: 0.0006,
-    repulsionStrength: 60000,
-    damping: 0.85,
-    timeStep: 0.03,
-    maxDisplacement: 12,
-    maxRepulsionDistance: 450,
-    centerStrength: 0.002,
-    settleDuration: 260
-  });
+  const svgRef = useRef(null);
+  const simulationRef = useRef(null);
   
   // 初始化加载图谱数据
   useEffect(() => {
     fetchGraphData();
   }, []);
 
-  // 清理Cytoscape实例
+  // 清理D3模拟
   useEffect(() => {
     return () => {
-      if (layoutFrameRef.current) {
-        cancelAnimationFrame(layoutFrameRef.current);
-        layoutFrameRef.current = null;
+      if (simulationRef.current) {
+        simulationRef.current.stop();
       }
-      if (physicsFrameRef.current) {
-        cancelAnimationFrame(physicsFrameRef.current);
-        physicsFrameRef.current = null;
-      }
-      physicsActiveRef.current = false;
-      layoutScheduledRef.current = false;
-      pendingLayoutOptionsRef.current = null;
-      draggingNodesRef.current.clear();
-      draggedPositionsRef.current.clear();
-      velocitiesRef.current.clear();
-      neighborMapRef.current = new Map();
-      if (layoutRef.current) {
-        try {
-          layoutRef.current.stop();
-        } catch (e) {
-          // ignore layout stop errors
-        }
-        layoutRef.current = null;
-      }
-      if (cyRef.current) {
-        try {
-          cyRef.current.stop?.();
-        } catch (e) {
-          // ignore stop errors
-        }
-        cyRef.current.destroy();
-        cyRef.current = null;
-      }
-      runLayoutRef.current = null;
-      scheduleLayoutRef.current = null;
     };
   }, []);
   
@@ -118,7 +63,7 @@ const KnowledgeGraph = () => {
     setEntityDetailsLoading(true);
     
     try {
-      const response = await getEntityDetails(node.data('type'), node.id());
+      const response = await getEntityDetails(node.type, node.id);
       setEntityDetails(response.data);
     } catch (err) {
       console.error('获取实体详情失败:', err);
@@ -127,574 +72,193 @@ const KnowledgeGraph = () => {
       setEntityDetailsLoading(false);
     }
   };
-  
-  // 配置cytoscape组件
-  const cytoscapeElements = useMemo(() => ([
-    ...graphData.nodes.map(node => ({
-      data: {
-        id: node.id,
-        label: node.label,
-        type: node.type
-      }
-    })),
-    ...graphData.edges.map(edge => ({
-      data: {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        label: edge.label
-      }
-    }))
-  ]), [graphData]);
 
-  const neighborMap = useMemo(() => {
-    const map = new Map();
-    graphData.edges.forEach(edge => {
-      const { source, target } = edge;
-      if (!map.has(source)) {
-        map.set(source, new Set());
-      }
-      if (!map.has(target)) {
-        map.set(target, new Set());
-      }
-      map.get(source).add(target);
-      map.get(target).add(source);
-    });
-    return map;
-  }, [graphData]);
-
-  useEffect(() => {
-    neighborMapRef.current = neighborMap;
-    velocitiesRef.current.clear();
-  }, [neighborMap]);
-  
-  // Cytoscape样式
-  const cytoscapeStylesheet = [
-    {
-      selector: 'node',
-      style: {
-        'background-color': '#666',
-        'label': 'data(label)',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'color': 'white',
-        'text-outline-width': 2,
-        'text-outline-color': '#666',
-        'font-size': 12,
-        'width': 40,
-        'height': 40
-      }
-    },
-    {
-      selector: 'node[type="artifact"]',
-      style: {
-        'background-color': '#1890ff',
-        'text-outline-color': '#1890ff'
-      }
-    },
-    {
-      selector: 'node[type="category"]',
-      style: {
-        'background-color': '#52c41a',
-        'text-outline-color': '#52c41a'
-      }
-    },
-    {
-      selector: 'node[type="era"]',
-      style: {
-        'background-color': '#fa8c16',
-        'text-outline-color': '#fa8c16'
-      }
-    },
-    {
-      selector: 'node[type="author"]',
-      style: {
-        'background-color': '#722ed1',
-        'text-outline-color': '#722ed1'
-      }
-    },
-    {
-      selector: 'node[type="location"]',
-      style: {
-        'background-color': '#eb2f96',
-        'text-outline-color': '#eb2f96'
-      }
-    },
-    {
-      selector: 'node[type="material"]',
-      style: {
-        'background-color': '#f5222d',
-        'text-outline-color': '#f5222d'
-      }
-    },
-    {
-      selector: 'edge',
-      style: {
-        'width': 2,
-        'line-color': '#ccc',
-        'target-arrow-color': '#ccc',
-        'target-arrow-shape': 'triangle',
-        'curve-style': 'bezier',
-        'label': 'data(label)',
-        'font-size': 10,
-        'text-rotation': 'autorotate',
-        'text-margin-y': -10,
-        'text-background-color': 'white',
-        'text-background-opacity': 1,
-        'text-background-padding': 2
-      }
-    }
-  ];
-  
-  // Cytoscape布局配置
-  const layoutConfig = {
-    name: 'cose',
-    animate: false,
-    refresh: 0,
-    nodeDimensionsIncludeLabels: true,
-    randomize: false,
-    nodeRepulsion: 8000,
-    idealEdgeLength: 100,
-    edgeElasticity: 100,
-    nestingFactor: 5,
-    gravity: 80,
-    numIter: 1000,
-    initialTemp: 200,
-    coolingFactor: 0.95,
-    minTemp: 1.0
-  };
-  
-  // 当图形组件初始化完成
-  const onCytoscapeInit = (cy) => {
-    cyRef.current = cy;
-
-    const cleanupLayout = () => {
-      if (layoutRef.current) {
-        try {
-          layoutRef.current.stop();
-        } catch (e) {
-          // ignore layout stop errors
-        }
-        layoutRef.current = null;
-      }
+  // 节点颜色映射
+  const getNodeColor = (type) => {
+    const colorMap = {
+      artifact: '#1890ff',
+      category: '#52c41a',
+      era: '#fa8c16',
+      author: '#722ed1',
+      location: '#eb2f96',
+      material: '#f5222d'
     };
-
-    const stopPhysicsLoop = () => {
-      if (physicsFrameRef.current) {
-        cancelAnimationFrame(physicsFrameRef.current);
-        physicsFrameRef.current = null;
-      }
-      physicsActiveRef.current = false;
-    };
-
-    const runPhysicsStep = () => {
-      const cyInstance = cyRef.current;
-      if (!cyInstance || cyInstance.destroyed()) {
-        return false;
-      }
-
-      const physicsConfig = physicsConfigRef.current;
-      const neighborSnapshot = neighborMapRef.current;
-      const velocities = velocitiesRef.current;
-      const dragging = draggingNodesRef.current;
-      const nodes = cyInstance.nodes();
-
-      if (!nodes || nodes.length === 0) {
-        return false;
-      }
-
-      const positions = new Map();
-      let sumX = 0;
-      let sumY = 0;
-      nodes.forEach(node => {
-        const pos = { ...node.position() };
-        positions.set(node.id(), pos);
-        sumX += pos.x;
-        sumY += pos.y;
-      });
-      const count = typeof nodes.length === 'number' ? nodes.length : nodes.size();
-      const centerX = count > 0 ? sumX / count : 0;
-      const centerY = count > 0 ? sumY / count : 0;
-
-      const updates = [];
-
-      nodes.forEach(node => {
-        const id = node.id();
-        const pos = positions.get(id);
-        if (!pos) {
-          return;
-        }
-
-        if (dragging.has(id) || node.grabbed()) {
-          velocities.set(id, { x: 0, y: 0 });
-          return;
-        }
-
-        let forceX = 0;
-        let forceY = 0;
-
-        nodes.forEach(other => {
-          if (other === node) {
-            return;
-          }
-          const otherPos = positions.get(other.id());
-          if (!otherPos) {
-            return;
-          }
-          const dx = pos.x - otherPos.x;
-          const dy = pos.y - otherPos.y;
-          let distSq = dx * dx + dy * dy;
-          if (distSq < 0.0001) {
-            distSq = 0.0001;
-          }
-          const dist = Math.sqrt(distSq);
-          if (dist > physicsConfig.maxRepulsionDistance) {
-            return;
-          }
-          const repulse = physicsConfig.repulsionStrength / distSq;
-          const normX = dx / dist;
-          const normY = dy / dist;
-          forceX += normX * repulse;
-          forceY += normY * repulse;
-        });
-
-        const neighbors = neighborSnapshot.get(id);
-        if (neighbors) {
-          neighbors.forEach(neighborId => {
-            const neighborPos = positions.get(neighborId);
-            if (!neighborPos) {
-              return;
-            }
-            const dx = neighborPos.x - pos.x;
-            const dy = neighborPos.y - pos.y;
-            let distSq = dx * dx + dy * dy;
-            if (distSq < 0.0001) {
-              distSq = 0.0001;
-            }
-            const dist = Math.sqrt(distSq);
-            const springForce = physicsConfig.springCoeff * (dist - physicsConfig.springLength);
-            const normX = dx / dist;
-            const normY = dy / dist;
-            forceX += normX * springForce;
-            forceY += normY * springForce;
-          });
-        }
-
-          if (physicsConfig.centerStrength) {
-            const centerForce = physicsConfig.centerStrength;
-            forceX += (centerX - pos.x) * centerForce;
-            forceY += (centerY - pos.y) * centerForce;
-          }
-
-        const velocity = velocities.get(id) || { x: 0, y: 0 };
-        velocity.x = (velocity.x + forceX * physicsConfig.timeStep) * physicsConfig.damping;
-        velocity.y = (velocity.y + forceY * physicsConfig.timeStep) * physicsConfig.damping;
-
-        if (!Number.isFinite(velocity.x)) {
-          velocity.x = 0;
-        }
-        if (!Number.isFinite(velocity.y)) {
-          velocity.y = 0;
-        }
-
-        const clampedX = Math.max(-physicsConfig.maxDisplacement, Math.min(physicsConfig.maxDisplacement, velocity.x));
-        const clampedY = Math.max(-physicsConfig.maxDisplacement, Math.min(physicsConfig.maxDisplacement, velocity.y));
-
-        velocity.x = clampedX;
-        velocity.y = clampedY;
-        velocities.set(id, velocity);
-
-        if (Math.abs(clampedX) > 0.01 || Math.abs(clampedY) > 0.01) {
-          updates.push({ node, x: pos.x + clampedX, y: pos.y + clampedY });
-        }
-      });
-
-      if (updates.length > 0) {
-        cyInstance.batch(() => {
-          updates.forEach(({ node, x, y }) => {
-            node.position({ x, y });
-          });
-        });
-        return true;
-      }
-
-      return false;
-    };
-
-    const physicsLoop = () => {
-      const cyInstance = cyRef.current;
-      if (!cyInstance || cyInstance.destroyed()) {
-        stopPhysicsLoop();
-        return;
-      }
-
-      const moved = runPhysicsStep();
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-      const draggingCount = draggingNodesRef.current.size;
-
-      if (draggingCount === 0 && !moved && now - lastDragTimeRef.current > physicsConfigRef.current.settleDuration) {
-        stopPhysicsLoop();
-        return;
-      }
-
-      physicsFrameRef.current = requestAnimationFrame(physicsLoop);
-    };
-
-    const ensurePhysicsLoop = () => {
-      if (physicsActiveRef.current) {
-        return;
-      }
-      physicsActiveRef.current = true;
-      physicsFrameRef.current = requestAnimationFrame(physicsLoop);
-    };
-
-    const runLayout = (options = {}) => {
-      if (cy.destroyed()) {
-        return;
-      }
-
-      const {
-        animate = true,
-        excludeIds = new Set(),
-        fitView = false
-      } = options;
-
-      const excluded = new Set(excludeIds);
-
-      cleanupLayout();
-
-      const nodes = cy.nodes();
-      const previousPositions = {};
-
-      nodes.forEach(node => {
-        previousPositions[node.id()] = { ...node.position() };
-      });
-
-      const layout = cy.layout(layoutConfig);
-      layoutRef.current = layout;
-
-      layout.once('layoutstop', () => {
-        if (layoutRef.current === layout) {
-          layoutRef.current = null;
-        }
-        if (cy.destroyed()) {
-          return;
-        }
-
-        velocitiesRef.current.clear();
-
-        if (animate) {
-          const targetPositions = {};
-          nodes.forEach(node => {
-            targetPositions[node.id()] = { ...node.position() };
-          });
-
-          cy.batch(() => {
-            nodes.forEach(node => {
-              if (excluded.has(node.id()) && node.grabbed()) {
-                return;
-              }
-              const stored = draggedPositionsRef.current.get(node.id()) || previousPositions[node.id()];
-              if (stored) {
-                node.position(stored);
-              }
-            });
-          });
-
-          nodes.forEach(node => {
-            if (excluded.has(node.id())) {
-              const stored = draggedPositionsRef.current.get(node.id()) || previousPositions[node.id()];
-              if (stored && !node.grabbed()) {
-                node.stop();
-                node.position(stored);
-              }
-              return;
-            }
-            const target = targetPositions[node.id()];
-            if (!target) {
-              return;
-            }
-            node.stop();
-            node.animate({ position: target }, {
-              duration: 450,
-              easing: 'ease-out'
-            });
-          });
-        } else if (excluded.size > 0) {
-          cy.batch(() => {
-            excluded.forEach(id => {
-              const node = cy.getElementById(id);
-              const stored = draggedPositionsRef.current.get(id) || previousPositions[id];
-              if (node && stored && !node.grabbed()) {
-                node.position(stored);
-              }
-            });
-          });
-        }
-
-        if (fitView) {
-          cy.fit(undefined, 50);
-        }
-      });
-
-      layout.run();
-    };
-
-    const scheduleLayout = (options = {}) => {
-      const merged = {
-        animate: options.animate !== undefined ? options.animate : (pendingLayoutOptionsRef.current?.animate ?? true),
-        fitView: options.fitView !== undefined ? options.fitView : (pendingLayoutOptionsRef.current?.fitView ?? false),
-        excludeIds: options.excludeIds !== undefined
-          ? new Set(options.excludeIds)
-          : (pendingLayoutOptionsRef.current?.excludeIds
-            ? new Set(pendingLayoutOptionsRef.current.excludeIds)
-            : new Set())
-      };
-
-      pendingLayoutOptionsRef.current = merged;
-
-      if (layoutScheduledRef.current) {
-        return;
-      }
-
-      layoutScheduledRef.current = true;
-
-      if (layoutFrameRef.current) {
-        cancelAnimationFrame(layoutFrameRef.current);
-      }
-
-      layoutFrameRef.current = requestAnimationFrame(() => {
-        layoutScheduledRef.current = false;
-        const opts = pendingLayoutOptionsRef.current || {};
-        if (!opts.excludeIds) {
-          opts.excludeIds = new Set();
-        }
-        pendingLayoutOptionsRef.current = null;
-        layoutFrameRef.current = null;
-        runLayout(opts);
-      });
-    };
-
-    const updateDragTime = () => {
-      lastDragTimeRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    };
-
-    runLayoutRef.current = runLayout;
-    scheduleLayoutRef.current = scheduleLayout;
-
-    const handleGrab = (evt) => {
-      const node = evt.target;
-      const id = node.id();
-      draggingNodesRef.current.add(id);
-      draggedPositionsRef.current.set(id, { ...node.position() });
-      velocitiesRef.current.set(id, { x: 0, y: 0 });
-      updateDragTime();
-      ensurePhysicsLoop();
-    };
-
-    const handleDrag = (evt) => {
-      const node = evt.target;
-      const id = node.id();
-      draggedPositionsRef.current.set(id, { ...node.position() });
-      velocitiesRef.current.set(id, { x: 0, y: 0 });
-      updateDragTime();
-      ensurePhysicsLoop();
-    };
-
-    const handleFree = (evt) => {
-      const node = evt.target;
-      const id = node.id();
-      draggingNodesRef.current.delete(id);
-      draggedPositionsRef.current.set(id, { ...node.position() });
-      velocitiesRef.current.set(id, { x: 0, y: 0 });
-      updateDragTime();
-      ensurePhysicsLoop();
-    };
-
-    const handleDestroy = () => {
-      cy.off('grab', 'node', handleGrab);
-      cy.off('drag', 'node', handleDrag);
-      cy.off('free', 'node', handleFree);
-      cy.off('tap', 'node');
-      cy.off('mouseover', 'node');
-      cy.off('mouseout', 'node');
-      if (layoutFrameRef.current) {
-        cancelAnimationFrame(layoutFrameRef.current);
-        layoutFrameRef.current = null;
-      }
-      stopPhysicsLoop();
-      layoutScheduledRef.current = false;
-      pendingLayoutOptionsRef.current = null;
-      cleanupLayout();
-      runLayoutRef.current = null;
-      scheduleLayoutRef.current = null;
-      draggingNodesRef.current.clear();
-      draggedPositionsRef.current.clear();
-      velocitiesRef.current.clear();
-      if (cyRef.current === cy) {
-        cyRef.current = null;
-      }
-    };
-
-    cy.on('destroy', handleDestroy);
-    cy.on('grab', 'node', handleGrab);
-    cy.on('drag', 'node', handleDrag);
-    cy.on('free', 'node', handleFree);
-
-    cy.on('tap', 'node', evt => {
-      handleNodeClick(evt.target);
-    });
-
-    cy.on('mouseover', 'node', e => {
-      e.target.style({
-        'border-width': 2,
-        'border-color': '#000'
-      });
-    });
-
-    cy.on('mouseout', 'node', e => {
-      e.target.style({
-        'border-width': 0
-      });
-    });
-
-    scheduleLayout({
-      animate: true,
-      excludeIds: new Set(),
-      fitView: true
-    });
-
-    updateDragTime();
-    ensurePhysicsLoop();
+    return colorMap[type] || '#666';
   };
 
+  // D3力导向图初始化和更新
   useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy || cy.destroyed()) {
+    if (!svgRef.current || graphData.nodes.length === 0) {
       return;
     }
-    if (graphData.nodes.length === 0) {
-      draggingNodesRef.current.clear();
-      draggedPositionsRef.current.clear();
-      velocitiesRef.current.clear();
-      return;
-    }
-    draggingNodesRef.current.clear();
-    draggedPositionsRef.current.clear();
-    velocitiesRef.current.clear();
-    if (scheduleLayoutRef.current) {
-      scheduleLayoutRef.current({
-        animate: true,
-        excludeIds: new Set(),
-        fitView: true
+
+    const width = 1000;
+    const height = 600;
+    
+    // 清空之前的内容
+    d3.select(svgRef.current).selectAll('*').remove();
+
+    const svg = d3.select(svgRef.current)
+      .attr('width', '100%')
+      .attr('height', height)
+      .attr('viewBox', [0, 0, width, height]);
+
+    // 添加缩放功能
+    const g = svg.append('g');
+    
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 4])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
       });
-    } else if (runLayoutRef.current) {
-      runLayoutRef.current({
-        animate: true,
-        excludeIds: new Set(),
-        fitView: true
-      });
-    }
+    
+    svg.call(zoom);
+
+    // 准备数据
+    const nodes = graphData.nodes.map(d => ({ ...d, x: width / 2, y: height / 2 }));
+    const links = graphData.edges.map(d => ({ ...d }));
+
+    // 创建力模拟
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links)
+        .id(d => d.id)
+        .distance(100)
+        .strength(0.5))
+      .force('charge', d3.forceManyBody()
+        .strength(-300)
+        .distanceMax(400))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('collision', d3.forceCollide().radius(30));
+
+    simulationRef.current = simulation;
+
+    // 创建箭头标记
+    svg.append('defs').selectAll('marker')
+      .data(['arrow'])
+      .join('marker')
+      .attr('id', 'arrow')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 25)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', '#ccc');
+
+    // 绘制连线
+    const link = g.append('g')
+      .selectAll('line')
+      .data(links)
+      .join('line')
+      .attr('stroke', '#ccc')
+      .attr('stroke-width', 2)
+      .attr('marker-end', 'url(#arrow)');
+
+    // 绘制连线标签
+    const linkLabel = g.append('g')
+      .selectAll('text')
+      .data(links)
+      .join('text')
+      .attr('class', 'link-label')
+      .attr('font-size', 10)
+      .attr('fill', '#666')
+      .attr('text-anchor', 'middle')
+      .text(d => d.label);
+
+    // 绘制节点
+    const node = g.append('g')
+      .selectAll('circle')
+      .data(nodes)
+      .join('circle')
+      .attr('r', 20)
+      .attr('fill', d => getNodeColor(d.type))
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 2)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        handleNodeClick(d);
+      })
+      .on('mouseover', function() {
+        d3.select(this)
+          .attr('stroke', '#000')
+          .attr('stroke-width', 3);
+      })
+      .on('mouseout', function() {
+        d3.select(this)
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 2);
+      })
+      .call(d3.drag()
+        .on('start', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on('drag', (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on('end', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }));
+
+    // 绘制节点标签
+    const label = g.append('g')
+      .selectAll('text')
+      .data(nodes)
+      .join('text')
+      .attr('class', 'node-label')
+      .attr('font-size', 12)
+      .attr('fill', '#333')
+      .attr('text-anchor', 'middle')
+      .attr('dy', 35)
+      .text(d => d.label)
+      .style('pointer-events', 'none');
+
+    // 更新位置
+    simulation.on('tick', () => {
+      link
+        .attr('x1', d => d.source.x)
+        .attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x)
+        .attr('y2', d => d.target.y);
+
+      linkLabel
+        .attr('x', d => (d.source.x + d.target.x) / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2);
+
+      node
+        .attr('cx', d => d.x)
+        .attr('cy', d => d.y);
+
+      label
+        .attr('x', d => d.x)
+        .attr('y', d => d.y);
+    });
+
+    // 初始缩放以适应视图
+    const bounds = g.node().getBBox();
+    const fullWidth = svgRef.current.clientWidth;
+    const fullHeight = height;
+    const midX = bounds.x + bounds.width / 2;
+    const midY = bounds.y + bounds.height / 2;
+    const scale = 0.9 / Math.max(bounds.width / fullWidth, bounds.height / fullHeight);
+    const translate = [fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY];
+    
+    setTimeout(() => {
+      svg.transition()
+        .duration(750)
+        .call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+    }, 100);
+
+    return () => {
+      simulation.stop();
+    };
   }, [graphData]);
 
   return (
@@ -734,14 +298,8 @@ const KnowledgeGraph = () => {
       ) : (
         <>
           {graphData.nodes.length > 0 ? (
-            <div className="knowledge-graph">
-              <CytoscapeComponent
-                elements={cytoscapeElements}
-                stylesheet={cytoscapeStylesheet}
-                layout={layoutConfig}
-                style={{ width: '100%', height: '600px' }}
-                cy={onCytoscapeInit}
-              />
+            <div className="knowledge-graph" style={{ border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden' }}>
+              <svg ref={svgRef} style={{ display: 'block', background: '#fafafa' }} />
             </div>
           ) : (
             <Empty description="暂无图谱数据" />
@@ -751,7 +309,7 @@ const KnowledgeGraph = () => {
       
       {/* 实体详情模态框 */}
       <Modal
-        title={selectedEntity ? `实体详情: ${selectedEntity.data('label')}` : '实体详情'}
+        title={selectedEntity ? `实体详情: ${selectedEntity.label}` : '实体详情'}
         open={entityDetailsVisible}
         onCancel={() => setEntityDetailsVisible(false)}
         footer={null}

@@ -165,3 +165,18 @@ code {
     height: 400px;
   }
 }
+
+/* D3 Graph Styles */
+.node-label {
+  font-family: sans-serif;
+  pointer-events: none;
+  text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+  user-select: none;
+}
+
+.link-label {
+  font-family: sans-serif;
+  pointer-events: none;
+  text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
+  user-select: none;
+}
