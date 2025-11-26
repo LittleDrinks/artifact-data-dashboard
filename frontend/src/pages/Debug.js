@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useReducer, useEffect } from 'react';
 import { Card, Button, Alert, Input, Space, Divider, Typography, Collapse, Upload, Select, message } from 'antd';
 import { DatabaseOutlined, HistoryOutlined, ApiOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
@@ -9,120 +9,122 @@ import { getCurrentUser } from '../services/auth.service';
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 
+const initialState = {
+  dbLoading: false,
+  activitiesLoading: false,
+  apiLoading: false,
+  importLoading: false,
+  exportLoading: false,
+  userInfo: null,
+  dbStatus: null,
+  activitiesStatus: null,
+  rawApiResponse: null,
+  apiUrl: '/api/stats/recent-activities?limit=5',
+  apiErrorDetails: null,
+  selectedTable: 'artifacts',
+  importFileList: [],
+  importResult: null
+};
+
+function debugReducer(state, action) {
+  switch (action.type) {
+    case 'SET_USER_INFO':
+      return { ...state, userInfo: action.payload };
+    case 'SET_LOADING':
+      return { ...state, [action.key]: action.value };
+    case 'SET_STATUS':
+      return { ...state, [action.key]: action.value };
+    case 'SET_API_URL':
+      return { ...state, apiUrl: action.payload };
+    case 'SET_SELECTED_TABLE':
+      return { ...state, selectedTable: action.payload };
+    case 'SET_IMPORT_FILE_LIST':
+      return { ...state, importFileList: action.payload };
+    case 'RESET_STATUS':
+      return { ...state, [action.key]: null };
+    default:
+      return state;
+  }
+}
+
 const Debug = () => {
-  // 为每个操作创建单独的loading状态
-  const [dbLoading, setDbLoading] = useState(false);
-  const [activitiesLoading, setActivitiesLoading] = useState(false);
-  const [apiLoading, setApiLoading] = useState(false);
-  
-  const [userInfo, setUserInfo] = useState(null);
-  const [dbStatus, setDbStatus] = useState(null);
-  const [activitiesStatus, setActivitiesStatus] = useState(null);
-  const [rawApiResponse, setRawApiResponse] = useState(null);
-  const [apiUrl, setApiUrl] = useState('/api/stats/recent-activities?limit=5');
-  const [apiErrorDetails, setApiErrorDetails] = useState(null);
-  const [selectedTable, setSelectedTable] = useState('artifacts');
-  const [importFileList, setImportFileList] = useState([]);
-  const [importResult, setImportResult] = useState(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
+  const [state, dispatch] = useReducer(debugReducer, initialState);
 
   useEffect(() => {
-    // 获取当前用户信息
     const user = getCurrentUser();
-    setUserInfo(user);
-  }, []);  const handleTestDbConnection = async () => {
+    dispatch({ type: 'SET_USER_INFO', payload: user });
+  }, []);
+
+  const handleTestDbConnection = async () => {
     try {
-      setDbLoading(true);
+      dispatch({ type: 'SET_LOADING', key: 'dbLoading', value: true });
       const response = await testDbConnection();
-      setDbStatus({
-        status: 'success',
-        data: response.data
-      });
+      dispatch({ type: 'SET_STATUS', key: 'dbStatus', value: { status: 'success', data: response.data } });
     } catch (err) {
-      setDbStatus({
-        status: 'error',
-        error: err.response?.data || err.message
-      });
+      dispatch({ type: 'SET_STATUS', key: 'dbStatus', value: { status: 'error', error: err.response?.data || err.message } });
     } finally {
-      setDbLoading(false);
+      dispatch({ type: 'SET_LOADING', key: 'dbLoading', value: false });
     }
   };
-  
-  // 清除数据库测试结果
+
   const clearDbStatus = () => {
-    setDbStatus(null);
-  };  const handleTestActivities = async () => {
+    dispatch({ type: 'RESET_STATUS', key: 'dbStatus' });
+  };
+
+  const handleTestActivities = async () => {
     try {
-      setActivitiesLoading(true);
+      dispatch({ type: 'SET_LOADING', key: 'activitiesLoading', value: true });
       const response = await testRecentActivities();
-      setActivitiesStatus({
-        status: 'success',
-        data: response.data
-      });
+      dispatch({ type: 'SET_STATUS', key: 'activitiesStatus', value: { status: 'success', data: response.data } });
     } catch (err) {
-      setActivitiesStatus({
-        status: 'error',
-        error: err.response?.data || err.message
-      });
+      dispatch({ type: 'SET_STATUS', key: 'activitiesStatus', value: { status: 'error', error: err.response?.data || err.message } });
     } finally {
-      setActivitiesLoading(false);
+      dispatch({ type: 'SET_LOADING', key: 'activitiesLoading', value: false });
     }
   };
-  
-  // 清除活动测试结果
+
   const clearActivitiesStatus = () => {
-    setActivitiesStatus(null);
+    dispatch({ type: 'RESET_STATUS', key: 'activitiesStatus' });
   };
+
   const handleRawApiCall = async () => {
     try {
-      setApiLoading(true);
-      setApiErrorDetails(null);
-      const response = await axios.get(apiUrl);
-      setRawApiResponse({
-        status: 'success',
-        statusCode: response.status,
-        data: response.data
-      });
+      dispatch({ type: 'SET_LOADING', key: 'apiLoading', value: true });
+      dispatch({ type: 'SET_STATUS', key: 'apiErrorDetails', value: null });
+      const response = await axios.get(state.apiUrl);
+      dispatch({ type: 'SET_STATUS', key: 'rawApiResponse', value: { status: 'success', statusCode: response.status, data: response.data } });
     } catch (err) {
-      setRawApiResponse({
-        status: 'error',
-        statusCode: err.response?.status,
-        error: err.response?.data || err.message
-      });
+      dispatch({ type: 'SET_STATUS', key: 'rawApiResponse', value: { status: 'error', statusCode: err.response?.status, error: err.response?.data || err.message } });
 
-      // 如果是数据库相关错误，尝试获取更详细的信息
       if (err.response?.data?.sqlMessage) {
-        setApiErrorDetails({
+        dispatch({ type: 'SET_STATUS', key: 'apiErrorDetails', value: {
           message: err.response.data.sqlMessage,
           code: err.response.data.code,
           sqlState: err.response.data.sqlState,
           stack: err.response.data.stack
-        });
+        }});
       }
-    } finally {      setApiLoading(false);
+    } finally {
+      dispatch({ type: 'SET_LOADING', key: 'apiLoading', value: false });
     }
   };
-  
-  // 清除API响应结果
+
   const clearRawApiResponse = () => {
-    setRawApiResponse(null);
+    dispatch({ type: 'RESET_STATUS', key: 'rawApiResponse' });
   };
 
   const handleExportExcel = async () => {
     try {
-      setExportLoading(true);
-      const response = await exportTableToExcel(selectedTable);
+      dispatch({ type: 'SET_LOADING', key: 'exportLoading', value: true });
+      const response = await exportTableToExcel(state.selectedTable);
       const blob = new Blob([response.data], {
-        type:
-          response.headers['content-type'] ||
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        type: response.headers['content-type'] || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       link.href = url;
-      link.download = `${selectedTable}-${timestamp}.xlsx`;
+      link.download = `${state.selectedTable}-${timestamp}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -132,44 +134,41 @@ const Debug = () => {
       console.error('导出失败:', err);
       message.error(err.response?.data?.message || '导出失败，请稍后重试');
     } finally {
-      setExportLoading(false);
+      dispatch({ type: 'SET_LOADING', key: 'exportLoading', value: false });
     }
   };
 
   const handleImportExcel = async () => {
-    if (!importFileList.length) {
+    if (!state.importFileList.length) {
       message.warning('请先选择需要导入的Excel文件');
       return;
     }
 
     try {
-      setImportLoading(true);
-  const uploadFile = importFileList[0];
-  const file = uploadFile.originFileObj || uploadFile;
-  const response = await importTableFromExcel(selectedTable, file);
-      setImportResult({ success: true, data: response.data });
+      dispatch({ type: 'SET_LOADING', key: 'importLoading', value: true });
+      const uploadFile = state.importFileList[0];
+      const file = uploadFile.originFileObj || uploadFile;
+      const response = await importTableFromExcel(state.selectedTable, file);
+      dispatch({ type: 'SET_STATUS', key: 'importResult', value: { success: true, data: response.data } });
       message.success('导入成功');
-      setImportFileList([]);
+      dispatch({ type: 'SET_IMPORT_FILE_LIST', payload: [] });
     } catch (err) {
       console.error('导入失败:', err);
-      setImportResult({
-        success: false,
-        error: err.response?.data || { message: err.message }
-      });
+      dispatch({ type: 'SET_STATUS', key: 'importResult', value: { success: false, error: err.response?.data || { message: err.message } } });
       message.error(err.response?.data?.message || '导入失败，请检查文件内容');
     } finally {
-      setImportLoading(false);
+      dispatch({ type: 'SET_LOADING', key: 'importLoading', value: false });
     }
   };
 
   const handleUploadBefore = (file) => {
-    setImportFileList([file]);
-    setImportResult(null);
+    dispatch({ type: 'SET_IMPORT_FILE_LIST', payload: [file] });
+    dispatch({ type: 'SET_STATUS', key: 'importResult', value: null });
     return false;
   };
 
   const handleUploadRemove = () => {
-    setImportFileList([]);
+    dispatch({ type: 'SET_IMPORT_FILE_LIST', payload: [] });
   };
 
   return (
@@ -179,21 +178,21 @@ const Debug = () => {
 
       <Divider orientation="left">用户信息</Divider>
       <Card>
-        {userInfo ? (
+        {state.userInfo ? (
           <div>
             <Paragraph>
-              <Text strong>用户名:</Text> {userInfo.username}
+              <Text strong>用户名:</Text> {state.userInfo.username}
             </Paragraph>
             <Paragraph>
-              <Text strong>角色:</Text> {userInfo.role}
+              <Text strong>角色:</Text> {state.userInfo.role}
             </Paragraph>
             <Paragraph>
-              <Text strong>用户ID:</Text> {userInfo.id}
+              <Text strong>用户ID:</Text> {state.userInfo.id}
             </Paragraph>
             <Paragraph>
               <Text strong>Token有效性:</Text>{' '}
-              <Text type={userInfo.tokenIsValid ? 'success' : 'danger'}>
-                {userInfo.tokenIsValid ? '有效' : '无效或已过期'}
+              <Text type={state.userInfo.tokenIsValid ? 'success' : 'danger'}>
+                {state.userInfo.tokenIsValid ? '有效' : '无效或已过期'}
               </Text>
             </Paragraph>
           </div>
@@ -203,22 +202,25 @@ const Debug = () => {
       </Card>
 
       <Divider orientation="left">数据库连接</Divider>
-      <Space direction="vertical" style={{ width: '100%' }}>        <Button
+      <Space direction="vertical" style={{ width: '100%' }}>
+        <Button
           type="primary"
           icon={<DatabaseOutlined />}
           onClick={handleTestDbConnection}
-          loading={dbLoading}
+          loading={state.dbLoading}
         >
           测试数据库连接
-        </Button>        {dbStatus && (
+        </Button>
+        {state.dbStatus && (
           <Card
             title="数据库连接测试结果"
             extra={<Button type="text" size="small" onClick={clearDbStatus}>×</Button>}
-          >            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={dbStatus.status === 'success' ? 'success' : 'danger'}>{dbStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
+          >
+            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={state.dbStatus.status === 'success' ? 'success' : 'danger'}>{state.dbStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
             <Collapse defaultActiveKey={['1']}>
               <Panel header="详细信息" key="1">
                 <pre style={{ maxHeight: 400, overflow: 'auto' }}>
-                  {JSON.stringify(dbStatus.status === 'success' ? dbStatus.data : dbStatus.error, null, 2)}
+                  {JSON.stringify(state.dbStatus.status === 'success' ? state.dbStatus.data : state.dbStatus.error, null, 2)}
                 </pre>
               </Panel>
             </Collapse>
@@ -227,23 +229,26 @@ const Debug = () => {
       </Space>
 
       <Divider orientation="left">最近活动API测试</Divider>
-      <Space direction="vertical" style={{ width: '100%' }}>        <Button
+      <Space direction="vertical" style={{ width: '100%' }}>
+        <Button
           type="primary"
           icon={<HistoryOutlined />}
           onClick={handleTestActivities}
-          loading={activitiesLoading}
+          loading={state.activitiesLoading}
         >
           测试最近活动API
-        </Button>        {activitiesStatus && (
+        </Button>
+        {state.activitiesStatus && (
           <Card
             title="最近活动API测试结果"
             extra={<Button type="text" size="small" onClick={clearActivitiesStatus}>×</Button>}
-          >            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={activitiesStatus.status === 'success' ? 'success' : 'danger'}>{activitiesStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
+          >
+            <Title level={4} style={{ margin: 0 }}>测试结果: <Text type={state.activitiesStatus.status === 'success' ? 'success' : 'danger'}>{state.activitiesStatus.status === 'success' ? '成功' : '失败'}</Text></Title>
             <Collapse defaultActiveKey={['1']}>
               <Panel header="详细信息" key="1">
                 <pre style={{ maxHeight: 400, overflow: 'auto' }}>
                   {JSON.stringify(
-                    activitiesStatus.status === 'success' ? activitiesStatus.data : activitiesStatus.error,
+                    state.activitiesStatus.status === 'success' ? state.activitiesStatus.data : state.activitiesStatus.error,
                     null,
                     2
                   )}
@@ -259,24 +264,27 @@ const Debug = () => {
         <Input
           addonBefore={<ApiOutlined />}
           placeholder="输入API URL，例如: /api/stats/recent-activities?limit=5"
-          value={apiUrl}
-          onChange={(e) => setApiUrl(e.target.value)}
+          value={state.apiUrl}
+          onChange={(e) => dispatch({ type: 'SET_API_URL', payload: e.target.value })}
           style={{ width: '100%' }}
-        />        <Button type="primary" onClick={handleRawApiCall} loading={apiLoading}>
+        />
+        <Button type="primary" onClick={handleRawApiCall} loading={state.apiLoading}>
           发送请求
-        </Button>{rawApiResponse && (
+        </Button>
+        {state.rawApiResponse && (
           <Card
             title="自定义API调用测试结果"
             extra={<Button type="text" size="small" onClick={clearRawApiResponse}>×</Button>}
-          ><Title level={4} style={{ margin: 0 }}>请求结果: <Text type={rawApiResponse.status === 'success' ? 'success' : 'danger'}>{rawApiResponse.statusCode} {rawApiResponse.status === 'success' ? '成功' : '失败'}</Text></Title>
-            {apiErrorDetails && (
+          >
+            <Title level={4} style={{ margin: 0 }}>请求结果: <Text type={state.rawApiResponse.status === 'success' ? 'success' : 'danger'}>{state.rawApiResponse.statusCode} {state.rawApiResponse.status === 'success' ? '成功' : '失败'}</Text></Title>
+            {state.apiErrorDetails && (
               <Alert
                 message="SQL错误详情"
                 description={
                   <div>
-                    <p><Text strong>错误消息:</Text> {apiErrorDetails.message}</p>
-                    <p><Text strong>错误代码:</Text> {apiErrorDetails.code}</p>
-                    <p><Text strong>SQL状态:</Text> {apiErrorDetails.sqlState}</p>
+                    <p><Text strong>错误消息:</Text> {state.apiErrorDetails.message}</p>
+                    <p><Text strong>错误代码:</Text> {state.apiErrorDetails.code}</p>
+                    <p><Text strong>SQL状态:</Text> {state.apiErrorDetails.sqlState}</p>
                   </div>
                 }
                 type="error"
@@ -288,7 +296,7 @@ const Debug = () => {
               <Panel header="响应数据" key="1">
                 <pre style={{ maxHeight: 400, overflow: 'auto' }}>
                   {JSON.stringify(
-                    rawApiResponse.status === 'success' ? rawApiResponse.data : rawApiResponse.error,
+                    state.rawApiResponse.status === 'success' ? state.rawApiResponse.data : state.rawApiResponse.error,
                     null,
                     2
                   )}
@@ -305,8 +313,8 @@ const Debug = () => {
           <Space>
             <Text strong>目标数据表：</Text>
             <Select
-              value={selectedTable}
-              onChange={setSelectedTable}
+              value={state.selectedTable}
+              onChange={(value) => dispatch({ type: 'SET_SELECTED_TABLE', payload: value })}
               options={[{ label: '文物信息（artifacts）', value: 'artifacts' }]}
               style={{ minWidth: 200 }}
             />
@@ -316,7 +324,7 @@ const Debug = () => {
             <Button
               icon={<DownloadOutlined />}
               onClick={handleExportExcel}
-              loading={exportLoading}
+              loading={state.exportLoading}
             >
               导出当前数据
             </Button>
@@ -324,7 +332,7 @@ const Debug = () => {
             <Upload
               beforeUpload={handleUploadBefore}
               onRemove={handleUploadRemove}
-              fileList={importFileList}
+              fileList={state.importFileList}
               accept=".xlsx,.xls"
               maxCount={1}
             >
@@ -334,21 +342,21 @@ const Debug = () => {
             <Button
               type="primary"
               onClick={handleImportExcel}
-              loading={importLoading}
-              disabled={!importFileList.length}
+              loading={state.importLoading}
+              disabled={!state.importFileList.length}
             >
               导入Excel
             </Button>
           </Space>
 
-          {importResult && (
+          {state.importResult && (
             <Card
               size="small"
-              title={importResult.success ? '导入成功' : '导入失败'}
-              headStyle={{ color: importResult.success ? '#52c41a' : '#ff4d4f' }}
+              title={state.importResult.success ? '导入成功' : '导入失败'}
+              headStyle={{ color: state.importResult.success ? '#52c41a' : '#ff4d4f' }}
             >
               <pre style={{ maxHeight: 300, overflow: 'auto', margin: 0 }}>
-                {JSON.stringify(importResult.success ? importResult.data : importResult.error, null, 2)}
+                {JSON.stringify(state.importResult.success ? state.importResult.data : state.importResult.error, null, 2)}
               </pre>
             </Card>
           )}

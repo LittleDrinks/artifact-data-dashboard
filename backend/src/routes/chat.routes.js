@@ -261,32 +261,37 @@ async function handleGraphQueries(question) {
     if (question.includes('四羊方尊') || question.includes('方尊')) {
       cypherQuery = `
         MATCH (a:Artifact)-[r]-(n)
-        WHERE a.name CONTAINS '方尊'
+        WHERE a.name CONTAINS $name
         RETURN a, r, n LIMIT 10
       `;
-      responseText = '四羊方尊是商代晚期的青铜礼器，因器身四面各有一只羊而得名，出土于湖南宁乡。它是中国商代青铜文化的代表作之一，具有很高的历史、艺术和科学价值。';
+      params.name = '方尊';
+      responseText = '四羊方尊是商代晚期的青铜礼器，因器身四面各有一只羊而得名，是中国商代青铜文化的代表作之一，具有很高的历史、艺术和科学价值。';
     } else if (question.includes('唐三彩') || question.includes('三彩')) {
       cypherQuery = `
         MATCH (a:Artifact)-[r]-(n)
-        WHERE a.name CONTAINS '三彩'
+        WHERE a.name CONTAINS $name
         RETURN a, r, n LIMIT 10
       `;
+      params.name = '三彩';
       responseText = '唐三彩是盛唐时期的彩陶艺术品，以黄、绿、白三色为主，也有褐、蓝、黑等色彩。主要产地在河南洛阳和陕西西安附近，多用于陪葬品，展现了唐代的社会生活和艺术风貌。';
     } else if (question.includes('商代') && question.includes('文物')) {
       cypherQuery = `
-        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: '商代'})
+        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: $era})
         OPTIONAL MATCH (a)-[r]-(n)
         WHERE n:Category OR n:Location
         RETURN a, r, n LIMIT 15
       `;
+      params.era = '商代';
       responseText = '商代(约前16世纪-前11世纪)的代表性文物主要有青铜礼器，如四羊方尊、司母戊鼎等；甲骨文；玉器和陶器等。这些文物体现了商代高度发达的青铜冶铸技术和礼制文化。';
     } else if (question.includes('西周') && question.includes('青铜器')) {
       cypherQuery = `
-        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: '西周'})
-        MATCH (a)-[:HAS_CATEGORY]->(c:Category {name: '青铜器'})
+        MATCH (a:Artifact)-[:BELONGS_TO_ERA]->(e:Era {name: $era})
+        MATCH (a)-[:HAS_CATEGORY]->(c:Category {name: $category})
         OPTIONAL MATCH (a)-[r]-(n)
         RETURN a, r, n LIMIT 15
       `;
+      params.era = '西周';
+      params.category = '青铜器';
       responseText = '西周(约前11世纪-前771年)青铜器继承了商代的传统，但造型更加庄重，纹饰更加写实。代表性器物有毛公鼎、散氏盘等，铭文内容增多，对研究西周历史、礼制具有重要价值。';
     } else {
       // 尝试一个更通用的查询

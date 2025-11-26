@@ -267,20 +267,29 @@ router.get('/test-recent-activities', async (req, res) => {
       
       joinResult = activities;
     } catch (err) {
+      console.error('JOIN查询失败:', err);
       error = {
         message: err.message,
-        stack: err.stack
+        stack: err.stack,
+        type: 'DatabaseError'
       };
       
       // 尝试不使用JOIN的查询
-      // 同样直接嵌入limit值
-      const [logsOnly] = await mysqlPool.execute(`
-        SELECT * FROM logs ORDER BY timestamp DESC LIMIT 5
-      `);
+      try {
+        const [logsOnly] = await mysqlPool.execute(`
+          SELECT * FROM logs ORDER BY timestamp DESC LIMIT 5
+        `);
         joinResult = {
-        logsOnly,
-        note: "JOIN查询失败，只显示logs表数据"
-      };
+          logsOnly,
+          warning: "由于数据库关联查询失败，仅显示原始日志数据。请检查users表和logs表的一致性。",
+          originalError: err.message
+        };
+      } catch (fallbackErr) {
+         joinResult = {
+            error: "无法获取日志数据",
+            details: fallbackErr.message
+         };
+      }
     }
     
     res.status(200).json({

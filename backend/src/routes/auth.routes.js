@@ -24,35 +24,6 @@ const sanitizeField = (value, limit) => {
   return trimmed.length > limit ? trimmed.slice(0, limit) : trimmed;
 };
 
-let userProfileColumnsEnsured = false;
-
-const ensureUserProfileColumns = async () => {
-  if (userProfileColumnsEnsured) {
-    return;
-  }
-
-  const connection = await mysqlPool.getConnection();
-  try {
-    const ensureColumn = async (name, definition) => {
-      const [rows] = await connection.query('SHOW COLUMNS FROM users LIKE ?', [name]);
-      if (!rows.length) {
-        await connection.query(`ALTER TABLE users ADD COLUMN ${definition}`);
-      }
-    };
-
-    await ensureColumn('organization', 'organization VARCHAR(150) NULL AFTER role');
-    await ensureColumn('title', 'title VARCHAR(100) NULL AFTER organization');
-    await ensureColumn('bio', 'bio TEXT NULL AFTER title');
-
-    userProfileColumnsEnsured = true;
-  } catch (error) {
-    console.error('确保用户资料字段失败:', error);
-    throw error;
-  } finally {
-    connection.release();
-  }
-};
-
 /**
  * @swagger
  * /api/auth/register:
@@ -244,8 +215,6 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
     const userId = req.user.id;
 
-    await ensureUserProfileColumns();
-    
     const [users] = await mysqlPool.execute(
       'SELECT id, username, email, role, created_at, updated_at, organization, title, bio FROM users WHERE id = ?',
       [userId]
@@ -339,7 +308,6 @@ router.put('/profile', authMiddleware, async (req, res) => {
 
     const userId = req.user.id;
 
-    await ensureUserProfileColumns();
     const {
       username,
       organization,
