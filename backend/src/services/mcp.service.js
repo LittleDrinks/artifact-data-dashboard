@@ -13,6 +13,15 @@ class MCPService {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.apiKey}`
     };
+
+    // 打印初始化日志，帮助调试
+    if (this.apiEndpoint) {
+      console.log(`[MCP] 服务已初始化`);
+      console.log(`[MCP] 模型: ${this.model}`);
+      console.log(`[MCP] 端点: ${this.apiEndpoint}`);
+    } else {
+      console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
+    }
   }
 
   /**
@@ -31,12 +40,12 @@ class MCPService {
       }
 
       const messages = [];
-      
+
       // 添加系统提示词和上下文
       if (context) {
-        messages.push({ 
-          role: 'system', 
-          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。\n\n${context}` 
+        messages.push({
+          role: 'system',
+          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。永远不要在回答中输出英文。\n\n${context}`
         });
       } else {
         messages.push({
@@ -47,7 +56,7 @@ class MCPService {
 
       // 添加历史记录
       messages.push(...history);
-      
+
       // 添加当前问题
       messages.push({ role: 'user', content: question });
 
@@ -90,20 +99,24 @@ class MCPService {
     try {
       // 检查API配置
       if (!this.apiEndpoint || !this.apiKey) {
-        console.warn('MCP API 配置缺失，使用模拟回答');
+        console.warn('[MCP] ⚠️ API 配置缺失，转为模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
         onEnd();
         return;
       }
 
+      console.log(`[MCP] 🚀 正在调用大模型: ${this.model}`);
+      console.log(`[MCP] 📡 端点: ${this.apiEndpoint}`);
+      console.log(`[MCP] ❓ 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
+
       const messages = [];
-      
+
       // 添加系统提示词和上下文
       if (context) {
         messages.push({ 
           role: 'system', 
-          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。\n\n${context}` 
+          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。永远不要在回答中输出英文。\n\n${context}` 
         });
       } else {
         messages.push({
@@ -182,7 +195,15 @@ class MCPService {
       response.data.on('error', (err) => onError(err));
 
     } catch (error) {
-      console.error('MCP API 流式调用失败:', error.message);
+      console.error(`[MCP] API 流式调用失败 (${this.apiEndpoint}):`, error.message);
+      
+      // 如果是连接错误，给出具体建议
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+        console.error('[MCP] 提示: 无法连接到 AI 服务。');
+        console.error('[MCP] 1. 如果在本地运行，请确保 .env 中 AI_API_ENDPOINT 为 http://localhost:11434/...');
+        console.error('[MCP] 2. 如果在 Docker 中运行，请确保使用 http://host.docker.internal:11434/... 且宿主机 Ollama 已启动');
+      }
+      
       onError(error);
     }
   }
@@ -194,6 +215,8 @@ class MCPService {
    * @returns {Object} 模拟响应
    */
   simulateResponse(question, history = []) {
+    console.log('[MCP] ⚠️ 正在生成模拟响应 (Simulation Mode)');
+
     // 简单的关键词匹配
     const patterns = {
       '文物': "文物是指从古至今具有历史、艺术和科学价值的遗物。中国的文物保护法规定，具有历史、艺术和科学价值的古文化遗址、古墓葬、古建筑、石窟寺等都属于文物。",

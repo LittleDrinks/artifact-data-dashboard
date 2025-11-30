@@ -34,8 +34,11 @@ services:
     container_name: artifact-dashboard-backend
     ports:
       - "3000:3000"
+    command: npm run dev
     env_file:
       - ./backend/.env
+    environment:
+      - NODE_ENV=development
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -46,6 +49,8 @@ services:
       - artifact-network
     restart: unless-stopped
     volumes:
+      - ./backend/src:/app/src
+      - ./backend/package.json:/app/package.json
       - ./backend/logs:/app/logs
       - ./backend/scripts:/app/scripts
 

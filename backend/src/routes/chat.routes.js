@@ -1,5 +1,5 @@
 const express = require('express');
-const { neo4jDriver, redisClient } = require('../config/database');
+const { neo4jDriver, redisClient, mysqlPool } = require('../config/database');
 const mcpService = require('../services/mcp.service');
 
 const router = express.Router();
@@ -67,11 +67,16 @@ router.post('/ask', async (req, res) => {
     
     // 尝试获取知识图谱数据
     const graphResponse = await handleGraphQueries(question);
+    // 尝试获取关系型数据库数据
+    const relationalData = await handleRelationalQueries(question);
+
     let context = '';
     let graphData = null;
+    let sources = [];
 
     if (graphResponse) {
       graphData = graphResponse.data;
+      sources.push('knowledge_graph');
       
       // 构建上下文供大模型使用
       const nodes = graphResponse.data.nodes;
@@ -88,24 +93,36 @@ router.post('/ask', async (req, res) => {
           return `${source} ${e.label} ${target}`;
         }).join('；');
         
-        context = `检索到的相关信息：\n实体：${entities}\n关系：${relations}\n\n参考说明：${graphResponse.text}`;
+        context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
       }
-      
-      // 发送元数据
-      res.write(`event: metadata\n`);
-      res.write(`data: ${JSON.stringify({
-        conversationId: sessionId,
-        source: 'knowledge_graph_enhanced',
-        data: graphData
-      })}\n\n`);
-    } else {
-      // 发送元数据
-      res.write(`event: metadata\n`);
-      res.write(`data: ${JSON.stringify({
-        conversationId: sessionId,
-        source: 'mcp_model'
-      })}\n\n`);
     }
+
+    if (relationalData) {
+      sources.push('relational_db');
+      context += `【文物档案信息】：\n${relationalData}\n\n`;
+    }
+    
+    // 打印检索到的上下文信息，方便调试
+    console.log('--- MCP Context Debug ---');
+    console.log('Question:', question);
+    console.log('Sources:', sources);
+    if (graphData) {
+      console.log('Graph Data Nodes:', graphData.nodes.length);
+      console.log('Graph Data Edges:', graphData.edges.length);
+    }
+    if (relationalData) {
+      console.log('Relational Data Preview:', relationalData.substring(0, 200) + (relationalData.length > 200 ? '...' : ''));
+    }
+    console.log('Full Context Length:', context.length);
+    console.log('-------------------------');
+
+    // 发送元数据
+    res.write(`event: metadata\n`);
+    res.write(`data: ${JSON.stringify({
+      conversationId: sessionId,
+      source: sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model',
+      data: graphData
+    })}\n\n`);
     
     let fullAnswer = '';
     
@@ -124,9 +141,13 @@ router.post('/ask', async (req, res) => {
         res.end();
       },
       (error) => {
-        console.error('流式响应错误:', error);
+        console.error('流式响应错误:', error.message);
         res.write(`event: error\n`);
-        res.write(`data: ${JSON.stringify({ message: '生成回答时出错' })}\n\n`);
+        // 返回更具体的错误信息，帮助前端判断
+        const errorMsg = error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' 
+          ? '无法连接到AI模型服务，请检查后端配置' 
+          : '生成回答时出错';
+        res.write(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
         res.end();
       }
     );
@@ -192,7 +213,7 @@ router.get('/history', async (req, res) => {
       const userConversationPattern = `chat:*`;
       const keys = await redisClient.keys(userConversationPattern);
       
-      history = [];
+      const sessions = [];
       for (const key of keys) {
         // 跳过消息列表键，只处理会话元数据键
         if (key.endsWith(':messages')) {
@@ -212,23 +233,35 @@ router.get('/history', async (req, res) => {
           if (owner && parseInt(owner) === userId) {
             const convId = key.split(':')[1];
             const createdAt = await redisClient.hGet(key, 'createdAt');
-            const messagesCount = await redisClient.lLen(`${key}:messages`);
             
-            history.push({
+            sessions.push({
               conversationId: convId,
-              createdAt,
-              messagesCount
+              createdAt
             });
           }
         } catch (err) {
-          // 忽略类型错误或其他读取错误，继续处理下一个键
           console.warn(`Skipping key ${key} due to error: ${err.message}`);
           continue;
         }
       }
       
       // 按创建时间降序排序
-      history.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      sessions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      // 如果没有会话，返回空消息列表
+      if (sessions.length === 0) {
+        history = { messages: [] };
+      } else {
+        // 获取最近一次会话的详情
+        const latestSession = sessions[0];
+        const conversationKey = `chat:${latestSession.conversationId}`;
+        const messages = await redisClient.lRange(`${conversationKey}:messages`, 0, -1);
+        
+        history = {
+          conversationId: latestSession.conversationId,
+          messages: messages.map(msg => JSON.parse(msg))
+        };
+      }
     }
     
     res.status(200).json(history);
@@ -363,6 +396,52 @@ async function handleGraphQueries(question) {
     return null;
   } finally {
     await session.close();
+  }
+}
+
+/**
+ * 处理关系型数据库查询 (MySQL)
+ * @param {string} question 用户问题
+ * @returns {string|null} 格式化的文物信息或null
+ */
+async function handleRelationalQueries(question) {
+  try {
+    // 简单的关键词提取，排除常见停用词
+    const stopWords = ['什么', '是', '的', '吗', '有', '在', '哪里', '介绍', '一下', '知道', '了解', '告诉', '我'];
+    const keywords = question.split(/[\s,.?!，。？！]+/)
+      .filter(k => k.length > 1 && !stopWords.includes(k));
+    
+    if (keywords.length === 0) return null;
+
+    // 构建动态查询
+    // 我们希望找到匹配任意关键词的文物
+    const conditions = [];
+    const params = [];
+    
+    keywords.forEach(keyword => {
+      conditions.push(`(name LIKE ? OR description LIKE ? OR category LIKE ? OR era LIKE ? OR location LIKE ?)`);
+      const term = `%${keyword}%`;
+      params.push(term, term, term, term, term);
+    });
+
+    const sql = `
+      SELECT name, description, category, era, location 
+      FROM artifacts 
+      WHERE ${conditions.join(' OR ')}
+      LIMIT 5
+    `;
+
+    const [rows] = await mysqlPool.execute(sql, params);
+    
+    if (rows.length === 0) return null;
+
+    return rows.map(r => 
+      `- 名称: ${r.name}\n  类别: ${r.category}\n  年代: ${r.era}\n  出土地点: ${r.location}\n  描述: ${r.description}`
+    ).join('\n\n');
+
+  } catch (error) {
+    console.error('MySQL查询错误:', error);
+    return null;
   }
 }
 
