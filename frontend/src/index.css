@@ -310,3 +310,71 @@ code {
   text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff;
   user-select: none;
 }
+
+/* Knowledge Graph Animation Styles */
+.knowledge-graph svg {
+  transition: background-color 0.3s ease;
+}
+
+.node-group {
+  transition: transform 0.1s ease-out;
+}
+
+.node-circle {
+  transition: filter 0.2s ease, r 0.2s ease;
+  will-change: transform, filter, r;
+}
+
+.node-outer {
+  transition: stroke-opacity 0.2s ease, r 0.2s ease;
+  will-change: stroke-opacity, r;
+}
+
+/* Pulse animation for node click */
+@keyframes nodePulse {
+  0% {
+    r: 25;
+    stroke-opacity: 0.8;
+  }
+  100% {
+    r: 45;
+    stroke-opacity: 0;
+  }
+}
+
+/* Glow animation for hover */
+@keyframes nodeGlow {
+  0% {
+    filter: drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+  100% {
+    filter: drop-shadow(0 0 2px currentColor);
+  }
+}
+
+/* Link highlight animation */
+.links line {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease, stroke-opacity 0.2s ease;
+  will-change: stroke, stroke-width, stroke-opacity;
+}
+
+/* Link label animation */
+.link-labels text {
+  transition: opacity 0.2s ease, fill 0.2s ease;
+  will-change: opacity, fill;
+}
+
+/* Labels animation */
+.labels text {
+  transition: opacity 0.3s ease;
+  will-change: opacity;
+}
+
+/* Improve SVG rendering performance */
+.knowledge-graph svg {
+  shape-rendering: geometricPrecision;
+  text-rendering: optimizeLegibility;
+}
