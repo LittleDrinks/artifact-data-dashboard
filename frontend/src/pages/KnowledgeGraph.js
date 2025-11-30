@@ -211,10 +211,8 @@ const KnowledgeGraph = () => {
     simulationRef.current = simulation;
 
     // 创建箭头标记
-    defs.selectAll('marker')
-      .data(['arrow', 'arrow-hover'])
-      .join('marker')
-      .attr('id', d => d)
+    defs.append('marker')
+      .attr('id', 'arrow')
       .attr('viewBox', '0 -5 10 10')
       .attr('refX', 25)
       .attr('refY', 0)
@@ -223,7 +221,7 @@ const KnowledgeGraph = () => {
       .attr('orient', 'auto')
       .append('path')
       .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', d => d === 'arrow-hover' ? '#1890ff' : '#ccc');
+      .attr('fill', '#ccc');
 
     // 绘制连线 - 带入场动画
     const linkGroup = g.append('g').attr('class', 'links');
@@ -391,13 +389,13 @@ const KnowledgeGraph = () => {
           .attr('fill', '#888');
       })
       .call(d3.drag()
-        .on('start', (event, d) => {
+        .on('start', function(event, d) {
           if (!event.active) simulation.alphaTarget(0.1).restart();
           d.fx = d.x;
           d.fy = d.y;
           
           // 拖拽开始动画
-          d3.select(event.sourceEvent.target.parentNode)
+          d3.select(this)
             .select('.node-circle')
             .transition()
             .duration(100)
@@ -407,11 +405,11 @@ const KnowledgeGraph = () => {
           d.fx = event.x;
           d.fy = event.y;
         })
-        .on('end', (event, d) => {
+        .on('end', function(event, d) {
           if (!event.active) simulation.alphaTarget(0);
           
           // 拖拽结束动画
-          d3.select(event.sourceEvent.target.parentNode)
+          d3.select(this)
             .select('.node-circle')
             .transition()
             .duration(300)

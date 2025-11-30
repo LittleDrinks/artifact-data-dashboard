@@ -330,31 +330,6 @@ code {
   will-change: stroke-opacity, r;
 }
 
-/* Pulse animation for node click */
-@keyframes nodePulse {
-  0% {
-    r: 25;
-    stroke-opacity: 0.8;
-  }
-  100% {
-    r: 45;
-    stroke-opacity: 0;
-  }
-}
-
-/* Glow animation for hover */
-@keyframes nodeGlow {
-  0% {
-    filter: drop-shadow(0 0 2px currentColor);
-  }
-  50% {
-    filter: drop-shadow(0 0 8px currentColor);
-  }
-  100% {
-    filter: drop-shadow(0 0 2px currentColor);
-  }
-}
-
 /* Link highlight animation */
 .links line {
   transition: stroke 0.2s ease, stroke-width 0.2s ease, stroke-opacity 0.2s ease;
