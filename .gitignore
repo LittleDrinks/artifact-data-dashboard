@@ -51,4 +51,4 @@ Thumbs.db
 .github/
 
 # large resource files
-res/
+.reference/
