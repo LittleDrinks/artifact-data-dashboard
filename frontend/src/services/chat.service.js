@@ -28,3 +28,17 @@ export const getChatHistory = async (conversationId = null) => {
   
   return axios.get(API_URL + 'history', { params });
 };
+
+/**
+ * 清空对话历史
+ * @param {string} conversationId 会话ID（可选，不传则清空该用户所有会话）
+ * @returns {Promise}
+ */
+export const clearChatHistory = async (conversationId = null) => {
+  const params = {};
+  if (conversationId) {
+    params.conversationId = conversationId;
+  }
+
+  return axios.delete(API_URL + 'history', { params });
+};

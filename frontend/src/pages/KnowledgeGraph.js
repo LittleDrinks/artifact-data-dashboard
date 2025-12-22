@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, Input, Button, Spin, Alert, Modal, Descriptions, Empty } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import * as d3 from 'd3';
+import { useLocation } from 'react-router-dom';
 import { getGraphData, getEntityDetails } from '../services/graph.service';
 
 const KnowledgeGraph = () => {
@@ -16,9 +17,50 @@ const KnowledgeGraph = () => {
 
   const svgRef = useRef(null);
   const simulationRef = useRef(null);
+  const zoomRef = useRef(null);
+  const svgSelectionRef = useRef(null);
+  const gSelectionRef = useRef(null);
+  const hasAutoFitRef = useRef(false);
+  const focusNodeIdRef = useRef(null);
+  const location = useLocation();
 
   // 初始化加载图谱数据
   useEffect(() => {
+    // 1) 允许从 Chat 跳转携带图谱数据
+    const stateGraph = location.state && location.state.graphData;
+    if (stateGraph && stateGraph.nodes && stateGraph.edges) {
+      setGraphData(stateGraph);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    // 2) 允许通过 sessionStorage 传递（避免刷新丢失）
+    try {
+      const stored = sessionStorage.getItem('chatGraphData');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.nodes && parsed.edges) {
+          try {
+            const focusId = sessionStorage.getItem('chatGraphFocusNodeId');
+            focusNodeIdRef.current = focusId ? String(focusId) : null;
+            sessionStorage.removeItem('chatGraphFocusNodeId');
+          } catch (e) {
+            focusNodeIdRef.current = null;
+          }
+
+          setGraphData(parsed);
+          setLoading(false);
+          setError(null);
+          // 只消费一次
+          sessionStorage.removeItem('chatGraphData');
+          return;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
     fetchGraphData();
   }, []);
 
@@ -114,6 +156,10 @@ const KnowledgeGraph = () => {
     
     svg.call(zoom);
 
+    zoomRef.current = zoom;
+    svgSelectionRef.current = svg;
+    gSelectionRef.current = g;
+
     // 准备数据
     const nodes = graphData.nodes.map(d => ({ ...d, x: width / 2, y: height / 2 }));
     const links = graphData.edges.map(d => ({ ...d }));
@@ -172,14 +218,15 @@ const KnowledgeGraph = () => {
       .text(d => d.label);
 
     // 绘制节点
+    const focusId = focusNodeIdRef.current;
     const node = g.append('g')
       .selectAll('circle')
       .data(nodes)
       .join('circle')
       .attr('r', 20)
       .attr('fill', d => getNodeColor(d.type))
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 2)
+      .attr('stroke', d => (focusId && String(d.id) === String(focusId) ? '#000' : '#fff'))
+      .attr('stroke-width', d => (focusId && String(d.id) === String(focusId) ? 4 : 2))
       .style('cursor', 'pointer')
       .on('click', (event, d) => {
         event.stopPropagation();
@@ -190,10 +237,11 @@ const KnowledgeGraph = () => {
           .attr('stroke', '#000')
           .attr('stroke-width', 3);
       })
-      .on('mouseout', function() {
+      .on('mouseout', function(event, d) {
+        const isFocus = focusId && String(d.id) === String(focusId);
         d3.select(this)
-          .attr('stroke', '#fff')
-          .attr('stroke-width', 2);
+          .attr('stroke', isFocus ? '#000' : '#fff')
+          .attr('stroke-width', isFocus ? 4 : 2);
       })
       .call(d3.drag()
         .on('start', (event, d) => {
@@ -246,25 +294,98 @@ const KnowledgeGraph = () => {
         .attr('y', d => d.y);
     });
 
-    // 等待布局稳定后自动适应视图
-    simulation.on('end', () => {
-      const bounds = g.node().getBBox();
+    const fitToView = () => {
+      const gNode = g.node();
+      if (!gNode) return;
+      const bounds = gNode.getBBox();
       const fullWidth = svgRef.current.clientWidth || width;
       const fullHeight = height;
+      if (!bounds.width || !bounds.height) return;
+
       const midX = bounds.x + bounds.width / 2;
       const midY = bounds.y + bounds.height / 2;
       const scale = 0.8 / Math.max(bounds.width / fullWidth, bounds.height / fullHeight);
       const translate = [fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY];
-      
-      svg.transition()
-        .duration(750)
+
+      svg
+        .transition()
+        .duration(500)
         .call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+    };
+
+    // 等待布局稳定后自动适应视图：仅首次初始化执行一次，避免交互时频繁跳动
+    simulation.on('end', () => {
+      if (hasAutoFitRef.current) return;
+      hasAutoFitRef.current = true;
+      fitToView();
     });
+
+    // 暴露给快捷键使用
+    gSelectionRef.current.__fitToView = fitToView;
 
     return () => {
       simulation.stop();
     };
   }, [graphData]);
+
+  // 图谱快捷键（避免在输入框聚焦时触发）
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const active = document.activeElement;
+      const tag = active && active.tagName ? active.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea') return;
+
+      const svg = svgSelectionRef.current;
+      const zoom = zoomRef.current;
+      const g = gSelectionRef.current;
+      if (!svg || !zoom || !g) return;
+
+      const key = (e.key || '').toLowerCase();
+
+      if (key === 'f') {
+        e.preventDefault();
+        const fit = g.__fitToView;
+        if (typeof fit === 'function') fit();
+        return;
+      }
+
+      if (key === '0') {
+        e.preventDefault();
+        svg.transition().duration(200).call(zoom.transform, d3.zoomIdentity);
+        return;
+      }
+
+      if (key === '+' || key === '=') {
+        e.preventDefault();
+        svg.transition().duration(120).call(zoom.scaleBy, 1.15);
+        return;
+      }
+
+      if (key === '-' || key === '_') {
+        e.preventDefault();
+        svg.transition().duration(120).call(zoom.scaleBy, 1 / 1.15);
+        return;
+      }
+
+      const panStep = 40;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        svg.transition().duration(0).call(zoom.translateBy, panStep, 0);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        svg.transition().duration(0).call(zoom.translateBy, -panStep, 0);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        svg.transition().duration(0).call(zoom.translateBy, 0, panStep);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        svg.transition().duration(0).call(zoom.translateBy, 0, -panStep);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return (
     <Card title="文物知识图谱">

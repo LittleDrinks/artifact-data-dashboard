@@ -24,6 +24,45 @@ class MCPService {
     }
   }
 
+  sanitizeModelText(text) {
+    if (!text) return text;
+
+    // 过滤掉明显的“伪工具/伪函数调用”噪声（常见于某些模型的输出模式）
+    // 注意：这是保底措施，主要依赖系统提示词约束。
+    return text
+      .replace(/\bloadData\([^\)]*\)/g, '')
+      .replace(/\bfetch\([^\)]*\)/g, '')
+      .replace(/\bcall\w*Tool\([^\)]*\)/gi, '')
+      .replace(/<\/?script[^>]*>/gi, '')
+      // 常见内部类型词汇转为更符合中文习惯的表达
+      .replace(/\bartifact\b/gi, '文物')
+      .replace(/\bcategory\b/gi, '类别')
+      .replace(/\bera\b/gi, '年代')
+      .replace(/\blocation\b/gi, '地点')
+      .replace(/\bmaterial\b/gi, '材质')
+      .replace(/\bknowledge\s*graph\b/gi, '知识图谱')
+      .replace(/\n{4,}/g, '\n\n');
+  }
+
+  buildSystemPrompt(context) {
+    const baseRules = [
+      '你是一个文物领域的智能助手。',
+      '只输出中文。',
+      '避免使用英文单词；如不可避免，请用中文解释并尽量不直接输出英文。',
+      '严禁输出任何代码、函数调用、JSON、HTML、Markdown 代码块。',
+      "严禁输出类似 loadData('q') / fetch(...) 等伪函数调用。",
+      '回答必须优先、尽可能引用【检索上下文】中的事实。',
+      '如果【检索上下文】为空或确实无关，必须明确说“未在数据中找到”，不要编造具体实体、年代、地点、数值。',
+      '允许补充少量通用常识，但需用“常识补充：”开头，并避免具体细节。'
+    ].join('\n');
+
+    if (context) {
+      return `${baseRules}\n\n【检索上下文】\n${context}`;
+    }
+
+    return baseRules;
+  }
+
   /**
    * 发送问题到MCP大模型并获取回答
    * @param {string} question 用户问题
@@ -42,17 +81,10 @@ class MCPService {
       const messages = [];
 
       // 添加系统提示词和上下文
-      if (context) {
-        messages.push({
-          role: 'system',
-          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。永远不要在回答中输出英文。\n\n${context}`
-        });
-      } else {
-        messages.push({
-          role: 'system',
-          content: '你是一个文物领域的智能助手。'
-        });
-      }
+      messages.push({
+        role: 'system',
+        content: this.buildSystemPrompt(context)
+      });
 
       // 添加历史记录
       messages.push(...history);
@@ -64,8 +96,8 @@ class MCPService {
       const requestBody = {
         model: this.model,
         messages: messages,
-        temperature: 0.7,
-        max_tokens: 800
+        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
       };
 
       // 发送请求到MCP API
@@ -75,7 +107,7 @@ class MCPService {
       });
 
       return {
-        content: response.data.choices[0].message.content,
+        content: this.sanitizeModelText(response.data.choices[0].message.content),
         intent: response.data.choices[0].intent || 'general_chat',
         metadata: response.data.metadata || {}
       };
@@ -113,17 +145,10 @@ class MCPService {
       const messages = [];
 
       // 添加系统提示词和上下文
-      if (context) {
-        messages.push({ 
-          role: 'system', 
-          content: `你是一个文物领域的智能助手。请基于以下知识图谱数据回答用户的问题。如果数据不足，请使用你自己的知识补充，但要优先使用提供的数据。永远不要在回答中输出英文。\n\n${context}` 
-        });
-      } else {
-        messages.push({
-          role: 'system',
-          content: '你是一个文物领域的智能助手。'
-        });
-      }
+      messages.push({
+        role: 'system',
+        content: this.buildSystemPrompt(context)
+      });
 
       // 添加历史记录
       messages.push(...history);
@@ -136,8 +161,8 @@ class MCPService {
         model: this.model,
         messages: messages,
         stream: true,
-        temperature: 0.7,
-        max_tokens: 2000
+        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
       };
 
       // 发送请求到MCP API
@@ -163,7 +188,7 @@ class MCPService {
             try {
               const json = JSON.parse(dataStr);
               const content = json.choices[0].delta.content;
-              if (content) onData(content);
+              if (content) onData(this.sanitizeModelText(content));
             } catch (e) {
               // 忽略解析错误，可能是因为数据不完整（虽然我们已经处理了buffer，但仍需防范）
               console.warn('JSON解析失败:', e.message, dataStr);
@@ -182,7 +207,7 @@ class MCPService {
               try {
                 const json = JSON.parse(dataStr);
                 const content = json.choices[0].delta.content;
-                if (content) onData(content);
+                if (content) onData(this.sanitizeModelText(content));
               } catch (e) {
                 console.warn('JSON解析失败(end):', e.message, dataStr);
               }

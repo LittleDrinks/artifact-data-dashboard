@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert } from 'antd';
-import { UserOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons';
-import { getChatHistory } from '../services/chat.service';
+import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { getChatHistory, clearChatHistory } from '../services/chat.service';
 
 const { TextArea } = Input;
 
@@ -14,6 +15,7 @@ const Chat = () => {
   const [conversationId, setConversationId] = useState(null);
   const [streamingMessageId, setStreamingMessageId] = useState(null);
   const chatMessagesRef = useRef(null);
+  const navigate = useNavigate();
   
   // 加载聊天历史
   useEffect(() => {
@@ -180,6 +182,40 @@ const Chat = () => {
       setLoading(false);
     }
   };
+
+  const handleClearHistory = async () => {
+    try {
+      setLoading(true);
+      await clearChatHistory();
+      setMessages([]);
+      setConversationId(null);
+      setError(null);
+    } catch (err) {
+      console.error('清空聊天记录失败:', err);
+      setError('清空聊天记录失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openGraphFromMessage = (message) => {
+    try {
+      if (message?.data) {
+        sessionStorage.setItem('chatGraphData', JSON.stringify(message.data));
+
+        const focusId =
+          message.data.nodes?.find(n => n.type === 'artifact')?.id ||
+          message.data.nodes?.[0]?.id ||
+          null;
+        if (focusId) {
+          sessionStorage.setItem('chatGraphFocusNodeId', String(focusId));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    navigate('/knowledge-graph?from=chat');
+  };
   
   // 处理按键事件
   const handleKeyDown = (e) => {
@@ -267,7 +303,7 @@ const Chat = () => {
                       {message.source === 'simulation' && '来源: 本地知识库'}
                     </span>
                     {message.data && message.data.nodes && (
-                      <a className="message-link" onClick={() => window.location.href = '/knowledge-graph'}>
+                      <a className="message-link" onClick={() => openGraphFromMessage(message)}>
                         查看图谱 ({message.data.nodes.length}节点)
                       </a>
                     )}
@@ -286,7 +322,21 @@ const Chat = () => {
   };
   
   return (
-    <Card title="智能问答" style={{ height: '100%' }}>
+    <div className="chat-page">
+    <Card
+      title="智能问答"
+      style={{ height: '100%' }}
+      extra={
+        <Button
+          danger
+          icon={<DeleteOutlined />}
+          onClick={handleClearHistory}
+          disabled={loading || initialLoading}
+        >
+          清空记录
+        </Button>
+      }
+    >
       {error && (
         <Alert
           message="错误"
@@ -349,6 +399,7 @@ const Chat = () => {
         </div>
       </div>
     </Card>
+    </div>
   );
 };
 

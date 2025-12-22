@@ -169,9 +169,60 @@ router.get('/artifacts', async (req, res) => {
       }
     });
     
-    res.status(200).json({
-      nodes: Array.from(nodes.values()),
-      edges: Array.from(edges.values())
+    const allNodes = Array.from(nodes.values());
+    const allEdges = Array.from(edges.values());
+
+    // 搜索场景下，避免同类型节点过量导致前端难以阅读：按类型限量采样
+    const hasKeyword = Boolean(keyword && String(keyword).trim());
+    if (!hasKeyword) {
+      return res.status(200).json({ nodes: allNodes, edges: allEdges });
+    }
+
+    const limitsByType = {
+      artifact: Number(process.env.GRAPH_LIMIT_ARTIFACT) || 60,
+      category: Number(process.env.GRAPH_LIMIT_CATEGORY) || 20,
+      era: Number(process.env.GRAPH_LIMIT_ERA) || 12,
+      location: Number(process.env.GRAPH_LIMIT_LOCATION) || 15,
+      material: Number(process.env.GRAPH_LIMIT_MATERIAL) || 15,
+      dimension: Number(process.env.GRAPH_LIMIT_DIMENSION) || 10,
+      damagetype: Number(process.env.GRAPH_LIMIT_DAMAGETYPE) || 10,
+      restorationmethod: Number(process.env.GRAPH_LIMIT_RESTORATIONMETHOD) || 10,
+      reinforcementmethod: Number(process.env.GRAPH_LIMIT_REINFORCEMENTMETHOD) || 10,
+      inspectiontechnique: Number(process.env.GRAPH_LIMIT_INSPECTIONTECHNIQUE) || 10,
+      protectivematerial: Number(process.env.GRAPH_LIMIT_PROTECTIVEMATERIAL) || 10,
+      inspectionmetric: Number(process.env.GRAPH_LIMIT_INSPECTIONMETRIC) || 10,
+      node: Number(process.env.GRAPH_LIMIT_NODE) || 20
+    };
+
+    const keptIds = new Set();
+    const counts = new Map();
+    const keep = (node) => {
+      const type = node.type || 'node';
+      const limit = limitsByType[type] ?? limitsByType.node;
+      const current = counts.get(type) || 0;
+      if (current >= limit) return false;
+      counts.set(type, current + 1);
+      keptIds.add(node.id);
+      return true;
+    };
+
+    // 优先保留 artifact，再保留其他类型（保序）
+    const artifacts = allNodes.filter(n => n.type === 'artifact');
+    const nonArtifacts = allNodes.filter(n => n.type !== 'artifact');
+    const keptNodes = [];
+    for (const n of artifacts) {
+      if (keep(n)) keptNodes.push(n);
+    }
+    for (const n of nonArtifacts) {
+      if (keep(n)) keptNodes.push(n);
+    }
+
+    // 过滤掉指向被裁剪节点的边
+    const keptEdges = allEdges.filter(e => keptIds.has(e.source) && keptIds.has(e.target));
+
+    return res.status(200).json({
+      nodes: keptNodes,
+      edges: keptEdges
     });
   } catch (error) {
     console.error('获取知识图谱数据错误:', error);

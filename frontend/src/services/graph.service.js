@@ -21,7 +21,30 @@ export const getGraphData = async (keyword = '', limit = 200) => {
  * @returns {Promise} 实体详情
  */
 export const getEntityDetails = async (type, id) => {
-  return axios.get(`${API_URL}entity/${type}/${id}`);
+  const normalizeType = (t) => {
+    if (!t) return t;
+    const key = String(t).trim();
+    const map = {
+      artifact: 'Artifact',
+      era: 'Era',
+      category: 'Category',
+      dimension: 'Dimension',
+      material: 'Material',
+      location: 'Location',
+      damagetype: 'DamageType',
+      restorationmethod: 'RestorationMethod',
+      reinforcementmethod: 'ReinforcementMethod',
+      inspectiontechnique: 'InspectionTechnique',
+      protectivematerial: 'ProtectiveMaterial',
+      inspectionmetric: 'InspectionMetric'
+    };
+
+    const lowered = key.toLowerCase();
+    return map[lowered] || key;
+  };
+
+  const normalized = normalizeType(type);
+  return axios.get(`${API_URL}entity/${normalized}/${id}`);
 };
 
 /**

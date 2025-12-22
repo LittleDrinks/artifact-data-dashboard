@@ -17,7 +17,16 @@ class ApiError extends Error {
  * 404路由错误处理中间件
  */
 const notFoundHandler = (req, res, next) => {
-  const error = new ApiError(404, `接口不存在: ${req.originalUrl}`);
+  const url = req.originalUrl || '';
+
+  // 仅把 API 路径的 404 当作“接口不存在”错误；
+  // 其余路径（如前端热更新资源、静态文件探测）直接返回 404，避免刷屏堆栈日志。
+  const isApiRequest = url.startsWith('/api') || url.startsWith('/health') || url.startsWith('/api-docs');
+  if (!isApiRequest) {
+    return res.status(404).end();
+  }
+
+  const error = new ApiError(404, `接口不存在: ${url}`);
   next(error);
 };
 
@@ -25,10 +34,14 @@ const notFoundHandler = (req, res, next) => {
  * 全局错误处理中间件
  */
 const errorHandler = (err, req, res, next) => {
-  console.error('全局错误处理:', err.stack);
+  const statusCode = err.statusCode || 500;
+  if (statusCode === 404) {
+    console.warn('404 Not Found:', err.message);
+  } else {
+    console.error('全局错误处理:', err.stack);
+  }
   
   // 默认状态码和错误响应
-  const statusCode = err.statusCode || 500;
   const response = {
     success: false,
     error: {

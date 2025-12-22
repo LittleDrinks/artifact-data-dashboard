@@ -101,6 +101,10 @@ router.post('/ask', async (req, res) => {
       sources.push('relational_db');
       context += `【文物档案信息】：\n${relationalData}\n\n`;
     }
+
+    if (sources.length > 0) {
+      context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+    }
     
     // 打印检索到的上下文信息，方便调试
     console.log('--- MCP Context Debug ---');
@@ -272,6 +276,81 @@ router.get('/history', async (req, res) => {
 });
 
 /**
+ * @swagger
+ * /api/chat/history:
+ *   delete:
+ *     summary: 清空用户对话历史（可选仅清空指定会话）
+ *     tags: [Chat]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: conversationId
+ *         schema:
+ *           type: string
+ *         description: 会话ID，不提供则清空该用户所有会话
+ *     responses:
+ *       200:
+ *         description: 清空成功
+ */
+router.delete('/history', async (req, res) => {
+  try {
+    const { conversationId } = req.query;
+    const userId = req.user.id;
+
+    // 清空单个会话
+    if (conversationId) {
+      const conversationKey = `chat:${conversationId}`;
+      const exists = await redisClient.exists(conversationKey);
+      if (!exists) {
+        return res.status(200).json({ message: '会话已清空', deleted: 0 });
+      }
+
+      const owner = await redisClient.hGet(conversationKey, 'userId');
+      if (owner && parseInt(owner) !== userId) {
+        return res.status(403).json({ message: '无权操作此会话' });
+      }
+
+      const deleted = await redisClient.del(conversationKey, `${conversationKey}:messages`);
+      return res.status(200).json({ message: '会话已清空', deleted });
+    }
+
+    // 清空当前用户的所有会话
+    const keys = await redisClient.keys('chat:*');
+    const toDelete = [];
+
+    for (const key of keys) {
+      // 只处理会话元数据 hash 键
+      if (key.endsWith(':messages')) continue;
+
+      try {
+        const type = await redisClient.type(key);
+        if (type !== 'hash') continue;
+
+        const owner = await redisClient.hGet(key, 'userId');
+        if (owner && parseInt(owner) === userId) {
+          toDelete.push(key);
+          toDelete.push(`${key}:messages`);
+        }
+      } catch (err) {
+        console.warn(`Skipping key ${key} due to error: ${err.message}`);
+        continue;
+      }
+    }
+
+    if (toDelete.length === 0) {
+      return res.status(200).json({ message: '无可清空的会话', deleted: 0 });
+    }
+
+    const deleted = await redisClient.del(toDelete);
+    return res.status(200).json({ message: '聊天记录已清空', deleted });
+  } catch (error) {
+    console.error('清空对话历史错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
  * 处理知识图谱查询
  * @param {string} question 用户问题
  * @returns {Object|null} 包含文本和数据的响应或null
@@ -327,19 +406,61 @@ async function handleGraphQueries(question) {
       params.category = '青铜器';
       responseText = '西周(约前11世纪-前771年)青铜器继承了商代的传统，但造型更加庄重，纹饰更加写实。代表性器物有毛公鼎、散氏盘等，铭文内容增多，对研究西周历史、礼制具有重要价值。';
     } else {
-      // 尝试一个更通用的查询
+      // 通用检索：将问题拆成多个关键词，分别检索并汇总结果
+      const keywords = extractKeywords(question, { maxKeywords: 4 });
+      console.log('[Graph] Extracted keywords:', keywords);
+      if (keywords.length === 0) return null;
+
       cypherQuery = `
         MATCH (a:Artifact)
         WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
         OPTIONAL MATCH (a)-[r]-(n)
-        RETURN a, r, n LIMIT 15
+        RETURN a, r, n LIMIT 10
       `;
-      
-      // 从问题中提取关键词
-      const keywords = question.split(/\s+/).filter(word => word.length > 1);
-      params.keyword = keywords.length > 0 ? keywords[0] : '';
-      
-      responseText = `以下是与"${params.keyword}"相关的文物信息，您可以在图谱中探索它们的关系。`;
+
+      responseText = `以下是与"${keywords.join('、')}"相关的文物信息，您可以在图谱中探索它们的关系。`;
+
+      // 逐关键词查询并合并结果（去重）
+      const nodes = new Set();
+      const edges = new Set();
+
+      for (const keyword of keywords) {
+        params = { keyword };
+        const result = await session.run(cypherQuery, params);
+        result.records.forEach(record => {
+          const keys = record.keys;
+          keys.forEach(key => {
+            const value = record.get(key);
+            if (value && value.labels) {
+              const props = value.properties || {};
+              nodes.add(JSON.stringify({
+                id: value.identity.toString(),
+                label: props.name || props.label || props.title || value.identity.toString(),
+                type: value.labels[0].toLowerCase()
+              }));
+            } else if (value && value.type) {
+              edges.add(JSON.stringify({
+                id: value.identity.toString(),
+                source: value.start.toString(),
+                target: value.end.toString(),
+                label: value.type
+              }));
+            }
+          });
+        });
+      }
+
+      if (nodes.size === 0 && edges.size === 0) {
+        return null;
+      }
+
+      return {
+        text: responseText,
+        data: {
+          nodes: Array.from(nodes).map(node => JSON.parse(node)).slice(0, 60),
+          edges: Array.from(edges).map(edge => JSON.parse(edge)).slice(0, 120)
+        }
+      };
     }
     
     if (!cypherQuery) {
@@ -366,9 +487,10 @@ async function handleGraphQueries(question) {
         
         // 处理节点
         if (value && value.labels) {
+          const props = value.properties || {};
           nodes.add(JSON.stringify({
             id: value.identity.toString(),
-            label: value.properties.name,
+            label: props.name || props.label || props.title || value.identity.toString(),
             type: value.labels[0].toLowerCase()
           }));
         }
@@ -400,6 +522,72 @@ async function handleGraphQueries(question) {
 }
 
 /**
+ * 从用户问题中抽取适合用于图谱检索的关键词。
+ * 目标：避免把整句中文当成一个 keyword（原先按空格 split 会失败）。
+ */
+function extractKeywords(question, { maxKeywords = 4 } = {}) {
+  const raw = (question || '').trim();
+  if (!raw) return [];
+
+  // 优先提取引号/书名号里的实体（允许单字，例如“甗”】【鼎】《甗》）
+  const quoted = [];
+  const quotedRegex = /[“"《【「](.+?)[”"》】」]/g;
+  for (const match of raw.matchAll(quotedRegex)) {
+    const phrase = (match[1] || '').trim();
+    if (phrase) quoted.push(phrase);
+  }
+
+  // 先把常见标点统一成空格
+  let text = raw.replace(/[\s,.?!，。？！:：;；()（）"“”'’、《》【】\[\]{}<>]+/g, ' ');
+
+  // 去掉常见停用词/提问词/泛化词（尽量覆盖中文口语提问）
+  const stopPhrases = [
+    '请问', '麻烦', '帮我', '帮忙', '能否', '可以', '能不能', '给我',
+    '介绍', '讲讲', '说说', '解释', '说明', '概述', '总结', '详细', '更多',
+    '什么', '是什么', '有哪些', '有没有', '怎么', '如何', '为什么',
+    '的', '吗', '呢', '呀', '吧', '啊', '我', '你', '他', '她', '它',
+    '相关', '关系', '联系', '图谱', '知识图谱', '信息'
+  ];
+  for (const phrase of stopPhrases) {
+    if (!phrase) continue;
+    text = text.split(phrase).join(' ');
+  }
+
+  // 把常见并列/连接词也当作分隔符
+  text = text.replace(/[、/]/g, ' ');
+  for (const conj of ['和', '与', '及', '以及', '还有', '或者', '或', '跟']) {
+    text = text.split(conj).join(' ');
+  }
+
+  const tokens = text
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(Boolean)
+
+    // 默认只取 2+ 字，避免 1 字过泛；但如果是引号/书名号提取到的实体则允许 1 字
+    .filter(t => t.length >= 2 && t.length <= 20);
+
+  const isCjkSingleChar = (s) => /^[\u4e00-\u9fff]$/.test(s);
+
+  // 合并：quoted 优先、保序、去重
+  const candidates = [...quoted, ...tokens];
+
+  // 去重（保序）
+  const seen = new Set();
+  const unique = [];
+  for (const t of candidates) {
+    // 过滤掉过于泛化的一字（只允许 quoted 中的一字；普通 tokens 已经 >=2）
+    if (t.length === 1 && !isCjkSingleChar(t)) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    unique.push(t);
+    if (unique.length >= maxKeywords) break;
+  }
+
+  return unique;
+}
+
+/**
  * 处理关系型数据库查询 (MySQL)
  * @param {string} question 用户问题
  * @returns {string|null} 格式化的文物信息或null
@@ -408,8 +596,22 @@ async function handleRelationalQueries(question) {
   try {
     // 简单的关键词提取，排除常见停用词
     const stopWords = ['什么', '是', '的', '吗', '有', '在', '哪里', '介绍', '一下', '知道', '了解', '告诉', '我'];
-    const keywords = question.split(/[\s,.?!，。？！]+/)
+    const quoted = [];
+    const quotedRegex = /[“"《【「](.+?)[”"》】」]/g;
+    for (const match of (question || '').matchAll(quotedRegex)) {
+      const phrase = (match[1] || '').trim();
+      if (phrase) quoted.push(phrase);
+    }
+
+    const tokens = (question || '').split(/[\s,.?!，。？！]+/)
+      .map(k => k.trim())
+      .filter(Boolean)
       .filter(k => k.length > 1 && !stopWords.includes(k));
+
+    const keywords = Array.from(new Set([...quoted, ...tokens]))
+      .filter(k => !stopWords.includes(k));
+
+    console.log('[MySQL] Extracted keywords:', keywords);
     
     if (keywords.length === 0) return null;
 
