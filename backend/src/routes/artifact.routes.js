@@ -1,8 +1,21 @@
-// filepath: e:\shared\workplace\artifact-data-dashboard\backend\src\routes\artifact.routes.js
 const express = require('express');
 const { mysqlPool } = require('../config/database');
 
 const router = express.Router();
+
+const clampInt = (value, { min, max, fallback }) => {
+  const num = Number.parseInt(value, 10);
+  if (!Number.isFinite(num)) {
+    return fallback;
+  }
+  if (num < min) {
+    return min;
+  }
+  if (num > max) {
+    return max;
+  }
+  return num;
+};
 
 /**
  * @swagger
@@ -24,7 +37,7 @@ const router = express.Router();
  *         schema:
  *           type: integer
  *           default: 10
- *         description: 每页数量
+ *         description: 每页数量（最大100）
  *       - in: query
  *         name: category
  *         schema:
@@ -35,50 +48,53 @@ const router = express.Router();
  *         schema:
  *           type: string
  *         description: 按年代筛选
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: 按出土地筛选
  *     responses:
  *       200:
  *         description: 返回文物列表
  */
 router.get('/', async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
+    const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 10 });
     const offset = (page - 1) * limit;
-    
-    const { category, era, location } = req.query;
-    
-    let query = 'SELECT * FROM artifacts WHERE 1=1';
-    let countQuery = 'SELECT COUNT(*) as total FROM artifacts WHERE 1=1';
-    let params = [];
-    
+
+    const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+    const era = typeof req.query.era === 'string' ? req.query.era.trim() : '';
+    const location = typeof req.query.location === 'string' ? req.query.location.trim() : '';
+
+    let whereSql = 'WHERE 1=1';
+    const whereParams = [];
+
     if (category) {
-      query += ' AND category = ?';
-      countQuery += ' AND category = ?';
-      params.push(category);
+      whereSql += ' AND category = ?';
+      whereParams.push(category);
     }
-    
+
     if (era) {
-      query += ' AND era = ?';
-      countQuery += ' AND era = ?';
-      params.push(era);
+      whereSql += ' AND era = ?';
+      whereParams.push(era);
     }
-    
+
     if (location) {
-      query += ' AND location = ?';
-      countQuery += ' AND location = ?';
-      params.push(location);
+      whereSql += ' AND location = ?';
+      whereParams.push(location);
     }
-    
-    query += ' ORDER BY id DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
-    
-    const [artifacts] = await mysqlPool.execute(query, params);
-    const [countResult] = await mysqlPool.execute(countQuery, params.slice(0, -2));
-    
-    const total = countResult[0].total;
+
+    const listSql = `SELECT * FROM artifacts ${whereSql} ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`;
+    const countSql = `SELECT COUNT(*) as total FROM artifacts ${whereSql}`;
+
+    const [artifacts] = await mysqlPool.execute(listSql, whereParams);
+    const [countRows] = await mysqlPool.execute(countSql, whereParams);
+
+    const total = countRows?.[0]?.total ?? 0;
     const totalPages = Math.ceil(total / limit);
-    
-    res.status(200).json({
+
+    return res.status(200).json({
       data: artifacts,
       meta: {
         total,
@@ -89,7 +105,7 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     console.error('获取文物列表错误:', error);
-    res.status(500).json({ message: '服务器内部错误' });
+    return res.status(500).json({ message: '服务器内部错误' });
   }
 });
 
@@ -107,7 +123,7 @@ router.get('/', async (req, res) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: 搜索关键词
+ *         description: 搜索关键词（名称/描述/出土地/类别/年代）
  *       - in: query
  *         name: page
  *         schema:
@@ -119,66 +135,79 @@ router.get('/', async (req, res) => {
  *         schema:
  *           type: integer
  *           default: 10
- *         description: 每页数量
+ *         description: 每页数量（最大100）
  *     responses:
  *       200:
  *         description: 返回搜索结果
  */
 router.get('/search', async (req, res) => {
   try {
-    const { keyword } = req.query;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * limit;
-    
+    const keyword = typeof req.query.keyword === 'string' ? req.query.keyword.trim() : '';
     if (!keyword) {
       return res.status(400).json({ message: '搜索关键词为必填项' });
     }
-      // 搜索名称、描述和地域，避免使用参数绑定
-    const escapedKeyword = keyword.replace(/'/g, "''");
-    const searchPattern = `%${escapedKeyword}%`;
-    
-    const query = `
-      SELECT * 
-      FROM artifacts 
-      WHERE name LIKE '${searchPattern}' 
-      OR description LIKE '${searchPattern}'
-      OR location LIKE '${searchPattern}'
-      OR category LIKE '${searchPattern}'
-      OR era LIKE '${searchPattern}'
-      ORDER BY id DESC 
+
+    const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
+    const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 10 });
+    const offset = (page - 1) * limit;
+
+    const searchPattern = `%${keyword}%`;
+
+    const listSql = `
+      SELECT *
+      FROM artifacts
+      WHERE name LIKE ?
+         OR description LIKE ?
+         OR location LIKE ?
+         OR category LIKE ?
+         OR era LIKE ?
+      ORDER BY id DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
-    
-    const [artifacts] = await mysqlPool.query(query);
-    
-    const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM artifacts 
-      WHERE name LIKE '${searchPattern}' 
-      OR description LIKE '${searchPattern}'
-      OR location LIKE '${searchPattern}'
-      OR category LIKE '${searchPattern}'
-      OR era LIKE '${searchPattern}'
+
+    const listParams = [
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern
+    ];
+
+    const [artifacts] = await mysqlPool.execute(listSql, listParams);
+
+    const countSql = `
+      SELECT COUNT(*) as total
+      FROM artifacts
+      WHERE name LIKE ?
+         OR description LIKE ?
+         OR location LIKE ?
+         OR category LIKE ?
+         OR era LIKE ?
     `;
-    
-    const [countResult] = await mysqlPool.query(countQuery);
-    
-    const total = countResult[0].total;
+
+    const [countRows] = await mysqlPool.execute(countSql, [
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern
+    ]);
+
+    const total = countRows?.[0]?.total ?? 0;
     const totalPages = Math.ceil(total / limit);
-    
-    // 记录搜索日志 - 使用可选链操作符防止req.user为undefined时出错
-    try {
-      await mysqlPool.execute(
-        'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
-        [req.user?.id || null, 'search', null, new Date(), JSON.stringify({ keyword })]
-      );
-    } catch (logError) {
-      console.error('记录搜索日志错误:', logError);
-      // 不要因为日志错误影响主流程
+
+    if (req.user && req.user.id) {
+      try {
+        await mysqlPool.execute(
+          'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
+          [req.user.id, 'search', null, new Date(), JSON.stringify({ keyword })]
+        );
+      } catch (logError) {
+        console.error('记录搜索日志错误:', logError);
+      }
     }
-    
-    res.status(200).json({
+
+    return res.status(200).json({
       data: artifacts,
       meta: {
         total,
@@ -190,7 +219,7 @@ router.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('搜索文物错误:', error);
-    res.status(500).json({ message: '服务器内部错误' });
+    return res.status(500).json({ message: '服务器内部错误' });
   }
 });
 
@@ -217,32 +246,31 @@ router.get('/search', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    const artifactId = req.params.id;
-    
-    const [artifacts] = await mysqlPool.execute(
-      'SELECT * FROM artifacts WHERE id = ?',
-      [artifactId]
-    );
-    
-    if (artifacts.length === 0) {
+    const artifactId = Number(req.params.id);
+    if (!Number.isFinite(artifactId)) {
+      return res.status(400).json({ message: '文物ID无效' });
+    }
+
+    const [artifacts] = await mysqlPool.execute('SELECT * FROM artifacts WHERE id = ?', [artifactId]);
+    if (!artifacts || artifacts.length === 0) {
       return res.status(404).json({ message: '文物不存在' });
     }
-    
-    // 记录查看日志
-    try {
-      await mysqlPool.execute(
-        'INSERT INTO logs (user_id, action, target_id, timestamp) VALUES (?, ?, ?, ?)',
-        [req.user?.id || null, 'view_artifact', artifactId, new Date()]
-      );
-    } catch (logError) {
-      console.error('记录查看日志错误:', logError);
-      // 不要因为日志错误影响主流程
+
+    if (req.user && req.user.id) {
+      try {
+        await mysqlPool.execute(
+          'INSERT INTO logs (user_id, action, target_id, timestamp) VALUES (?, ?, ?, ?)',
+          [req.user.id, 'view_artifact', artifactId, new Date()]
+        );
+      } catch (logError) {
+        console.error('记录查看日志错误:', logError);
+      }
     }
-    
-    res.status(200).json(artifacts[0]);
+
+    return res.status(200).json(artifacts[0]);
   } catch (error) {
     console.error('获取文物详情错误:', error);
-    res.status(500).json({ message: '服务器内部错误' });
+    return res.status(500).json({ message: '服务器内部错误' });
   }
 });
 

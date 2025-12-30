@@ -52,3 +52,4 @@ Thumbs.db
 
 # large resource files
 .reference/
+build_kg/crawler/images_shenzhen

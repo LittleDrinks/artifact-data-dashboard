@@ -14,11 +14,15 @@ class MCPService {
       'Authorization': `Bearer ${this.apiKey}`
     };
 
-    // 打印初始化日志，帮助调试
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // 打印初始化日志（仅非生产环境）
     if (this.apiEndpoint) {
-      console.log(`[MCP] 服务已初始化`);
-      console.log(`[MCP] 模型: ${this.model}`);
-      console.log(`[MCP] 端点: ${this.apiEndpoint}`);
+      if (!isProd) {
+        console.log(`[MCP] 服务已初始化`);
+        console.log(`[MCP] 模型: ${this.model}`);
+        console.log(`[MCP] 端点: ${this.apiEndpoint}`);
+      }
     } else {
       console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
     }
@@ -129,6 +133,8 @@ class MCPService {
    */
   async askStream(question, history = [], context = '', onData, onEnd, onError) {
     try {
+      const isProd = process.env.NODE_ENV === 'production';
+
       // 检查API配置
       if (!this.apiEndpoint || !this.apiKey) {
         console.warn('[MCP] ⚠️ API 配置缺失，转为模拟模式');
@@ -138,9 +144,11 @@ class MCPService {
         return;
       }
 
-      console.log(`[MCP] 🚀 正在调用大模型: ${this.model}`);
-      console.log(`[MCP] 📡 端点: ${this.apiEndpoint}`);
-      console.log(`[MCP] ❓ 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
+      if (!isProd) {
+        console.log(`[MCP] 🚀 正在调用大模型: ${this.model}`);
+        console.log(`[MCP] 📡 端点: ${this.apiEndpoint}`);
+        console.log(`[MCP] ❓ 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
+      }
 
       const messages = [];
 
@@ -240,7 +248,9 @@ class MCPService {
    * @returns {Object} 模拟响应
    */
   simulateResponse(question, history = []) {
-    console.log('[MCP] ⚠️ 正在生成模拟响应 (Simulation Mode)');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[MCP] ⚠️ 正在生成模拟响应 (Simulation Mode)');
+    }
 
     // 简单的关键词匹配
     const patterns = {

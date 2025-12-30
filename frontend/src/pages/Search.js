@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert, Modal, Table } from 'antd';
+import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert, Modal, Table, Image } from 'antd';
 import { SearchOutlined, EnvironmentOutlined, ClockCircleOutlined, TagOutlined } from '@ant-design/icons';
 import { searchArtifacts, getArtifactById } from '../services/artifact.service';
 
@@ -352,6 +352,15 @@ const ArtifactSearch = () => {
                 onClose={() => setDetailAlert(null)}
               />
             )}
+            {selectedArtifact?.image_url ? (
+              <div style={{ marginBottom: 16 }}>
+                <Image
+                  src={selectedArtifact.image_url}
+                  alt={selectedArtifact?.name || '文物图片'}
+                  style={{ maxWidth: '100%', borderRadius: 6 }}
+                />
+              </div>
+            ) : null}
             {selectedArtifact ? (
               detailRows.length > 0 ? (
                 <Table

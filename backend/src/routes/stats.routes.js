@@ -1,7 +1,16 @@
 const express = require('express');
 const { mysqlPool } = require('../config/database');
+const { roleMiddleware } = require('../middleware/auth.middleware');
 
 const router = express.Router();
+
+const clampInt = (value, fallback, min, max) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(Math.max(parsed, min), max);
+};
 
 /**
  * @swagger
@@ -143,52 +152,34 @@ router.get('/timeline', async (req, res) => {
  */
 router.get('/recent-activities', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 10;
-      // 获取最近的活动日志，使用LEFT JOIN关联用户信息，这样即使用户不存在也能返回日志
-    let activities;
-    if (limit <= 100) { // 添加限制，防止过大的查询
-      // 使用模板字符串将limit直接嵌入SQL查询中
-      [activities] = await mysqlPool.execute(`
-        SELECT 
+    const limit = clampInt(req.query.limit, 10, 1, 100);
+
+    // 获取最近的活动日志，使用 LEFT JOIN 关联用户信息（即使用户不存在也能返回日志）
+    const [activities] = await mysqlPool.execute(
+      `
+        SELECT
           l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
           IFNULL(u.username, '未知用户') as username
-        FROM 
+        FROM
           logs l
-        LEFT JOIN 
+        LEFT JOIN
           users u ON l.user_id = u.id
-        ORDER BY 
+        ORDER BY
           l.timestamp DESC
         LIMIT ${limit}
-      `);
-    } else {
-      // 如果limit过大，则使用默认值
-      [activities] = await mysqlPool.execute(`
-        SELECT 
-          l.id, l.user_id, l.action, l.target_id, l.timestamp, l.details,
-          IFNULL(u.username, '未知用户') as username
-        FROM 
-          logs l
-        LEFT JOIN 
-          users u ON l.user_id = u.id
-        ORDER BY 
-          l.timestamp DESC
-        LIMIT 10
-      `);
-    }
+      `
+    );
     
     res.status(200).json({
       activities
     });
   } catch (error) {
     console.error('获取最近活动错误:', error);
-    // 提供更详细的错误信息
-    res.status(500).json({ 
-      message: '服务器内部错误',
-      error: error.message,
-      code: error.code,
-      sqlState: error.sqlState,
-      sqlMessage: error.sqlMessage
-    });
+    const payload = { message: '服务器内部错误' };
+    if (process.env.NODE_ENV !== 'production') {
+      payload.error = error.message;
+    }
+    res.status(500).json(payload);
   }
 });
 
@@ -204,8 +195,12 @@ router.get('/recent-activities', async (req, res) => {
  *       500:
  *         description: 活动数据获取失败
  */
-router.get('/test-recent-activities', async (req, res) => {
+router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res) => {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ message: '接口不存在' });
+    }
+
     // 记录环境信息，帮助诊断问题
     const dbInfo = {
       database: process.env.MYSQL_DATABASE || 'artifact_dashboard',
@@ -214,7 +209,7 @@ router.get('/test-recent-activities', async (req, res) => {
       port: process.env.MYSQL_PORT || '3306',
       hasPassword: process.env.MYSQL_PASSWORD ? '已设置' : '未设置'
     };
-    
+
     console.log('测试最近活动API - 数据库信息:', dbInfo);
     
     // 检查logs表中是否有数据
@@ -324,8 +319,12 @@ router.get('/test-recent-activities', async (req, res) => {
  *       500:
  *         description: 数据库连接失败
  */
-router.get('/test-db-connection', async (req, res) => {
+router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) => {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ message: '接口不存在' });
+    }
+
     // 尝试执行一个简单的查询
     const [result] = await mysqlPool.execute('SELECT 1 as test');
     
@@ -343,7 +342,9 @@ router.get('/test-db-connection', async (req, res) => {
     
     // 记录实际查询结果，用于调试
     console.log('数据库名称:', process.env.MYSQL_DATABASE || 'artifact_dashboard');
-    console.log('表查询结果:', tables);    // 获取logs表结构
+    console.log('表查询结果:', tables);
+
+    // 获取logs表结构
     let logsColumns = [];
     if (existingTables.includes('logs')) {
       try {
