@@ -15,6 +15,9 @@ RUN npm uninstall jieba && npm install nodejieba axios --registry=https://regist
 # 复制源代码
 COPY . .
 
+# 上传目录（会被 docker-compose volume 覆盖，但非 compose 场景也可用）
+RUN mkdir -p /app/uploads
+
 # 统一shell脚本行结尾，防止Windows换行导致执行失败
 RUN sed -i 's/\r$//' start.sh
 

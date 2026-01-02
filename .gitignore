@@ -49,6 +49,7 @@ Thumbs.db
 
 # github-copilot
 .github/
+.specify/
 
 # large resource files
 .reference/

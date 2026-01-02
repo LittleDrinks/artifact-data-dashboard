@@ -1,0 +1,97 @@
+openapi: 3.0.0
+info:
+  title: Artifact Data Dashboard API
+  version: 1.0.0
+  description: 用于管理 artifacts、knowledge graph 与 chat 的 API。
+servers:
+  - url: http://localhost:3000/api
+    description: 本地开发（Local Development）
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      summary: 用户登录（User login）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: 登录成功（Login successful）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+  /artifacts:
+    get:
+      summary: 获取 artifacts 列表（List artifacts）
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: artifacts 列表（List of artifacts）
+    post:
+      summary: 创建 artifact（仅 Admin）（Create artifact - Admin only）
+      responses:
+        '201':
+          description: 已创建（Created）
+  /graph:
+    get:
+      summary: 获取 knowledge graph 数据（Get knowledge graph data）
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: 图谱 nodes 与 edges（Graph nodes and edges）
+  /chat:
+    post:
+      summary: 发送 chat 消息（Send message to chat）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                conversationId:
+                  type: string
+      responses:
+        '200':
+          description: Chat 响应（Chat response）
+  /wordcloud/analyze:
+    post:
+      summary: 生成词云数据（Generate word cloud data）
+      responses:
+        '200':
+          description: 词云数据（Word cloud data）

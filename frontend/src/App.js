@@ -7,6 +7,7 @@ import {
   CloudOutlined,
   ShareAltOutlined,
   MessageOutlined,
+  PaperClipOutlined,
   UserOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -23,6 +24,7 @@ import KnowledgeGraph from './pages/KnowledgeGraph';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import Debug from './pages/Debug'; // 导入调试页面
+import Attachments from './pages/Attachments';
 
 // 导入服务和上下文
 import { getCurrentUser, logout } from './services/auth.service';
@@ -80,6 +82,9 @@ function App() {
         break;
       case 'profile':
         navigate('/profile');
+        break;
+      case 'attachments':
+        navigate('/attachments');
         break;
       case 'debug':
         if (isAdmin) {
@@ -139,6 +144,12 @@ function App() {
       icon: <UserOutlined />,
       label: '个人信息',
     }
+    ,
+    {
+      key: 'attachments',
+      icon: <PaperClipOutlined />,
+      label: '附件管理',
+    }
   ];
 
   if (isAdmin) {
@@ -166,6 +177,7 @@ function App() {
     if (path === '/knowledge-graph') return 'knowledge-graph';
     if (path === '/chat') return 'chat';
     if (path === '/profile') return 'profile';
+    if (path === '/attachments') return 'attachments';
     if (path === '/debug') {
       return isAdmin ? 'debug' : 'dashboard';
     }
@@ -236,6 +248,7 @@ function App() {
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/attachments" element={<Attachments />} />
             <Route
               path="/debug"
               element={isAdmin ? <Debug /> : <Navigate to="/" replace />}

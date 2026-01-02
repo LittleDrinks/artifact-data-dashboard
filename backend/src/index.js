@@ -15,6 +15,7 @@ const graphRoutes = require('./routes/graph.routes');
 const wordcloudRoutes = require('./routes/wordcloud.routes');
 const chatRoutes = require('./routes/chat.routes');
 const debugRoutes = require('./routes/debug.routes');
+const attachmentRoutes = require('./routes/attachment.routes');
 
 // 导入中间件
 const { errorHandler, notFoundHandler } = require('./middleware/error.middleware');
@@ -101,6 +102,7 @@ app.use('/api/stats', authMiddleware, statsRoutes);
 app.use('/api/graph', authMiddleware, graphRoutes);
 app.use('/api/wordcloud', authMiddleware, wordcloudRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
+app.use('/api/attachments', authMiddleware, attachmentRoutes);
 app.use('/api/debug', authMiddleware, roleMiddleware(['admin']), debugRoutes);
 
 // API文档路由 - 必须在其他路由之后注册

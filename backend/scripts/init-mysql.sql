@@ -54,6 +54,22 @@ CREATE TABLE IF NOT EXISTS logs (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- 创建attachments表（附件元数据）
+CREATE TABLE IF NOT EXISTS attachments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  owner_type VARCHAR(50) NULL,
+  owner_id INT NULL,
+  uploaded_by INT NOT NULL,
+  original_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  storage_name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_attachments_owner (owner_type, owner_id),
+  INDEX idx_attachments_uploaded_by (uploaded_by),
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- 插入管理员账户
 INSERT INTO users (username, email, password_hash, role) VALUES
 ('admin', 'admin@example.com', '$2a$10$myBxkYDPKMFPrwZG9psVUupG3hoX7W.TYp0moN.Ez0/4f573TW1sy', 'admin'); -- 密码: admin123
