@@ -1,5 +1,3 @@
-"""Convert raw artifact JSON into Excel sheets that match README format requirements."""
-
 from __future__ import annotations
 
 import json
@@ -68,72 +66,6 @@ def normalise_cell(value: Any) -> str:
         return "; ".join(normalise_cell(v) for v in value)
     return str(value)
 
-
-def derive_export_payload(raw: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    expected_keys = {name for name, _ in NODE_SHEETS + RELATION_SHEETS}
-    if any(key in raw for key in expected_keys):
-        ensured = {name: [] for name in expected_keys}
-        for key, value in raw.items():
-            if key in ensured and isinstance(value, list):
-                ensured[key] = value
-        return ensured
-
-    prepared: Dict[str, List[Dict[str, Any]]] = {name: [] for name in expected_keys}
-    category_index: Dict[str, Dict[str, Any]] = {}
-    era_index: Dict[str, Dict[str, Any]] = {}
-
-    for artifact_id, payload in raw.items():
-        description_chunks: List[str] = []
-        for key in ("note", "sourceDetail", "deptSizeInfo"):
-            field_value = payload.get(key)
-            if field_value:
-                description_chunks.append(str(field_value).strip())
-        explain_text = strip_html(payload.get("explainTxt"))
-        if explain_text:
-            description_chunks.append(explain_text.strip())
-
-        tags = [payload.get("categoryName"), payload.get("levelName"), payload.get("yearInfo")]
-        tag_string = "; ".join(tag for tag in tags if tag)
-
-        prepared["Artifacts"].append(
-            {
-                "artifact_id": artifact_id,
-                "name": payload.get("name", ""),
-                "description": "\n".join(chunk for chunk in description_chunks if chunk),
-                "tags": tag_string,
-                "isCataloged": False,
-                "isDigitized": False,
-                "needsRepair": False,
-            }
-        )
-
-        category_name = payload.get("categoryName") or payload.get("categoryInfo")
-        if category_name:
-            category_index.setdefault(category_name, {"name": category_name, "description": payload.get("categoryInfo", "") or ""})
-            prepared["REL_HAS_CATEGORY"].append({"artifact_id": artifact_id, "category_name": category_name})
-
-        era_name = payload.get("yearStartName") or payload.get("yearInfo")
-        if era_name:
-            era_entry = era_index.setdefault(
-                era_name,
-                {
-                    "name": era_name,
-                    "startYear": payload.get("yearStart", "") or "",
-                    "endYear": payload.get("yearEnd", "") or "",
-                },
-            )
-            if payload.get("yearStart") and not era_entry["startYear"]:
-                era_entry["startYear"] = payload["yearStart"]
-            if payload.get("yearEnd") and not era_entry["endYear"]:
-                era_entry["endYear"] = payload["yearEnd"]
-            prepared["REL_BELONGS_TO_ERA"].append({"artifact_id": artifact_id, "era_name": era_name})
-
-    prepared["Categories"] = list(category_index.values())
-    prepared["Eras"] = list(era_index.values())
-
-    return prepared
-
-
 def write_workbook(prepared: Dict[str, List[Dict[str, Any]]], output_path: Path) -> None:
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         for sheet_name, columns in NODE_SHEETS + RELATION_SHEETS:
@@ -149,14 +81,15 @@ def main(input_path: str, output_path: str) -> None:
         raise FileNotFoundError(f"无法找到输入文件: {source}")
 
     raw_payload = load_json(source)
-    prepared_payload = derive_export_payload(raw_payload)
+    # prepared_payload = derive_export_payload(raw_payload)
+    prepared_payload = raw_payload
     write_workbook(prepared_payload, Path(output_path))
     print(f"转换完成: {output_path}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("用法: python convert_artifact_to_excel.py <artifact.json路径> <输出excel路径>")
+        print("用法: python process.py <artifact.json路径> <输出excel路径>")
         sys.exit(1)
 
     main(sys.argv[1], sys.argv[2])

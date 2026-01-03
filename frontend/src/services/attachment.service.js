@@ -18,13 +18,19 @@ export const uploadAttachment = async ({ file, ownerType, ownerId }) => {
   });
 };
 
-export const listAttachments = async ({ ownerType, ownerId } = {}) => {
+export const listAttachments = async ({ ownerType, ownerId, page, limit } = {}) => {
   const params = {};
   if (ownerType !== undefined && ownerType !== null && String(ownerType).trim() !== '') {
     params.ownerType = ownerType;
   }
   if (ownerId !== undefined && ownerId !== null && String(ownerId).trim() !== '') {
     params.ownerId = ownerId;
+  }
+  if (page !== undefined && page !== null && String(page).trim() !== '') {
+    params.page = page;
+  }
+  if (limit !== undefined && limit !== null && String(limit).trim() !== '') {
+    params.limit = limit;
   }
   return axios.get(BASE, { params });
 };

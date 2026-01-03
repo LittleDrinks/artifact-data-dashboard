@@ -12,6 +12,73 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+    PaginationMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+      required:
+        - total
+        - page
+        - limit
+        - totalPages
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        ownerType:
+          type: string
+          nullable: true
+        ownerId:
+          type: integer
+          nullable: true
+        uploadedBy:
+          type: integer
+        originalName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        createdAt:
+          type: string
+        downloadUrl:
+          type: string
+      required:
+        - id
+        - uploadedBy
+        - originalName
+        - mimeType
+        - sizeBytes
+        - createdAt
+        - downloadUrl
+    AttachmentsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+      required:
+        - data
+        - meta
 security:
   - bearerAuth: []
 paths:
@@ -100,6 +167,16 @@ paths:
     get:
       summary: 获取附件列表（List attachments）
       parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
         - name: ownerType
           in: query
           schema:
@@ -111,6 +188,22 @@ paths:
       responses:
         '200':
           description: 附件列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentsListResponse'
+        '400':
+          description: 参数无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 未登录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /attachments/upload:
     post:

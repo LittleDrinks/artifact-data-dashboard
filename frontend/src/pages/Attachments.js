@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Input, message, Space, Spin, Table, Upload } from 'antd';
 import { DeleteOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 
@@ -26,28 +26,45 @@ const Attachments = () => {
   const [rows, setRows] = useState([]);
   const [ownerType, setOwnerType] = useState('');
   const [ownerId, setOwnerId] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [total, setTotal] = useState(0);
+  const limitRef = useRef(limit);
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    limitRef.current = limit;
+  }, [limit]);
+
+  const refresh = useCallback(async ({ nextPage, nextLimit } = {}) => {
     setLoading(true);
     try {
+      const resolvedPage = nextPage ?? 1;
+      const resolvedLimit = nextLimit ?? limitRef.current;
       const resp = await listAttachments({
         ownerType: ownerType.trim() || undefined,
-        ownerId: ownerId.trim() || undefined
+        ownerId: ownerId.trim() || undefined,
+        page: resolvedPage,
+        limit: resolvedLimit
       });
       setRows(resp.data?.data || []);
+      const meta = resp.data?.meta;
+      setTotal(Number(meta?.total || 0));
+      setPage(Number(meta?.page || resolvedPage));
+      setLimit(Number(meta?.limit || resolvedLimit));
       setError(null);
     } catch (err) {
       console.error('加载附件失败:', err);
       setError(err.response?.data?.message || '加载附件失败，请稍后重试');
       setRows([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   }, [ownerType, ownerId]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    refresh({ nextPage: 1 });
+  }, [ownerType, ownerId, refresh]);
 
   const canDeleteRow = (row) => {
     if (!user || !row) return false;
@@ -232,7 +249,18 @@ const Attachments = () => {
             rowKey="id"
             columns={columns}
             dataSource={rows}
-            pagination={{ pageSize: 10 }}
+            pagination={{
+              current: page,
+              pageSize: limit,
+              total,
+              showSizeChanger: true
+            }}
+            onChange={(nextPagination) => {
+              refresh({
+                nextPage: nextPagination.current,
+                nextLimit: nextPagination.pageSize
+              });
+            }}
           />
         )}
       </Card>

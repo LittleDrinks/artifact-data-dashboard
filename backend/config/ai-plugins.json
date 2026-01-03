@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "defaultProvider": "mcp",
+  "providers": {
+    "mcp": {
+      "enabled": true
+    }
+  },
+  "capabilities": {
+    "sanitize": {
+      "enabled": true
+    },
+    "logging": {
+      "enabled": true
+    }
+  }
+}

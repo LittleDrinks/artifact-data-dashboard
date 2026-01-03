@@ -1,51 +1,51 @@
 @echo off
 echo ========================================
-echo å¯åŠ¨æ–‡ç‰©æ•°æ®çœ‹æ¿ - Docker å¼€å‘ç¯å¢ƒ
+echo Æô¶¯ÎÄÎïÊı¾İ¿´°å - Docker ¿ª·¢»·¾³
 echo ========================================
 echo.
 
-REM æ£€æŸ¥ Docker æ˜¯å¦è¿è¡Œ
+REM ¼ì²é Docker ÊÇ·ñÔËĞĞ
 docker info >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [é”™è¯¯] Docker æœªè¿è¡Œï¼Œè¯·å…ˆå¯åŠ¨ Docker Desktop
+    echo [´íÎó] Docker Î´ÔËĞĞ£¬ÇëÏÈÆô¶¯ Docker Desktop
     pause
     exit /b 1
 )
 
-echo [æ£€æŸ¥] Docker æ­£åœ¨è¿è¡Œ...
+echo [¼ì²é] Docker ÕıÔÚÔËĞĞ...
 echo.
 
-REM æ£€æŸ¥ .env æ–‡ä»¶
+REM ¼ì²é .env ÎÄ¼ş
 if not exist "backend\.env" (
-    echo [è­¦å‘Š] backend\.env æ–‡ä»¶ä¸å­˜åœ¨
-    echo [æ“ä½œ] ä» .env.example åˆ›å»º .env æ–‡ä»¶...
+    echo [¾¯¸æ] backend\.env ÎÄ¼ş²»´æÔÚ
+    echo [²Ù×÷] ´Ó .env.example ´´½¨ .env ÎÄ¼ş...
     copy "backend\.env.example" "backend\.env"
-    echo [å®Œæˆ] .env æ–‡ä»¶å·²åˆ›å»º
+    echo [Íê³É] .env ÎÄ¼şÒÑ´´½¨
     echo.
 )
 
-echo [æç¤º] å³å°†å¯åŠ¨ä»¥ä¸‹æœåŠ¡ï¼š
-echo   - å‰ç«¯ (React): http://localhost:8080
-echo   - åç«¯ (Express): http://localhost:3000
+echo [ÌáÊ¾] ¼´½«Æô¶¯ÒÔÏÂ·şÎñ£º
+echo   - Ç°¶Ë (React): http://localhost:8080
+echo   - ºó¶Ë (Express): http://localhost:3000
 echo   - MySQL: localhost:13306
 echo   - Neo4j: http://localhost:17474
 echo   - Redis: localhost:16379
 echo.
 
-echo [æ“ä½œ] æ­£åœ¨æ„å»ºå¹¶å¯åŠ¨ Docker å®¹å™¨...
+echo [²Ù×÷] ÕıÔÚ¹¹½¨²¢Æô¶¯ Docker ÈİÆ÷...
 echo.
 
 docker-compose up --build
 
-REM å¦‚æœç”¨æˆ·æŒ‰ Ctrl+C åœæ­¢ï¼Œæ˜¾ç¤ºæ¸…ç†æç¤º
+REM Èç¹ûÓÃ»§°´ Ctrl+C Í£Ö¹£¬ÏÔÊ¾ÇåÀíÌáÊ¾
 echo.
-echo [æç¤º] å®¹å™¨å·²åœæ­¢
+echo [ÌáÊ¾] ÈİÆ÷ÒÑÍ£Ö¹
 echo.
-echo å¸¸ç”¨å‘½ä»¤ï¼š
-echo   å¯åŠ¨: docker-compose up
-echo   åå°å¯åŠ¨: docker-compose up -d
-echo   åœæ­¢: docker-compose down
-echo   æŸ¥çœ‹æ—¥å¿—: docker-compose logs -f
-echo   é‡ç½®æ•°æ®: docker-compose down -v
+echo ³£ÓÃÃüÁî£º
+echo   Æô¶¯: docker-compose up
+echo   ºóÌ¨Æô¶¯: docker-compose up -d
+echo   Í£Ö¹: docker-compose down
+echo   ²é¿´ÈÕÖ¾: docker-compose logs -f
+echo   ÖØÖÃÊı¾İ: docker-compose down -v
 echo.
 pause

@@ -159,11 +159,23 @@ router.post('/upload', upload.single('file'), async (req, res) => {
  * @swagger
  * /api/attachments:
  *   get:
- *     summary: 获取附件列表（默认仅返回当前用户上传的附件）
+ *     summary: 获取附件列表（支持分页与过滤）
  *     tags: [Attachments]
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: 页码（从 1 开始）
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: 每页条数（默认 50）
  *       - in: query
  *         name: ownerType
  *         schema:
@@ -176,7 +188,11 @@ router.post('/upload', upload.single('file'), async (req, res) => {
  *         description: 关联对象ID（可选）
  *     responses:
  *       200:
- *         description: 返回附件列表
+ *         description: 返回附件列表（data + meta）
+ *       400:
+ *         description: 参数无效
+ *       401:
+ *         description: 未登录
  */
 router.get('/', async (req, res) => {
   try {
@@ -185,6 +201,18 @@ router.get('/', async (req, res) => {
       ? Number(req.query.ownerId)
       : null;
 
+    const rawPage = req.query.page !== undefined ? Number(req.query.page) : 1;
+    const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 50;
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : null;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : null;
+
+    if (page === null) {
+      return res.status(400).json({ message: 'page无效' });
+    }
+    if (limit === null) {
+      return res.status(400).json({ message: 'limit无效' });
+    }
+
     if (ownerType && ownerType.length > 50) {
       return res.status(400).json({ message: 'ownerType过长' });
     }
@@ -192,21 +220,37 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ message: 'ownerId无效' });
     }
 
-    let query = `SELECT id, owner_type, owner_id, uploaded_by, original_name, mime_type, size_bytes, created_at FROM attachments WHERE 1=1`;
-    const params = [];
+    let whereSql = 'WHERE 1=1';
+    const whereParams = [];
 
     if (ownerType) {
-      query += ' AND owner_type = ?';
-      params.push(ownerType);
+      whereSql += ' AND owner_type = ?';
+      whereParams.push(ownerType);
     }
     if (ownerId !== null) {
-      query += ' AND owner_id = ?';
-      params.push(ownerId);
+      whereSql += ' AND owner_id = ?';
+      whereParams.push(ownerId);
     }
 
-    query += ' ORDER BY id DESC';
+    const [countRows] = await mysqlPool.execute(
+      `SELECT COUNT(*) AS total FROM attachments ${whereSql}`,
+      whereParams
+    );
+    const total = Number(countRows?.[0]?.total || 0);
+    const totalPages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+    const safePage = Math.min(page, totalPages);
+    const offset = (safePage - 1) * limit;
 
-    const [rows] = await mysqlPool.execute(query, params);
+    // NOTE: MySQL prepared statements can be picky about parameter markers in LIMIT/OFFSET.
+    // limit/offset are validated integers, so we safely inline them.
+    const pagedSql =
+      `SELECT id, owner_type, owner_id, uploaded_by, original_name, mime_type, size_bytes, created_at
+       FROM attachments
+       ${whereSql}
+       ORDER BY id DESC
+       LIMIT ${limit} OFFSET ${offset}`;
+
+    const [rows] = await mysqlPool.execute(pagedSql, whereParams);
     return res.status(200).json({
       data: rows.map(row => ({
         id: row.id,
@@ -218,7 +262,13 @@ router.get('/', async (req, res) => {
         sizeBytes: row.size_bytes,
         createdAt: row.created_at,
         downloadUrl: `/api/attachments/${row.id}/download`
-      }))
+      })),
+      meta: {
+        total,
+        page: safePage,
+        limit,
+        totalPages
+      }
     });
   } catch (error) {
     console.error('获取附件列表错误:', error);

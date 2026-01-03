@@ -53,6 +53,7 @@ services:
       - ./backend/package.json:/app/package.json
       - ./backend/logs:/app/logs
       - ./backend/scripts:/app/scripts
+      - ./backend/config:/app/config
       - uploads-data:/app/uploads
 
   # MySQL数据库

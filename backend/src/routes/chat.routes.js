@@ -1,8 +1,28 @@
 const express = require('express');
 const { neo4jDriver, redisClient, mysqlPool, ensureRedisConnected } = require('../config/database');
 const mcpService = require('../services/mcp.service');
+const { getAiPluginsConfig } = require('../services/ai/plugin-config');
+const { McpProvider } = require('../services/ai/providers/mcp.provider');
+const { applyInputCapabilities } = require('../services/ai/capabilities');
 
 const router = express.Router();
+
+const providers = {
+  mcp: new McpProvider()
+};
+
+const writeAuditLog = async ({ userId, action, details }) => {
+  try {
+    await mysqlPool.execute(
+      'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
+      [userId, action, null, new Date(), details ? JSON.stringify(details) : null]
+    );
+  } catch (error) {
+    console.warn('[AI-Audit] 写入日志失败:', error.message);
+  }
+};
+
+const shouldAudit = (aiConfig) => Boolean(aiConfig?.capabilities?.logging?.enabled);
 
 router.use(async (req, res, next) => {
   try {
@@ -140,31 +160,129 @@ router.post('/ask', async (req, res) => {
     
     let fullAnswer = '';
     
-    // 调用MCP大模型服务，流式返回
-    await mcpService.askStream(question, history, context,
-      (content) => {
+    const aiConfig = getAiPluginsConfig();
+    const providerId = aiConfig.defaultProvider;
+    const providerConfig = aiConfig.providers?.[providerId];
+    const provider = providers[providerId];
+
+    const startTs = Date.now();
+
+    if (shouldAudit(aiConfig)) {
+      await writeAuditLog({
+        userId: req.user.id,
+        action: 'ai_plugin_call',
+        details: {
+          providerId,
+          providerEnabled: Boolean(providerConfig?.enabled),
+          capabilities: aiConfig.capabilities || {},
+          conversationId: sessionId,
+          sources
+        }
+      });
+    }
+
+    if (!provider || !provider.isEnabled(providerConfig)) {
+      const disabledMessage = 'AI 服务未启用或当前 provider 不可用，请联系管理员启用后重试。';
+      res.write(`event: message\n`);
+      res.write(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
+      fullAnswer += disabledMessage;
+
+      if (shouldAudit(aiConfig)) {
+        await writeAuditLog({
+          userId: req.user.id,
+          action: 'ai_plugin_error',
+          details: {
+            providerId,
+            reason: provider ? 'provider_disabled' : 'provider_not_found',
+            durationMs: Date.now() - startTs,
+            conversationId: sessionId
+          }
+        });
+      }
+
+      await saveConversation(sessionId, question, fullAnswer, req.user.id);
+      res.write(`event: done\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
+
+    const applied = applyInputCapabilities({
+      question,
+      context,
+      capabilities: aiConfig.capabilities
+    });
+
+    if (shouldAudit(aiConfig)) {
+      await writeAuditLog({
+        userId: req.user.id,
+        action: 'ai_provider_call',
+        details: {
+          providerId,
+          model: process.env.AI_MODEL,
+          endpointConfigured: Boolean(process.env.AI_API_ENDPOINT),
+          conversationId: sessionId,
+          status: 'start'
+        }
+      });
+    }
+
+    // 调用 provider（目前实现为 MCP），保持原 SSE 流式输出格式
+    await provider.askStream({
+      question: applied.question,
+      history,
+      context: applied.context,
+      onData: (content) => {
         res.write(`event: message\n`);
         res.write(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
       },
-      async () => {
+      onEnd: async () => {
+        if (shouldAudit(aiConfig)) {
+          await writeAuditLog({
+            userId: req.user.id,
+            action: 'ai_provider_call',
+            details: {
+              providerId,
+              status: 'success',
+              durationMs: Date.now() - startTs,
+              conversationId: sessionId
+            }
+          });
+        }
+
         // 保存对话
         await saveConversation(sessionId, question, fullAnswer, req.user.id);
         res.write(`event: done\n`);
         res.write(`data: [DONE]\n\n`);
         res.end();
       },
-      (error) => {
+      onError: async (error) => {
         console.error('流式响应错误:', error.message);
+
+        if (shouldAudit(aiConfig)) {
+          await writeAuditLog({
+            userId: req.user.id,
+            action: 'ai_plugin_error',
+            details: {
+              providerId,
+              status: 'error',
+              code: error.code,
+              message: error.message,
+              durationMs: Date.now() - startTs,
+              conversationId: sessionId
+            }
+          });
+        }
+
         res.write(`event: error\n`);
-        // 返回更具体的错误信息，帮助前端判断
-        const errorMsg = error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND' 
-          ? '无法连接到AI模型服务，请检查后端配置' 
+        const errorMsg = error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND'
+          ? '无法连接到AI模型服务，请检查后端配置'
           : '生成回答时出错';
         res.write(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
         res.end();
       }
-    );
+    });
     
   } catch (error) {
     console.error('问答系统错误:', error);

@@ -68,6 +68,32 @@
   - 返回按 `id DESC` 排序
   - 支持按 ownerType/ownerId 过滤
   - 权限：登录用户可用
+
+  响应示例（200）：
+
+  ```json
+  {
+    "data": [
+      {
+        "id": 123,
+        "ownerType": "artifact",
+        "ownerId": 456,
+        "uploadedBy": 1,
+        "originalName": "photo.png",
+        "mimeType": "image/png",
+        "sizeBytes": 204800,
+        "createdAt": "2026-01-03T10:20:30.000Z",
+        "downloadUrl": "/api/attachments/123/download"
+      }
+    ],
+    "meta": {
+      "total": 78,
+      "page": 1,
+      "limit": 50,
+      "totalPages": 2
+    }
+  }
+  ```
 - 下载附件
   - 以文件流形式返回原始文件名
   - 权限：登录用户可用
@@ -77,21 +103,34 @@
 - 审计
   - 上传/删除附件应记录到日志（见 4.3）
 
+#### 3.1.6 Excel 数据导入/导出（移自 System Debug）
+- **目标**：提供基于 Excel 的批量数据管理能力，替代原有的调试接口。
+- **导出 (Export)**：
+  - 行为：生成包含当前全量数据的 Excel 文件（格式遵循 3.2 规范）。
+  - 交付形式：生成的文件自动保存为“附件”，`ownerType="system_export"`，`ownerId=0`（或时间戳）。
+  - 权限：仅 `admin` 可触发。
+- **导入 (Import)**：
+  - 前置条件：用户需先上传 Excel 文件作为附件（`ownerType="system_import"`）。
+  - 行为：针对指定附件 ID 触发“执行导入”。
+  - 逻辑：解析 Excel（遵循 3.2 规范），更新数据库（v1.0.0 策略：**全量覆盖** 或 **仅新增**，需在触发时指定或默认仅新增）。
+  - 权限：仅 `admin` 可触发。
+
 ---
 
-### 3.2 数据流水线：爬虫输出 dict/JSON -> xlsx 规范
+### 3.2 Excel 数据规范（原：数据流水线）
 
 #### 3.2.1 目标
-将爬虫产出的 JSON（概念上等价于 Python dict）转换为一个格式固定的 xlsx，以便后续导入数据库与管理。
+定义系统支持的标准 Excel 数据交换格式，用于：
+1. 爬虫数据清洗后的输出（作为导入源）。
+2. 系统数据的批量导出（作为备份或离线编辑）。
+3. 系统数据的批量导入。
 
-#### 3.2.2 输入格式
-- 输入文件为 JSON
-- 顶层为对象（dict）
-- key 为文物 ID（字符串/数字均可）
-- value 为文物原始 payload
+#### 3.2.2 输入/输出格式
+- **文件格式**：`.xlsx`
+- **结构**：包含固定 Sheet 与列顺序（见 3.2.3）。
 
-#### 3.2.3 输出格式（必须固定）
-输出为一个 xlsx，包含固定 sheet 与固定列顺序：
+#### 3.2.3 Sheet 与列定义（必须固定）
+输出/输入为一个 xlsx，包含固定 sheet 与固定列顺序：
 
 - 节点（Nodes）sheet：
   - Artifacts: `artifact_id, name, description, tags, isCataloged, isDigitized, needsRepair`

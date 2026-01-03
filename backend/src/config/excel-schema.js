@@ -245,7 +245,16 @@ const GRAPH_REL_EXPORTS = [
   }
 ];
 
+const EXCEL_SCHEMA = {
+  nodes: GRAPH_NODE_EXPORTS.map(({ sheet, headers }) => ({ sheet, headers })),
+  relations: GRAPH_REL_EXPORTS.map(({ sheet, headers }) => ({ sheet, headers }))
+};
+
+const EXCEL_SHEETS_IN_ORDER = [...EXCEL_SCHEMA.nodes, ...EXCEL_SCHEMA.relations];
+
 module.exports = {
   GRAPH_NODE_EXPORTS,
-  GRAPH_REL_EXPORTS
+  GRAPH_REL_EXPORTS,
+  EXCEL_SCHEMA,
+  EXCEL_SHEETS_IN_ORDER
 };

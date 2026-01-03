@@ -172,3 +172,36 @@ README.md
 
 
 貌似 docker 配好了，代码好不好不太清楚，之后再说
+
+# 2026.1.3
+
+按 specs/main/tasks.md 的 US3（AI 插件化 MVP）做了一次 docker-compose smoke test：
+
+1) 启动服务
+
+- docker-compose up -d --build
+
+2) Admin 登录
+
+- POST http://localhost:3000/api/auth/login
+   - body: {"username":"admin","password":"admin123"}
+
+3) 验证插件状态接口（Admin only）
+
+- GET http://localhost:3000/api/ai-plugins/status
+   - 返回 data 中包含 configPath/defaultProvider/providers/capabilities/enabled
+
+4) 验证 chat SSE 输出（PowerShell）
+
+- PowerShell 示例（通过管道喂给 curl.exe，避免 JSON 引号转义问题）：
+
+   $login=Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/auth/login" -ContentType "application/json" -Body (@{ username='admin'; password='admin123' } | ConvertTo-Json)
+   $token=$login.token
+   $body=@{ question='用一句话回答：你好'; conversationId=$null } | ConvertTo-Json -Compress
+   $body | & curl.exe -N -m 30 -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@-" "http://localhost:3000/api/chat/ask"
+
+5) 验证审计日志写入 MySQL
+
+- docker exec artifact-dashboard-mysql mysql -uroot -ppassword -D artifact_dashboard -e "SELECT id, user_id, action, timestamp, LEFT(details, 200) AS details_preview FROM logs WHERE action LIKE 'ai_%' ORDER BY id DESC LIMIT 20;"
+
+结果：能看到 ai_plugin_call / ai_provider_call（start/success）等记录。

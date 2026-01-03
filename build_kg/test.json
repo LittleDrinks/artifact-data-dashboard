@@ -1,0 +1,151 @@
+{
+    "Artifacts": [
+        {
+            "artifact_id": "ART001",
+            "name": "示例文物",
+            "description": "这是一个示例文物描述",
+            "tags": "示例;文物",
+            "isCataloged": true,
+            "isDigitized": true,
+            "needsRepair": false
+        }
+    ],
+    "Categories": [
+        {
+            "name": "示例分类",
+            "description": "示例分类描述"
+        }
+    ],
+    "Eras": [
+        {
+            "name": "示例年代",
+            "startYear": "1000",
+            "endYear": "1100"
+        }
+    ],
+    "Locations": [
+        {
+            "name": "示例位置",
+            "region": "示例区域",
+            "longitude": "116.3974",
+            "latitude": "39.9087"
+        }
+    ],
+    "Materials": [
+        {
+            "name": "示例材料",
+            "description": "示例材料描述"
+        }
+    ],
+    "Dimensions": [
+        {
+            "label": "高度",
+            "value": "10.5",
+            "unit": "厘米"
+        }
+    ],
+    "DamageTypes": [
+        {
+            "name": "示例损坏",
+            "severity": "轻微",
+            "description": "示例损坏描述"
+        }
+    ],
+    "RestorationMethods": [
+        {
+            "name": "示例修复方法",
+            "description": "示例修复描述"
+        }
+    ],
+    "ReinforcementMethods": [
+        {
+            "name": "示例加固方法",
+            "description": "示例加固描述"
+        }
+    ],
+    "InspectionTechniques": [
+        {
+            "name": "示例检测技术",
+            "description": "示例检测描述"
+        }
+    ],
+    "ProtectiveMaterials": [
+        {
+            "name": "示例保护材料",
+            "description": "示例保护描述"
+        }
+    ],
+    "InspectionMetrics": [
+        {
+            "name": "示例指标",
+            "unit": "百分比",
+            "idealRange": "40-60"
+        }
+    ],
+    "REL_HAS_CATEGORY": [
+        {
+            "artifact_id": "ART001",
+            "category_name": "示例分类"
+        }
+    ],
+    "REL_BELONGS_TO_ERA": [
+        {
+            "artifact_id": "ART001",
+            "era_name": "示例年代"
+        }
+    ],
+    "REL_STORED_AT": [
+        {
+            "artifact_id": "ART001",
+            "location_name": "示例位置"
+        }
+    ],
+    "REL_MADE_OF": [
+        {
+            "artifact_id": "ART001",
+            "material_name": "示例材料"
+        }
+    ],
+    "REL_HAS_DIMENSION": [
+        {
+            "artifact_id": "ART001",
+            "dimension_label": "高度"
+        }
+    ],
+    "REL_HAS_DAMAGE": [
+        {
+            "artifact_id": "ART001",
+            "damage_name": "示例损坏"
+        }
+    ],
+    "REL_USES_RESTORATION": [
+        {
+            "artifact_id": "ART001",
+            "restoration_name": "示例修复方法"
+        }
+    ],
+    "REL_USES_REINFORCEMENT": [
+        {
+            "artifact_id": "ART001",
+            "reinforcement_name": "示例加固方法"
+        }
+    ],
+    "REL_INSPECTED_BY": [
+        {
+            "artifact_id": "ART001",
+            "technique_name": "示例检测技术"
+        }
+    ],
+    "REL_PROTECTED_WITH": [
+        {
+            "artifact_id": "ART001",
+            "protective_material_name": "示例保护材料"
+        }
+    ],
+    "REL_MEASURED_BY": [
+        {
+            "artifact_id": "ART001",
+            "metric_name": "示例指标"
+        }
+    ]
+}

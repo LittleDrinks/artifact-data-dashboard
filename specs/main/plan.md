@@ -35,7 +35,7 @@ Artifact Data Dashboard 是一个整合 MySQL、Neo4j 与 Redis 的全栈应用�
 *GATE：在 Phase 0 研究前必须通过；Phase 1 设计后需要复查。*
 
 - [x] **Data Traceability**: `main.py` crawler 已存在；需要确保记录执行元数据（execution metadata）。
-- [x] **Data Quality**: Excel 导入 schema 已在 spec 与 `debug.routes.js` 中定义。
+- [x] **Data Quality**: Excel 导入 schema 已在 spec 与 `attachment.routes.js` (原 debug) 中定义。
 - [x] **Modular/Docker**: `docker-compose.yml` 已存在且可用。
 - [x] **Interface Contracts**: API routes 已定义；已生成 OpenAPI spec。
 - [x] **Secure Credentials**: 所有服务已建立 `.env` 的使用方式。
@@ -95,6 +95,10 @@ build_kg/
 	- 后端：已实现上传/删除 admin-only，读取/下载登录可用。
 	- 前端：独立附件管理页与文物详情内附件区已接入；非 admin 有提示。
 - **数据导出（dict/JSON -> xlsx）**：文档明确固定 sheet/列顺序与归一化规则；提供关键函数复用方式（`derive_export_payload()` / `write_workbook()`）。
+- **Excel 导入/导出（移自 Debug）**：
+	- 导出：生成 Excel 并作为附件保存（`ownerType="system_export"`）。
+	- 导入：从附件（`ownerType="system_import"`）触发导入逻辑。
+	- 权限：仅 admin 可触发。
 - **AI 插件化**：目前为规格/任务层，代码仍为单一 MCPService（未引入配置驱动的 provider/capability registry）。
 
 ## Gap Analysis (Spec / Contract / Implementation)

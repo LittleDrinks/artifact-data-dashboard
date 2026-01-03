@@ -53,4 +53,25 @@ Thumbs.db
 
 # large resource files
 .reference/
-build_kg/crawler/images_shenzhen
+build_kg/crawler/images_shenzhen/
+build_kg/crawler/images_*/
+
+# Generated exports / local artifacts
+*.xlsx
+build_kg/**/*.xlsx
+
+# Large crawler outputs (keep locally, avoid committing)
+build_kg/crawler/artifact.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+ENV/
+env/

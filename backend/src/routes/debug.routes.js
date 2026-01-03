@@ -3,7 +3,7 @@ const multer = require('multer');
 const XLSX = require('xlsx');
 const neo4j = require('neo4j-driver');
 const { mysqlPool, neo4jDriver } = require('../config/database');
-const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS } = require('../config/excel-schema');
+const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS, EXCEL_SCHEMA } = require('../config/excel-schema');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 const router = express.Router();
@@ -148,6 +148,58 @@ const buildRelationMap = (rows, keyCandidates, valueCandidates) => {
     map.set(String(key), value);
   }
   return map;
+};
+
+const getWorksheetHeaderRow = (worksheet) => {
+  const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    return [];
+  }
+  return (matrix[0] || []).map(cell => String(cell ?? '').trim());
+};
+
+const validateWorkbookSchema = (workbook) => {
+  const sheetNameMap = toSheetNameMap(workbook);
+  const issues = {
+    missingSheets: [],
+    sheets: {}
+  };
+
+  const expectedSheets = [...EXCEL_SCHEMA.nodes, ...EXCEL_SCHEMA.relations];
+
+  for (const expected of expectedSheets) {
+    const resolvedName = sheetNameMap[expected.sheet.toLowerCase()];
+    if (!resolvedName) {
+      issues.missingSheets.push(expected.sheet);
+      continue;
+    }
+
+    const worksheet = workbook.Sheets[resolvedName];
+    const actualHeaders = getWorksheetHeaderRow(worksheet);
+    const expectedHeaders = expected.headers;
+
+    const missingColumns = expectedHeaders.filter((h) => !actualHeaders.includes(h));
+    const extraColumns = actualHeaders.filter((h) => h && !expectedHeaders.includes(h));
+    const sameOrder =
+      actualHeaders.length === expectedHeaders.length &&
+      expectedHeaders.every((h, idx) => actualHeaders[idx] === h);
+
+    if (missingColumns.length || extraColumns.length || !sameOrder) {
+      issues.sheets[expected.sheet] = {
+        expected: expectedHeaders,
+        actual: actualHeaders,
+        missingColumns,
+        extraColumns,
+        orderMatches: sameOrder
+      };
+    }
+  }
+
+  const hasErrors =
+    issues.missingSheets.length > 0 ||
+    Object.keys(issues.sheets).length > 0;
+
+  return { ok: !hasErrors, issues };
 };
 
 const splitTagValues = (value) => {
@@ -439,39 +491,41 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
 
   try {
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    // Strict schema validation (sheet presence + exact column set + exact order)
+    const validation = validateWorkbookSchema(workbook);
+    if (!validation.ok) {
+      return res.status(400).json({
+        message: 'Excel schema 不匹配：请使用系统导出或按固定 schema 生成的文件',
+        issues: validation.issues
+      });
+    }
+
     const sheetNameMap = toSheetNameMap(workbook);
-    const getRows = (target) => {
-      const resolvedName = sheetNameMap[target.toLowerCase()];
-      if (!resolvedName) {
-        return [];
-      }
+    const getRowsByExpectedSheet = (expectedSheetName) => {
+      const resolvedName = sheetNameMap[expectedSheetName.toLowerCase()];
       const worksheet = workbook.Sheets[resolvedName];
       return XLSX.utils.sheet_to_json(worksheet, { defval: null });
     };
 
-    const artifactRows = getRows('artifacts');
-    const rows = artifactRows.length
-      ? artifactRows
-      : XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: null });
-
+    const rows = getRowsByExpectedSheet('Artifacts');
     if (!rows.length) {
-      return res.status(400).json({ message: 'Excel文件为空或无法解析' });
+      return res.status(400).json({ message: 'Artifacts sheet 为空或无法解析' });
     }
 
     const categoryMap = buildRelationMap(
-      getRows('rel_has_category'),
-      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
-      ['category_name', 'categoryName', 'name']
+      getRowsByExpectedSheet('REL_HAS_CATEGORY'),
+      ['artifact_id'],
+      ['category_name']
     );
     const eraMap = buildRelationMap(
-      getRows('rel_belongs_to_era'),
-      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
-      ['era_name', 'eraName', 'name']
+      getRowsByExpectedSheet('REL_BELONGS_TO_ERA'),
+      ['artifact_id'],
+      ['era_name']
     );
     const locationMap = buildRelationMap(
-      getRows('rel_stored_at'),
-      ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id'],
-      ['location_name', 'locationName', 'name']
+      getRowsByExpectedSheet('REL_STORED_AT'),
+      ['artifact_id'],
+      ['location_name']
     );
 
     const connection = await mysqlPool.getConnection();
@@ -490,30 +544,21 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
       const processedKeys = new Set();
 
       for (const row of rows) {
-        const artifactKey = pickValue(row, ['artifact_id', 'artifactId', 'artifactID', 'id', 'ID', 'Id']);
+        const artifactKey = pickValue(row, ['artifact_id']);
         const normalized = {
-          name: pickValue(row, ['name', '名称']) || '',
-          description: pickValue(row, ['description', '描述']) || '',
-          category:
-            pickValue(row, ['category', '类别', 'category_name', 'categoryName']) ||
-            (artifactKey ? categoryMap.get(String(artifactKey)) : null),
-          era:
-            pickValue(row, ['era', '年代', 'era_name', 'eraName']) ||
-            (artifactKey ? eraMap.get(String(artifactKey)) : null),
-          location:
-            pickValue(row, ['location', '地点', 'location_name', 'locationName']) ||
-            (artifactKey ? locationMap.get(String(artifactKey)) : null),
-          image_url: pickValue(row, ['image_url', 'imageUrl', '图片']) || null,
-          tags: normaliseTags(row.tags || row.标签),
-          is_cataloged: parseBoolean(row.is_cataloged ?? row.已入藏 ?? row.已編目 ?? row.已编目),
-          is_digitized: parseBoolean(row.is_digitized ?? row.已数字化 ?? row.已數字化),
-          needs_repair: parseBoolean(row.needs_repair ?? row.需修复 ?? row.需修復)
+          name: pickValue(row, ['name']) || '',
+          description: pickValue(row, ['description']) || '',
+          category: artifactKey ? categoryMap.get(String(artifactKey)) : null,
+          era: artifactKey ? eraMap.get(String(artifactKey)) : null,
+          location: artifactKey ? locationMap.get(String(artifactKey)) : null,
+          image_url: null,
+          tags: normaliseTags(row.tags),
+          is_cataloged: parseBoolean(row.isCataloged),
+          is_digitized: parseBoolean(row.isDigitized),
+          needs_repair: parseBoolean(row.needsRepair)
         };
 
-        let id = normalizeNumericId(pickValue(row, ['id', 'ID', 'Id']));
-        if (!id && artifactKey) {
-          id = normalizeNumericId(artifactKey);
-        }
+        const id = artifactKey ? normalizeNumericId(artifactKey) : null;
 
         const dedupeKey = artifactKey
           ? `artifact:${artifactKey}`
