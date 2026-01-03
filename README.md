@@ -3,7 +3,24 @@
 [![项目状态](https://img.shields.io/badge/状态-功能基本完整-green.svg)](https://github.com/LittleDrinks/artifact-data-dashboard)
 [![Docker](https://img.shields.io/badge/部署-Docker%20Compose-2496ED.svg?logo=docker)](https://github.com)
 
-本项目是一个文物数据管理和智能分析平台，集成了大数据分析、知识图谱和人工智能技术。
+本项目是一个文物数据管理和智能分析平台，集成了大数据分析、知识图谱和人工智能技术。目标是为数据工程师、馆藏管理员、研究人员提供文物/文献的采集、检索、知识图谱与可视化分析平台，支持上传/转换 Excel、生成知识图谱、聊天/检索接口与统计图表。
+
+## 🔧 架构预览
+
+- 后端（Node.js）：API、身份认证、文件上传、聊天接口、Excel→KG 服务。
+- 前端（React）：管理面板、搜索、知识图谱、聊天与附件页面。
+- 数据与爬虫（Python）：爬虫与导出脚本、样例数据在 crawler。
+- 部署：Docker Compose 和 Dockerfiles。
+
+### 关键模块与接口
+后端路由：artifact.routes.js、attachment.routes.js、chat.routes.js、graph.routes.js 等。
+后端服务：excel-kg.service.js（Excel→KG）、mcp.service.js（外部 AI/插件交互）。
+前端页面：Search.js、KnowledgeGraph.js、Chat.js、Attachments.js 等。
+API 合同：api.yaml（查看现有接口定义）。
+
+### 数据与初始化
+您可以使用 DB 初始化脚本：init-mysql.sql、init-neo4j.js。也可以在启动系统后导入指定格式的 .xlsx 文件。
+
 
 ## 🚀 部署指南 (Deployment)
 
@@ -18,12 +35,9 @@ git clone https://github.com/LittleDrinks/artifact-data-dashboard.git
 cd artifact-data-dashboard
 
 # 2. 配置环境变量
-cp .env.example .env
 # 说明：本项目的唯一“人工配置入口”为仓库根目录 `.env`：
 # - docker compose 通过 `env_file: ./.env` 将变量注入到后端/前端容器。
-# - `.env` 不得提交；`.env.example` 为可提交模板。
-# Windows: notepad .env
-# Linux/Mac: nano .env
+cp .env.example .env
 
 # 3. 启动服务 (生产环境)
 docker-compose -f docker-compose.prod.yml up -d --build
