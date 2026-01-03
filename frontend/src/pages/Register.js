@@ -9,7 +9,7 @@ const Register = () => {
   const navigate = useNavigate();
   
   const onFinish = async (values) => {
-    const { username, email, password, confirmPassword } = values;
+    const { username, email, password, confirmPassword, organization, title, bio } = values;
     
     if (password !== confirmPassword) {
       message.error('两次输入的密码不一致');
@@ -19,7 +19,14 @@ const Register = () => {
     setLoading(true);
     
     try {
-      await register(username, email, password);
+      await register({
+        username,
+        email,
+        password,
+        organization,
+        title,
+        bio
+      });
       message.success('注册成功！请登录');
       navigate('/login');
     } catch (error) {
@@ -58,6 +65,27 @@ const Register = () => {
             ]}
           >
             <Input prefix={<MailOutlined />} placeholder="邮箱" />
+          </Form.Item>
+
+          <Form.Item
+            name="organization"
+            rules={[{ max: 150, message: '单位/机构最多150个字符' }]}
+          >
+            <Input placeholder="单位/机构（可选）" />
+          </Form.Item>
+
+          <Form.Item
+            name="title"
+            rules={[{ max: 100, message: '职位/头衔最多100个字符' }]}
+          >
+            <Input placeholder="职位/头衔（可选）" />
+          </Form.Item>
+
+          <Form.Item
+            name="bio"
+            rules={[{ max: 500, message: '个人简介最多500个字符' }]}
+          >
+            <Input.TextArea placeholder="个人简介（可选）" autoSize={{ minRows: 3, maxRows: 6 }} />
           </Form.Item>
           
           <Form.Item

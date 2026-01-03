@@ -1,80 +1,144 @@
 # Tasks: Artifact Data Dashboard v1.0.0
 
-**Spec**: [specs/main/spec.md](specs/main/spec.md) | **Plan**: [specs/main/plan.md](specs/main/plan.md)
-**Status**: 进行中（In Progress）
+**Input**: Design documents from `/specs/main/` (`plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`)
+
+**Scope (2026-01-03)**: 基于 [specs/main/plan.md](specs/main/plan.md) 的“Next”计划拆分任务，聚焦：附件分页端到端对齐、Excel schema 一致性、AI 插件化 MVP（配置+重启+审计）。
+
+**Tests**: 本轮未显式要求 TDD / 测试优先，因此不生成测试任务；如需引入 Jest/Supertest/Cypress，可在后续增补。
+
+## Format
+
+每条任务必须严格遵循：
+
+`- [ ] T### [P?] [US#] 描述（必须包含文件路径）`
+
+- `[P]`：可并行（不同文件、无未完成依赖）
+- `[US#]`：仅用于 User Story 阶段任务（Setup/Foundational/Polish 不加）
+
+---
 
 ## Phase 1: Setup (Project Initialization)
-**Goal**: 确保开发环境与容器编排准备就绪。
 
-- [ ] T001 Verify `docker-compose.yml` includes all services (frontend, backend, mysql, neo4j, redis) with correct ports and volumes.
-- [ ] T002 Verify `backend/.env.example` contains all necessary keys (DB credentials, JWT secret, LLM keys).
-- [ ] T003 [P] Ensure `backend/Dockerfile` and `frontend/Dockerfile` are optimized for development (hot reload).
+**Purpose**: 为后续改动提供一致的本地/容器运行基线。
+
+- [ ] T001 校验附件上传相关环境变量示例与说明在 backend/.env.example
+- [ ] T002 记录附件分页接口的预期响应示例到 specs/main/spec.md（更新 3.1.5 的响应示例段落）
+
+---
 
 ## Phase 2: Foundational (Blocking Prerequisites)
-**Goal**: 建立数据库 schema 与核心鉴权逻辑。
 
-- [ ] T004 Update `backend/scripts/init-mysql.sql` to match v1 schema (add `email`, `organization`, `title`, `bio` to users; `category`, `era`, `tags` to artifacts).
-- [ ] T005 Update `backend/scripts/init-neo4j.js` to define all v1 node types and relationships (Artifact, Category, Era, etc.).
-- [ ] T006 Implement `backend/src/middleware/auth.middleware.js` to support Role-Based Access Control (Admin vs User).
-- [ ] T007 [P] Configure Redis connection in `backend/src/config/database.js` (or equivalent) with error handling.
+**Purpose**: 提供跨功能的基础约定与复用点。
 
-## Phase 3: User Story 1 - Authentication
-**Goal**: 完成安全的注册/登录，并支持角色（role）管理。
+- [ ] T003 统一附件列表响应结构（data + meta）并补齐错误响应约定到 specs/main/contracts/api.yaml
 
-- [ ] T008 [US1] Update `backend/src/routes/auth.routes.js` to support registration with extended user fields.
-- [ ] T009 [US1] Update `frontend/src/services/auth.service.js` to handle new registration payload.
-- [ ] T010 [US1] Update `frontend/src/pages/Register.js` UI to include new fields (Organization, Title, Bio).
-- [ ] T011 [US1] Update `frontend/src/pages/Login.js` to store user role in local storage/context upon login.
+---
 
-## Phase 4: User Story 6 - Data Ingestion
-**Goal**: 建立可靠的数据获取与导入流水线。
+## Phase 3: User Story 1 - Attachment List Pagination (Priority: P1) 🎯 MVP
 
-- [ ] T012 [US6] Enhance `build_kg/crawler/main.py` to add execution logging and error handling.
-- [ ] T013 [US6] Implement/Update `build_kg/convert_artifact_to_excel.py` to ensure output matches `debug.routes.js` schema strictness.
-- [ ] T014 [US6] Update `backend/src/routes/debug.routes.js` (or `import.routes.js`) to enforce strict Excel schema validation during import.
+**Goal**: `/api/attachments` 支持 `page/limit`（默认 `limit=50`），并在前端实现服务端分页；spec/合同/实现对齐。
 
-## Phase 5: User Story 2 - Artifact Management
-**Goal**: Admin 可控的 artifact 管理与公开浏览。
+**Independent Test**:
+- 启动服务后，请求 `GET /api/attachments` 返回最多 50 条，并包含 `meta.total/page/limit/totalPages`。
+- 请求 `GET /api/attachments?page=2&limit=10` 正确分页且仍按 `id DESC`。
+- 携带 `ownerType/ownerId` 时分页仍生效。
+- 前端附件页切换分页会触发新请求并更新表格。
 
-- [ ] T015 [US2] Update `backend/src/routes/artifact.routes.js` to restrict POST/PUT/DELETE to Admin role.
-- [ ] T016 [US2] Update `frontend/src/services/artifact.service.js` to handle 403 Forbidden responses gracefully.
-- [ ] T017 [US2] Update `frontend/src/pages/Dashboard.js` (Artifact List) to hide "Edit/Delete" buttons for non-admin users.
-- [ ] T018 [US2] Implement "Read-Only" view mode in `frontend/src/components/ArtifactForm.js` (or equivalent).
+### Implementation
 
-## Phase 6: User Story 3 - Knowledge Graph
-**Goal**: 高性能的图谱可视化。
+- [ ] T004 [US1] 为 `GET /api/attachments` 增加 `page/limit` 与 COUNT 查询（LIMIT/OFFSET）在 backend/src/routes/attachment.routes.js
+- [ ] T005 [US1] 为附件列表响应增加 `meta` 字段并保持 `id DESC` 在 backend/src/routes/attachment.routes.js
+- [ ] T006 [P] [US1] 为 listAttachments 增加 `page/limit` 参数透传在 frontend/src/services/attachment.service.js
+- [ ] T007 [US1] 将附件管理页改为服务端分页（Table pagination 受控、onChange 触发请求）在 frontend/src/pages/Attachments.js
+- [ ] T008 [P] [US1] 为 OpenAPI `/attachments` 增加 `page/limit` 参数与 `meta` 响应结构在 specs/main/contracts/api.yaml
+- [ ] T009 [US1] 修正附件列表 swagger 注释与真实行为一致在 backend/src/routes/attachment.routes.js
 
-- [ ] T019 [US3] Update `backend/src/routes/graph.routes.js` `GET /` to limit response to Top 100 nodes by default.
-- [ ] T020 [US3] Implement `POST /api/graph/query` in `backend/src/routes/graph.routes.js` for search-based graph expansion.
-- [ ] T021 [US3] Optimize `frontend/src/pages/KnowledgeGraph.js` to handle initial load limit and "Load More" functionality.
+---
 
-## Phase 7: User Story 4 - Chat/QA
-**Goal**: 支持 AI Chat，并实现隐私友好的历史存储策略。
+## Phase 4: User Story 2 - Dict/JSON → XLSX Schema Consistency (Priority: P2)
 
-- [ ] T022 [US4] Update `backend/src/routes/chat.routes.js` to save session metadata (ID, timestamp) to MySQL `logs` table.
-- [ ] T023 [US4] Update `backend/src/routes/chat.routes.js` to save full message history to Redis with 7-day TTL.
-- [ ] T024 [US4] Verify `frontend/src/pages/Chat.js` retrieves history correctly from the new backend logic.
+**Goal**: 以一个“单一权威 schema”减少 Excel 导出/导入/脚本之间的漂移，并保持与 spec 的固定 sheet/列一致。
 
-## Phase 8: User Story 5 - Wordcloud
-**Goal**: 可视化文本分析。
+**Independent Test**:
+- 后端导出的 Excel（若已有导出功能）与 `build_kg/convert_artifact_to_excel.py` 生成的表头集合/列顺序一致。
+- 导入侧严格校验：缺少 sheet 或列名不匹配会拒绝并给出清晰错误。
 
-- [ ] T025 [US5] Verify `backend/src/routes/wordcloud.routes.js` correctly processes text and returns frequency data.
-- [ ] T026 [US5] Ensure `frontend/src/pages/Wordcloud.js` renders ECharts wordcloud correctly with v1 data format.
+### Implementation
 
-## Phase 9: Polish & Cross-Cutting
-**Goal**: 测试与最终文档完善。
+- [ ] T010 [US2] 定义权威 Excel schema（sheets + columns）在 backend/src/config/excel-schema.js
+- [ ] T011 [US2] 让导出逻辑使用 excel-schema.js 的固定顺序在 backend/src/routes/debug.routes.js
+- [ ] T012 [US2] 校验并更新 Python 导出 schema 常量以匹配权威 schema 在 build_kg/convert_artifact_to_excel.py
+- [ ] T013 [US2] 在导入/校验路径中强制 Excel schema 严格匹配并给出错误明细在 backend/src/routes/debug.routes.js
 
-- [ ] T027 Setup Cypress for E2E testing in `frontend/cypress/`.
-- [ ] T028 Write E2E test for "User Login -> View Artifacts" flow.
-- [ ] T029 Write E2E test for "Admin Login -> Create Artifact" flow.
-- [ ] T030 Update `README.md` with v1 features and deployment instructions.
+---
 
-## Dependencies
-- US1（Auth）阻塞 US2、US3、US4、US5。
-- US6（Ingestion）阻塞 US2（Content）。
-- Phase 2（Foundational）阻塞所有 User Stories。
+## Phase 5: User Story 3 - Plugin-based AI Extensions MVP (Priority: P3)
+
+**Goal**: 在不影响核心路径的前提下，引入“配置驱动 + 重启生效”的 AI 插件化骨架，并写入审计日志。
+
+**Independent Test**:
+- 配置文件禁用 provider 时，聊天接口仍可返回“未启用/不可用”的清晰提示（不崩溃）。
+- 启用 provider 后，聊天正常调用；调用过程写入 `logs`（`ai_provider_call`/`ai_plugin_call`/`ai_plugin_error`）。
+- 修改配置并重启后生效。
+
+### Implementation
+
+- [ ] T014 [US3] 新增 AI 插件配置文件示例并定义字段结构在 backend/config/ai-plugins.json
+- [ ] T015 [US3] 实现配置加载与校验（启动时读取，失败可降级）在 backend/src/services/ai/plugin-config.js
+- [ ] T016 [US3] 抽象 Provider 接口并封装现有 MCP 调用为 provider 在 backend/src/services/ai/providers/mcp.provider.js
+- [ ] T017 [US3] 实现 Capability 管道（至少包含 sanitize/logging 的包装点）在 backend/src/services/ai/capabilities/index.js
+- [ ] T018 [US3] 在聊天路径接入插件选择与 capability 管道在 backend/src/routes/chat.routes.js
+- [ ] T019 [US3] 将 AI 调用审计写入 MySQL logs（含 provider/capability 标识与结果）在 backend/src/routes/chat.routes.js
+- [ ] T020 [US3] 提供 admin-only 插件状态查看接口（只读即可）在 backend/src/routes/ai-plugins.routes.js
+- [ ] T021 [US3] 挂载 AI 插件状态路由并补充 Swagger/OpenAPI 在 backend/src/index.js
+
+---
+
+## Phase 6: Polish & Cross-Cutting Concerns
+
+**Purpose**: 文档与运维验证，确保交付可用且一致。
+
+- [ ] T022 [P] 更新运行与运维说明（附件分页默认值、AI 插件配置与重启生效）在 README.md
+- [ ] T023 使用 docker-compose.yml 做一次 smoke test 并记录步骤/检查点到 specs/doc/diary.md
+
+---
+
+## Dependencies & Execution Order
+
+### User Story Completion Order
+
+- Phase 1 → Phase 2 → **US1（附件分页）** → **US2（Excel schema 一致性）** → **US3（AI 插件化 MVP）** → Polish
+
+### Why this order
+
+- US1 是当前最大的 spec/合同/实现偏差（P0），优先修复。
+- US2 解决数据导入/导出长期漂移风险。
+- US3 涉及架构变更与审计链路，放在后面降低回归风险。
+
+---
+
+## Parallel Execution Examples
+
+### US1
+
+- 你可以并行处理：
+	- `T006`（frontend/src/services/attachment.service.js）
+	- `T008`（specs/main/contracts/api.yaml）
+
+### Polish
+
+- `T022`（README.md）可与其他开发并行推进。
+
+---
 
 ## Implementation Strategy
-1.  **MVP**: 完成 Phase 1、2、3、5（Setup、Foundation、Auth、Artifacts）。
-2.  **Data**: 完成 Phase 4（Ingestion）以填充系统数据。
-3.  **Advanced**: 完成 Phase 6、7、8（Graph、Chat、Wordcloud）。
+
+### MVP First
+
+1) 完成 Phase 1 + Phase 2
+2) 完成 Phase 3（US1：附件分页端到端）
+3) **停止并验证**：按 US1 的 Independent Test 验收
+
+### Incremental Delivery
+
+- US1 → US2 → US3 每个阶段都要求“可独立验收”，避免一次性大改导致回归难定位。

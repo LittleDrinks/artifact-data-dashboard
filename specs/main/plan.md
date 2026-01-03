@@ -1,13 +1,22 @@
 # Implementation Plan: Artifact Data Dashboard v1.0.0
 
-**Branch**: `main` | **Date**: 2026-01-02 | **Spec**: [specs/main/spec.md](specs/main/spec.md)
+**Branch**: `main` | **Date**: 2026-01-03 | **Spec**: [specs/main/spec.md](specs/main/spec.md)
 **Input**: 来自 `.specify/memory/specification.md` 的功能规格说明
 
 **Note**: 本文档由 `/speckit.plan` 命令自动填充。执行流程见 `.specify/templates/commands/plan.md`。
 
 ## Summary
 
-Artifact Data Dashboard 是一个整合 MySQL、Neo4j 与 Redis 的全栈应用，用于提供文物（artifact）管理、知识图谱可视化以及 AI Chat。本计划聚焦于稳定 v1.0.0：强化数据质量、将写权限限制为 Admin、优化图谱性能，并移除超出范围的预测模型（predictive model）。
+Artifact Data Dashboard 是一个整合 MySQL、Neo4j 与 Redis 的全栈应用，用于提供文物（artifact）管理、知识图谱可视化以及 AI Chat。
+
+本计划以“当前仓库实现状态”为基线（已用 repomix 复核），聚焦 v1.0.0 的收敛与对齐：
+
+1) 对齐附件列表分页（spec 已确认 `GET /attachments?page&limit`，默认 `limit=50`）并同步前端与 OpenAPI
+2) 修正实现与文档/Swagger 注释的偏差，减少误导
+3) 以最小可交付方式落地 AI 插件化（配置文件 + 重启生效 + 审计日志），避免影响核心路径
+4) 同步 tasks 勾选与验收口径，保持“规格/合同/实现”一致
+
+> 备注：数据导出文档策略已调整为“仅提供关键函数 `derive_export_payload()` 与输入字段规范”，不再提供独立导出脚本。
 
 ## Technical Context
 
@@ -43,7 +52,7 @@ specs/main/
 ├── data-model.md        # Phase 1 output
 ├── contracts/           # Phase 1 output
 │   └── api.yaml
-└── tasks.md             # Phase 2 output (to be generated)
+└── tasks.md             # Phase 2 output
 ```
 
 ### 源码（仓库根目录）
@@ -76,6 +85,92 @@ build_kg/
 ```
 
 **Structure Decision**: 标准 Monorepo：Frontend/Backend 与数据脚本分离。
+
+## Current State (as of 2026-01-03)
+
+基于仓库现状（代码 + 文档 + OpenAPI）汇总：
+
+- **Artifacts 管理**：后端已限制 POST/PUT/DELETE 为 admin；前端已接入 admin 编辑/删除入口（以 Search 详情弹窗为最小入口）。
+- **附件管理**：
+	- 后端：已实现上传/删除 admin-only，读取/下载登录可用。
+	- 前端：独立附件管理页与文物详情内附件区已接入；非 admin 有提示。
+- **数据导出（dict/JSON -> xlsx）**：文档明确固定 sheet/列顺序与归一化规则；提供关键函数复用方式（`derive_export_payload()` / `write_workbook()`）。
+- **AI 插件化**：目前为规格/任务层，代码仍为单一 MCPService（未引入配置驱动的 provider/capability registry）。
+
+## Gap Analysis (Spec / Contract / Implementation)
+
+1) **附件分页（P0）**
+	 - Spec：要求 `GET /attachments?page&limit`，默认 `limit=50`，按 `id DESC`。
+	 - 实现：`GET /api/attachments` 当前为全量返回（仅过滤 ownerType/ownerId），无 page/limit。
+	 - OpenAPI：`/attachments` 当前缺少 page/limit 参数与分页 meta 约定。
+	 - 影响：数据量上来后会造成接口慢/前端体验差，并且“spec/合同/实现”不一致。
+
+2) **附件 Swagger 注释不一致（P1）**
+	 - `backend/src/routes/attachment.routes.js` 的注释仍包含“默认仅返回当前用户上传”的描述，但实际实现是全量（可过滤）。
+	 - 影响：API 文档误导使用者。
+
+3) **AI 插件化未落地（P2）**
+	 - Spec：配置文件 + 重启生效；admin-only 管理（最小可解释为“仅 admin 可查看/变更开关”）；调用写入 logs。
+	 - 实现：MCPService 直接读取 env 并调用，不存在插件 registry、配置文件与审计落库。
+
+## Execution Plan (Next)
+
+### Phase A (P0): Attachments Pagination — End-to-End
+
+目标：把分页“端到端”补齐，并保证 spec/合同/实现一致。
+
+后端（必做）：
+- `backend/src/routes/attachment.routes.js`
+	- 为 `GET /api/attachments` 增加 `page`/`limit` query（默认 `limit=50`；page 默认 1）。
+	- 返回结构增加 `meta: { total, page, limit, totalPages }`。
+	- SQL：增加 `LIMIT/OFFSET`；增加总数查询 `COUNT(*)`（与过滤条件一致）。
+
+前端（必做）：
+- `frontend/src/services/attachment.service.js`：`listAttachments` 支持传入 `page`/`limit`。
+- `frontend/src/pages/Attachments.js`
+	- Table 改为受控分页（由接口返回 meta 驱动），避免仅做前端本地分页。
+	- 交互：切页/改 pageSize 触发重新请求。
+
+合同（必做）：
+- `specs/main/contracts/api.yaml`
+	- 为 `/attachments` 增加 `page`/`limit` 参数。
+	- 响应中补充 `meta` 结构（与后端保持一致）。
+
+验收点：
+- 默认不传 `limit` 时，返回最多 50 条。
+- 按 `id DESC`。
+- `ownerType/ownerId` 过滤与分页同时生效。
+
+### Phase B (P1): Documentation / Swagger Consistency
+
+目标：消除已知误导。
+
+- 修正 `backend/src/routes/attachment.routes.js` 中 swagger summary/description，使其描述真实行为（可按 ownerType/ownerId 过滤，不默认限制 uploaded_by）。
+
+### Phase C (P2): AI Plugins MVP (Config + Restart + Audit)
+
+目标：在不重构现有聊天主链路的前提下，引入“最小插件化骨架”。
+
+建议最小交付内容：
+- 新增配置文件（示例：`backend/config/ai-plugins.json`）：声明启用的 provider 与 capability。
+- 引入轻量 registry（provider vs capability 的边界按 spec）：
+	- provider：负责实际模型调用（先把现有 MCPService 包装成一个 provider）。
+	- capability：对输入/输出做增强（例如 logging/sanitize 的包装层）。
+- 在聊天调用路径中写入 MySQL `logs`：
+	- `ai_provider_call` / `ai_plugin_call` / `ai_plugin_error`
+
+验收点：
+- 改配置后重启生效。
+- 插件禁用时不影响核心路径（给出可理解的“未启用”反馈）。
+- 调用可追溯（logs 有记录）。
+
+### Phase D: Sync Tasks
+
+目标：让 `specs/main/tasks.md` 与代码现状一致。
+
+- 勾选已完成项（Artifacts admin-only、附件权限收敛等）。
+- 将附件分页拆成明确子任务（后端/前端/合同）。
+- AI 插件化拆成“配置文件、registry、日志”三个子任务，便于迭代验收。
 
 ## Complexity Tracking
 

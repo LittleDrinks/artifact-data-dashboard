@@ -1,7 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert, Modal, Table, Image } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert, Modal, Table, Image, Space, Upload, message } from 'antd';
 import { SearchOutlined, EnvironmentOutlined, ClockCircleOutlined, TagOutlined } from '@ant-design/icons';
-import { searchArtifacts, getArtifactById } from '../services/artifact.service';
+import { searchArtifacts, getArtifactById, updateArtifact, deleteArtifact } from '../services/artifact.service';
+import { getCurrentUser } from '../services/auth.service';
+import ArtifactForm from '../components/ArtifactForm';
+import axios from 'axios';
+import { deleteAttachment, getAttachmentDownloadUrl, listAttachments, uploadAttachment } from '../services/attachment.service';
 
 const { Search } = Input;
 
@@ -91,6 +95,9 @@ const buildDetailRows = (artifact) => {
 };
 
 const ArtifactSearch = () => {
+  const [user] = useState(() => getCurrentUser());
+  const isAdmin = user?.role === 'admin';
+
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [artifacts, setArtifacts] = useState([]);
@@ -105,6 +112,14 @@ const ArtifactSearch = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailAlert, setDetailAlert] = useState(null);
   const [selectedArtifact, setSelectedArtifact] = useState(null);
+
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false);
+  const [attachmentsError, setAttachmentsError] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   // 执行搜索
   const handleSearch = async (value = keyword, page = 1) => {
@@ -216,7 +231,231 @@ const ArtifactSearch = () => {
     setDetailAlert(null);
   };
 
+  const openEditModal = () => {
+    if (!isAdmin) {
+      return;
+    }
+    if (!selectedArtifact?.id) {
+      message.warning('无法确定文物编号，暂不支持编辑');
+      return;
+    }
+    setEditOpen(true);
+  };
+
+  const handleUpdateArtifact = async (payload) => {
+    if (!selectedArtifact?.id) {
+      message.error('无法确定文物编号');
+      return;
+    }
+
+    setEditSubmitting(true);
+    try {
+      const resp = await updateArtifact(selectedArtifact.id, payload);
+      setSelectedArtifact((prev) => ({
+        ...prev,
+        ...resp.data
+      }));
+      message.success('保存成功');
+      setEditOpen(false);
+      if (keyword) {
+        await handleSearch(keyword, pagination.current);
+      }
+    } catch (err) {
+      console.error('更新文物失败:', err);
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可编辑');
+      } else {
+        message.error(err.response?.data?.message || '更新失败，请稍后重试');
+      }
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteArtifact = async () => {
+    if (!selectedArtifact?.id) {
+      message.error('无法确定文物编号');
+      return;
+    }
+
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除文物“${selectedArtifact.name || selectedArtifact.id}”吗？此操作不可恢复。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteArtifact(selectedArtifact.id);
+          message.success('删除成功');
+          closeDetailModal();
+          if (keyword) {
+            await handleSearch(keyword, pagination.current);
+          }
+        } catch (err) {
+          console.error('删除文物失败:', err);
+          if (err.response?.status === 403) {
+            message.error('权限不足：仅管理员可删除');
+          } else {
+            message.error(err.response?.data?.message || '删除失败，请稍后重试');
+          }
+        }
+      }
+    });
+  };
+
   const detailRows = useMemo(() => buildDetailRows(selectedArtifact), [selectedArtifact]);
+
+  const refreshAttachments = useCallback(async (artifactId) => {
+    if (!artifactId) {
+      setAttachments([]);
+      setAttachmentsError(null);
+      return;
+    }
+    setAttachmentsLoading(true);
+    try {
+      const resp = await listAttachments({ ownerType: 'artifact', ownerId: artifactId });
+      setAttachments(resp.data?.data || []);
+      setAttachmentsError(null);
+    } catch (err) {
+      console.error('加载附件失败:', err);
+      setAttachments([]);
+      setAttachmentsError(err.response?.data?.message || '加载附件失败');
+    } finally {
+      setAttachmentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (detailVisible && selectedArtifact?.id) {
+      refreshAttachments(selectedArtifact.id);
+    }
+  }, [detailVisible, selectedArtifact?.id, refreshAttachments]);
+
+  const handleDownloadAttachment = async (row) => {
+    try {
+      const url = getAttachmentDownloadUrl(row.id);
+      const resp = await axios.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(resp.data);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = row.originalName || `attachment_${row.id}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('下载失败:', err);
+      message.error(err.response?.data?.message || '下载失败');
+    }
+  };
+
+  const handleDeleteAttachment = async (row) => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可删除');
+      return;
+    }
+
+    Modal.confirm({
+      title: '确认删除附件',
+      content: `确定要删除附件“${row.originalName || row.id}”吗？此操作不可恢复。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteAttachment(row.id);
+          message.success('删除成功');
+          if (selectedArtifact?.id) {
+            await refreshAttachments(selectedArtifact.id);
+          }
+        } catch (err) {
+          console.error('删除附件失败:', err);
+          if (err.response?.status === 403) {
+            message.error('权限不足：仅管理员可删除');
+          } else {
+            message.error(err.response?.data?.message || '删除失败');
+          }
+        }
+      }
+    });
+  };
+
+  const uploadAttachmentProps = {
+    maxCount: 1,
+    showUploadList: false,
+    customRequest: async ({ file, onSuccess, onError }) => {
+      if (!isAdmin) {
+        message.error('权限不足：仅管理员可上传');
+        onError?.(new Error('forbidden'));
+        return;
+      }
+      if (!selectedArtifact?.id) {
+        message.error('无法确定文物编号');
+        onError?.(new Error('missing_artifact_id'));
+        return;
+      }
+      try {
+        setAttachmentsUploading(true);
+        const resp = await uploadAttachment({
+          file,
+          ownerType: 'artifact',
+          ownerId: selectedArtifact.id
+        });
+        message.success('上传成功');
+        onSuccess?.(resp.data);
+        await refreshAttachments(selectedArtifact.id);
+      } catch (err) {
+        console.error('上传附件失败:', err);
+        if (err.response?.status === 403) {
+          message.error('权限不足：仅管理员可上传');
+        } else {
+          message.error(err.response?.data?.message || '上传失败');
+        }
+        onError?.(err);
+      } finally {
+        setAttachmentsUploading(false);
+      }
+    }
+  };
+
+  const attachmentColumns = useMemo(() => {
+    const formatBytes = (bytes) => {
+      const value = Number(bytes);
+      if (!Number.isFinite(value) || value < 0) return '—';
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    };
+
+    return [
+      { title: 'ID', dataIndex: 'id', key: 'id', width: 90 },
+      { title: '文件名', dataIndex: 'originalName', key: 'originalName' },
+      { title: '类型', dataIndex: 'mimeType', key: 'mimeType', width: 180 },
+      { title: '大小', dataIndex: 'sizeBytes', key: 'sizeBytes', width: 120, render: (val) => formatBytes(val) },
+      {
+        title: '创建时间',
+        dataIndex: 'createdAt',
+        key: 'createdAt',
+        width: 190,
+        render: (val) => (val ? new Date(val).toLocaleString() : '—')
+      },
+      {
+        title: '操作',
+        key: 'actions',
+        width: isAdmin ? 200 : 120,
+        render: (_, row) => (
+          <Space>
+            <Button size="small" onClick={() => handleDownloadAttachment(row)}>下载</Button>
+            {isAdmin ? (
+              <Button size="small" danger onClick={() => handleDeleteAttachment(row)}>删除</Button>
+            ) : null}
+          </Space>
+        )
+      }
+    ];
+  }, [handleDownloadAttachment, isAdmin]);
   
   return (
     <div className="search-container">
@@ -329,7 +568,14 @@ const ArtifactSearch = () => {
         title={selectedArtifact?.name || '文物详情'}
         open={detailVisible}
         onCancel={closeDetailModal}
-        footer={null}
+        footer={
+          isAdmin ? (
+            <Space>
+              <Button onClick={openEditModal}>编辑</Button>
+              <Button danger onClick={handleDeleteArtifact}>删除</Button>
+            </Space>
+          ) : null
+        }
         width={720}
         bodyStyle={{ maxHeight: '60vh', overflowY: 'auto' }}
         destroyOnClose
@@ -361,6 +607,46 @@ const ArtifactSearch = () => {
                 />
               </div>
             ) : null}
+
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>附件</div>
+                {isAdmin ? (
+                  <Upload {...uploadAttachmentProps}>
+                    <Button size="small" type="primary" loading={attachmentsUploading}>
+                      上传附件
+                    </Button>
+                  </Upload>
+                ) : null}
+              </div>
+
+              {attachmentsError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="附件加载失败"
+                  description={attachmentsError}
+                  style={{ marginTop: 8 }}
+                />
+              ) : null}
+
+              {attachmentsLoading ? (
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <Spin />
+                </div>
+              ) : (
+                <Table
+                  style={{ marginTop: 8 }}
+                  rowKey="id"
+                  columns={attachmentColumns}
+                  dataSource={attachments}
+                  pagination={false}
+                  size="small"
+                  locale={{ emptyText: '暂无附件' }}
+                />
+              )}
+            </div>
+
             {selectedArtifact ? (
               detailRows.length > 0 ? (
                 <Table
@@ -379,6 +665,15 @@ const ArtifactSearch = () => {
           </>
         )}
       </Modal>
+
+      <ArtifactForm
+        open={editOpen}
+        title="编辑文物"
+        initialValues={selectedArtifact || {}}
+        submitting={editSubmitting}
+        onCancel={() => setEditOpen(false)}
+        onSubmit={handleUpdateArtifact}
+      />
     </div>
   );
 };

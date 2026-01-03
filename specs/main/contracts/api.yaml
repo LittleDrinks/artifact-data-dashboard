@@ -95,3 +95,85 @@ paths:
       responses:
         '200':
           description: 词云数据（Word cloud data）
+
+  /attachments:
+    get:
+      summary: 获取附件列表（List attachments）
+      parameters:
+        - name: ownerType
+          in: query
+          schema:
+            type: string
+        - name: ownerId
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 附件列表
+
+  /attachments/upload:
+    post:
+      summary: 上传附件（仅 Admin）（Upload attachment - Admin only）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                ownerType:
+                  type: string
+                ownerId:
+                  type: integer
+      responses:
+        '201':
+          description: 上传成功
+        '403':
+          description: 权限不足（仅管理员可上传）
+
+  /attachments/{id}:
+    get:
+      summary: 获取附件元数据（Get attachment metadata）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 附件元数据
+        '404':
+          description: 附件不存在
+    delete:
+      summary: 删除附件（仅 Admin）（Delete attachment - Admin only）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+        '403':
+          description: 权限不足（仅管理员可删除）
+
+  /attachments/{id}/download:
+    get:
+      summary: 下载附件（Download attachment）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 文件流

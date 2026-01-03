@@ -38,6 +38,18 @@
 - `timestamp`: TIMESTAMP
 - `details`: TEXT
 
+### `attachments`
+- `id`: INT 主键，自增
+- `owner_type`: VARCHAR(50) 可为空（例如 artifact/chat）
+- `owner_id`: INT 可为空（关联对象ID）
+- `uploaded_by`: INT 外键 -> users.id
+- `original_name`: VARCHAR(255)
+- `mime_type`: VARCHAR(100)
+- `size_bytes`: BIGINT
+- `storage_name`: VARCHAR(255)（服务端存储文件名）
+- `created_at`: TIMESTAMP
+- **Indexes**: (owner_type, owner_id), (uploaded_by)
+
 ## Neo4j Graph Model
 
 ### Nodes（节点）

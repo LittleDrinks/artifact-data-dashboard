@@ -57,7 +57,7 @@ const sanitizeField = (value, limit) => {
  */
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, organization, title, bio } = req.body;
     
     // 验证参数
     if (!username || !email || !password) {
@@ -78,10 +78,14 @@ router.post('/register', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     
+    const sanitizedOrganization = sanitizeField(organization, MAX_FIELD_LENGTH.organization);
+    const sanitizedTitle = sanitizeField(title, MAX_FIELD_LENGTH.title);
+    const sanitizedBio = sanitizeField(bio, MAX_FIELD_LENGTH.bio);
+
     // 创建新用户
     const [result] = await mysqlPool.execute(
-      'INSERT INTO users (username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)',
-      [username, email, hashedPassword, 'user', new Date()]
+      'INSERT INTO users (username, email, password_hash, role, organization, title, bio, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [username, email, hashedPassword, 'user', sanitizedOrganization, sanitizedTitle, sanitizedBio, new Date()]
     );
     
     res.status(201).json({ 
@@ -142,18 +146,10 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: '用户名或密码不正确' });
     }
     
-    const user = users[0];    // 验证密码
-    console.log('用户:', user.username, '密码哈希:', user.password_hash);
-    
-    // 临时解决方案：如果是admin用户，直接通过验证
-    let isPasswordValid = false;
-    if (user.username === 'admin' && password === 'admin123') {
-      isPasswordValid = true;
-    } else {
-      isPasswordValid = await bcrypt.compare(password, user.password_hash);
-    }
-    
-    console.log('密码验证结果:', isPasswordValid);
+    const user = users[0];
+
+    // 验证密码
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     
     if (!isPasswordValid) {
       return res.status(401).json({ message: '用户名或密码不正确' });
@@ -184,7 +180,10 @@ router.post('/login', async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        role: user.role
+        role: user.role,
+        organization: user.organization ?? null,
+        title: user.title ?? null,
+        bio: user.bio ?? null
       }
     });
   } catch (error) {

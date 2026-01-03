@@ -43,15 +43,18 @@ const isAdmin = (req) => req.user && req.user.role === 'admin';
 // 读取权限：所有已登录用户可见
 const canReadAttachment = (req, attachmentRow) => Boolean(req.user && attachmentRow);
 
-// 删除权限：仅上传者或管理员
-const canDeleteAttachment = (req, attachmentRow) => {
-  if (!req.user || !attachmentRow) {
-    return false;
+// 删除权限：仅管理员
+const canDeleteAttachment = (req) => Boolean(req.user && isAdmin(req));
+
+const writeLog = async ({ userId, action, targetId = null, details = null }) => {
+  try {
+    await mysqlPool.execute(
+      'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
+      [userId, action, targetId, new Date(), details]
+    );
+  } catch (error) {
+    console.warn('写入日志失败:', error.message);
   }
-  if (isAdmin(req)) {
-    return true;
-  }
-  return Number(attachmentRow.uploaded_by) === Number(req.user.id);
 };
 
 /**
@@ -86,6 +89,10 @@ const canDeleteAttachment = (req, attachmentRow) => {
  */
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可上传附件' });
+    }
+
     if (!req.file) {
       return res.status(400).json({ message: '未找到上传文件' });
     }
@@ -118,6 +125,20 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     );
 
     const attachmentId = result.insertId;
+
+    await writeLog({
+      userId: req.user.id,
+      action: 'upload_attachment',
+      targetId: attachmentId,
+      details: JSON.stringify({
+        ownerType,
+        ownerId,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype || 'application/octet-stream',
+        sizeBytes: req.file.size
+      })
+    });
+
     return res.status(201).json({
       id: attachmentId,
       ownerType,
@@ -344,8 +365,8 @@ router.delete('/:id', async (req, res) => {
     }
 
     const attachment = rows[0];
-    if (!canDeleteAttachment(req, attachment)) {
-      return res.status(403).json({ message: '无权删除此附件' });
+    if (!canDeleteAttachment(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可删除附件' });
     }
 
     const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);
@@ -358,6 +379,19 @@ router.delete('/:id', async (req, res) => {
     }
 
     await mysqlPool.execute('DELETE FROM attachments WHERE id = ?', [attachmentId]);
+
+    await writeLog({
+      userId: req.user.id,
+      action: 'delete_attachment',
+      targetId: attachmentId,
+      details: JSON.stringify({
+        ownerType: attachment.owner_type,
+        ownerId: attachment.owner_id,
+        originalName: attachment.original_name,
+        storageName: attachment.storage_name
+      })
+    });
+
     return res.status(200).json({ message: '删除成功' });
   } catch (error) {
     console.error('删除附件错误:', error);

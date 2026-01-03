@@ -27,15 +27,41 @@ const neo4jDriver = neo4j.driver(
 );
 
 // Redis客户端配置
+const redisPassword = process.env.REDIS_PASSWORD ? String(process.env.REDIS_PASSWORD) : '';
+
 const redisClient = redis.createClient({
   url: `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
-  password: process.env.REDIS_PASSWORD || undefined
+  password: redisPassword ? redisPassword : undefined,
+  socket: {
+    reconnectStrategy: retries => Math.min(retries * 100, 2000)
+  }
 });
+
+redisClient.on('error', err => {
+  console.error('Redis客户端错误:', err);
+});
+
+let redisConnectPromise = null;
+
+const ensureRedisConnected = async () => {
+  if (redisClient.isOpen) {
+    return;
+  }
+
+  if (!redisConnectPromise) {
+    redisConnectPromise = redisClient.connect().catch(err => {
+      redisConnectPromise = null;
+      throw err;
+    });
+  }
+
+  await redisConnectPromise;
+};
 
 // 连接Redis
 (async () => {
   try {
-    await redisClient.connect();
+    await ensureRedisConnected();
     console.log('Redis连接成功');
   } catch (err) {
     console.error('Redis连接失败:', err);
@@ -56,6 +82,16 @@ const testConnections = async () => {
     await neo4jSession.close();
     console.log('Neo4j连接成功');
 
+    // 测试Redis
+    try {
+      await ensureRedisConnected();
+      await redisClient.ping();
+      console.log('Redis连接成功');
+    } catch (redisErr) {
+      console.error('Redis连接测试失败:', redisErr);
+      return false;
+    }
+
     return true;
   } catch (err) {
     console.error('数据库连接测试失败:', err);
@@ -68,7 +104,9 @@ const closeConnections = async () => {
   try {
     await mysqlPool.end();
     await neo4jDriver.close();
-    await redisClient.disconnect();
+    if (redisClient.isOpen) {
+      await redisClient.quit();
+    }
     console.log('所有数据库连接已关闭');
   } catch (err) {
     console.error('关闭数据库连接时出错:', err);
@@ -79,6 +117,7 @@ module.exports = {
   mysqlPool,
   neo4jDriver,
   redisClient,
+  ensureRedisConnected,
   testConnections,
   closeConnections
 };

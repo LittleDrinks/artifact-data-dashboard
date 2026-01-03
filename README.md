@@ -252,7 +252,30 @@ docker exec artifact-dashboard-backend node /app/scripts/init-neo4j.js
 - **工作表命名**：保留系统预期的多表结构，其中包括 `Artifacts`、`Categories`、`Eras`、`Materials`、`Locations` 等节点表，以及 `REL_HAS_CATEGORY`、`REL_BELONGS_TO_ERA` 等关系表；名称长度建议≤31字符。
 - **字段列名**：每个工作表必须保持固定列顺序，例如 `Artifacts` 需要包含 `artifact_id`、`name`、`description`、`tags`、`isCataloged`、`isDigitized`、`needsRepair`；关系表应使用 `artifact_id` 与关联实体字段（如 `category_name`）。
 - **值约定**：布尔值采用 `TRUE`/`FALSE`；多值字段使用英文分号分隔；空值留空即可，无需填充 `NULL`。
-- 推荐通过 `build_kg/convert_artifact_to_excel.py` 将原始 JSON 自动转换为符合要求的 Excel 文件，避免手工格式错误。
+
+### JSON/dict → Excel：只提供关键函数（无独立脚本）
+
+为便于你直接“套用并添加自己的逻辑”，仓库不在文档中提供独立导出脚本；请直接复用 `build_kg/convert_artifact_to_excel.py` 中的关键函数 `derive_export_payload()`。
+
+当你的输入是“爬虫/原始 dict”（顶层 `artifact_id -> payload`）时，payload 内会被读取的字段如下（其余字段可忽略）：
+
+- `name`：文物名称（建议提供）
+- 组成 `description` 的可选字段：`note`、`sourceDetail`、`deptSizeInfo`、`explainTxt`（允许 HTML）
+- 组成 `tags` 的可选字段：`categoryName`、`levelName`、`yearInfo`（用 `; ` 拼接）
+- 类别：`categoryName` 或 `categoryInfo`（用于类别名）；`categoryInfo` 也会作为类别描述
+- 年代：`yearStartName` 或 `yearInfo`（用于年代名）；`yearStart` / `yearEnd`（起止年份）
+
+最小复用方式（你自己的脚本/Notebook 中）：
+
+```python
+from pathlib import Path
+
+from build_kg.convert_artifact_to_excel import derive_export_payload, load_json, write_workbook
+
+raw_payload = load_json(Path("artifact.json"))
+prepared_payload = derive_export_payload(raw_payload)
+write_workbook(prepared_payload, Path("output.xlsx"))
+```
 
 ## 📋 API文档
 

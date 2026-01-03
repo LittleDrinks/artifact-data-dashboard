@@ -1,0 +1,17 @@
+# 后端开发环境 Dockerfile
+FROM crpi-kl2yo8a1hefddu65.cn-hangzhou.personal.cr.aliyuncs.com/csj_images/node:16-alpine
+
+# 安装构建 bcrypt 等原生依赖所需的工具链
+RUN apk add --no-cache python3 make g++ gcc
+
+WORKDIR /app
+
+# 复制依赖清单并安装依赖
+COPY package*.json ./
+RUN npm install --registry=https://registry.npmmirror.com
+
+# 开发模式下，源码通过卷挂载进来，不需要 COPY 全量代码
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

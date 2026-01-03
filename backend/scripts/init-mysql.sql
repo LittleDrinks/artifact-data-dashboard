@@ -94,6 +94,3 @@ INSERT INTO artifacts (name, description, category, era, location, image_url, ta
 ('越王勾践剑', '春秋晚期越国青铜宝剑，锋利无比，历经两千余年仍可断发，代表了中国古代青铜冶炼工艺的最高水平。', '兵器', '春秋', '湖北', '/images/artifacts/goujian-sword.jpg', '宝剑,越王,青铜', TRUE, TRUE, FALSE),
 ('明宣德炉', '明宣德年间铜质香炉，炉体呈圆形，口沿外撇，腹部稍鼓，三足，铜质细腻，包浆均匀。', '铜器', '明代', '北京', '/images/artifacts/xuande-censer.jpg', '香炉,宣德,铜器', TRUE, FALSE, FALSE),
 ('青花缠枝莲纹梅瓶', '元代青花瓷器，瓶体修长，颈部短小，肩部圆缓，绘有缠枝莲纹，青花发色纯正。', '瓷器', '元代', '江西', '/images/artifacts/blue-white-meiping.jpg', '青花,梅瓶,元青花', TRUE, TRUE, FALSE);
-
--- 创建全文索引
-ALTER TABLE artifacts ADD FULLTEXT (name, description, tags);

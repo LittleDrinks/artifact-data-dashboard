@@ -54,17 +54,17 @@ export const login = async (username, password) => {
 
 /**
  * 用户注册
- * @param {string} username 用户名
- * @param {string} email 邮箱
- * @param {string} password 密码
+ * @param {Object} payload 注册信息
+ * @param {string} payload.username 用户名
+ * @param {string} payload.email 邮箱
+ * @param {string} payload.password 密码
+ * @param {string=} payload.organization 单位/机构
+ * @param {string=} payload.title 职位/头衔
+ * @param {string=} payload.bio 个人简介
  * @returns {Promise} 注册结果
  */
-export const register = async (username, email, password) => {
-  return axios.post(API_URL + 'register', {
-    username,
-    email,
-    password
-  });
+export const register = async (payload) => {
+  return axios.post(API_URL + 'register', payload);
 };
 
 /**

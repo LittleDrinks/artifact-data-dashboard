@@ -1,8 +1,18 @@
 const express = require('express');
-const { neo4jDriver, redisClient, mysqlPool } = require('../config/database');
+const { neo4jDriver, redisClient, mysqlPool, ensureRedisConnected } = require('../config/database');
 const mcpService = require('../services/mcp.service');
 
 const router = express.Router();
+
+router.use(async (req, res, next) => {
+  try {
+    await ensureRedisConnected();
+    return next();
+  } catch (error) {
+    console.error('Redis不可用:', error);
+    return res.status(503).json({ message: 'Redis不可用，请稍后再试' });
+  }
+});
 
 /**
  * @swagger

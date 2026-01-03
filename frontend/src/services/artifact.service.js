@@ -35,3 +35,28 @@ export const searchArtifacts = async (keyword, page = 1, limit = 10) => {
     params: { keyword, page, limit }
   });
 };
+
+/**
+ * 创建文物（管理员）
+ * @param {Object} payload 文物数据
+ */
+export const createArtifact = async (payload) => {
+  return axios.post(API_URL, payload);
+};
+
+/**
+ * 更新文物（管理员）
+ * @param {number} id 文物ID
+ * @param {Object} payload 文物数据（可部分更新）
+ */
+export const updateArtifact = async (id, payload) => {
+  return axios.put(`${API_URL}${id}`, payload);
+};
+
+/**
+ * 删除文物（管理员）
+ * @param {number} id 文物ID
+ */
+export const deleteArtifact = async (id) => {
+  return axios.delete(`${API_URL}${id}`);
+};

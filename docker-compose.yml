@@ -30,7 +30,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: artifact-dashboard-backend
     ports:
       - "3000:3000"

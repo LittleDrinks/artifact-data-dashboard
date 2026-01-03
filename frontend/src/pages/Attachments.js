@@ -19,6 +19,7 @@ const formatBytes = (bytes) => {
 
 const Attachments = () => {
   const [user] = useState(() => getCurrentUser());
+  const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -50,8 +51,7 @@ const Attachments = () => {
 
   const canDeleteRow = (row) => {
     if (!user || !row) return false;
-    if (user.role === 'admin') return true;
-    return Number(row.uploadedBy) === Number(user.id);
+    return user.role === 'admin';
   };
 
   const handleDownload = async (row) => {
@@ -79,7 +79,11 @@ const Attachments = () => {
       refresh();
     } catch (err) {
       console.error('删除失败:', err);
-      message.error(err.response?.data?.message || '删除失败');
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可删除');
+      } else {
+        message.error(err.response?.data?.message || '删除失败');
+      }
     }
   };
 
@@ -144,6 +148,11 @@ const Attachments = () => {
     showUploadList: false,
     customRequest: async ({ file, onSuccess, onError }) => {
       try {
+        if (!isAdmin) {
+          message.error('权限不足：仅管理员可上传');
+          onError?.(new Error('forbidden'));
+          return;
+        }
         setUploading(true);
         const resp = await uploadAttachment({
           file,
@@ -155,7 +164,11 @@ const Attachments = () => {
         refresh();
       } catch (err) {
         console.error('上传失败:', err);
-        message.error(err.response?.data?.message || '上传失败');
+        if (err.response?.status === 403) {
+          message.error('权限不足：仅管理员可上传');
+        } else {
+          message.error(err.response?.data?.message || '上传失败');
+        }
         onError?.(err);
       } finally {
         setUploading(false);
@@ -189,6 +202,16 @@ const Attachments = () => {
       >
         {error ? (
           <Alert type="error" showIcon message="错误" description={error} style={{ marginBottom: 16 }} />
+        ) : null}
+
+        {!isAdmin ? (
+          <Alert
+            type="info"
+            showIcon
+            message="权限提示"
+            description="所有登录用户可查看与下载附件；仅管理员可上传与删除。"
+            style={{ marginBottom: 16 }}
+          />
         ) : null}
 
         <div style={{ marginBottom: 16 }}>
