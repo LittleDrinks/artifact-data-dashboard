@@ -46,3 +46,16 @@ export const deleteAttachment = async (id) => {
 export const getAttachmentDownloadUrl = (id) => {
   return `${BASE}/${id}/download`;
 };
+
+export const exportKnowledgeGraphExcel = async () => {
+  return axios.post(`${BASE}/excel/export`);
+};
+
+export const importKnowledgeGraphExcelFromAttachment = async ({ id, strategy } = {}) => {
+  const attachmentId = id;
+  const params = {};
+  if (strategy !== undefined && strategy !== null && String(strategy).trim() !== '') {
+    params.strategy = strategy;
+  }
+  return axios.post(`${BASE}/${attachmentId}/excel/import`, null, { params });
+};

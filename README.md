@@ -71,67 +71,35 @@ Windows 也可以直接使用脚本：
 
 系统支持通过 Excel 文件批量导入文物数据。导入功能位于“附件管理”模块（仅限管理员）。
 
-> **💡 示例文件与工具**：
-> 项目在 `build_kg/` 目录下提供了示例数据和转换脚本，可用于生成标准的导入模板：
-> - **[build_kg/test.json](build_kg/test.json)**: JSON 格式的完整示例文物数据。
-> - **[build_kg/process.py](build_kg/process.py)**: 将 JSON 数据转换为符合系统要求的 Excel 文件的 Python 脚本。
->
-> **生成示例 Excel**:
-> ```bash
-> cd build_kg
-> python process.py test.json artifact_import_template.xlsx
-> ```
 
-Excel 模板字段/工作表的最终定义以后端配置为准：
+Excel 模板的 **sheet/列名/列顺序** 为固定 schema，权威定义以：
 
 - `backend/src/config/excel-schema.js`
 
-**Excel 结构要求：**
-Excel 文件应包含以下工作表（Sheet），每个工作表对应一类实体或关系。
+为准。Python 侧转换建议复用：
 
-#### 实体表 (Entities)
-
-| 工作表名 | 必需列 (Columns) | 说明 |
-| :--- | :--- | :--- |
-| **Artifacts** | `artifact_id`, `name`, `category`, `era`, `description`, `image_url` | 文物核心数据 |
-| **Eras** | `name`, `start_year`, `end_year` | 朝代/时期信息 |
-| **Categories** | `name`, `description` | 文物类别 |
-| **Materials** | `name`, `description` | 材质信息 |
-| **Locations** | `name`, `region` | 馆藏地点 |
-
-#### 关系表 (Relationships)
-
-| 工作表名 | 必需列 (Columns) | 说明 |
-| :--- | :--- | :--- |
-| **REL_HAS_CATEGORY** | `artifact_id`, `category_name` | 文物 -> 类别 |
-| **REL_BELONGS_TO_ERA** | `artifact_id`, `era_name` | 文物 -> 朝代 |
-| **REL_MADE_OF** | `artifact_id`, `material_name` | 文物 -> 材质 |
-| **REL_STORED_AT** | `artifact_id`, `location_name` | 文物 -> 地点 |
-
-> **注意**：
-> - `artifact_id` 必须唯一。
-> - 关系表中的 `*_name` 必须与对应实体表中的 `name` 一致。
-> - 布尔值请使用 `TRUE`/`FALSE`。
+- `build_kg/convert_artifact_to_excel.py` 中的 `derive_export_payload()` / `write_workbook()`
 
 ### 2. AI 插件配置 (AI Plugins)
 
 智能问答功能基于 MCP (Model Context Protocol) 架构。
 
-- **配置文件**: `backend/config/ai-plugins.json`
-- **配置方式**: 修改文件后重启后端容器。
-- **查看状态**: `GET /api/ai-plugins/status` (管理员)
+- **配置文件**: `backend/config/ai-plugins.json`（可通过 `.env` 的 `AI_PLUGINS_CONFIG` 覆盖路径）
+- **配置方式**: 修改配置后重启后端容器生效。
+- **查看状态**: `GET /api/ai-plugins/status`（仅管理员）
 
 示例配置：
 ```json
 {
-  "plugins": [
-    {
-      "name": "artifact-qa",
-      "enabled": true,
-      "provider": "openai",
-      "config": { "model": "gpt-3.5-turbo" }
-    }
-  ]
+  "version": 1,
+  "defaultProvider": "mcp",
+  "providers": {
+    "mcp": { "enabled": true }
+  },
+  "capabilities": {
+    "sanitize": { "enabled": true },
+    "logging": { "enabled": true }
+  }
 }
 ```
 
@@ -140,8 +108,13 @@ Excel 文件应包含以下工作表（Sheet），每个工作表对应一类实
 附件管理提供分页查询接口，用于管理上传的图片和文档。
 
 - **接口**: `GET /api/attachments`
-- **参数**: `page` (页码), `limit` (每页数量)
+- **参数**: `page` (页码), `limit` (每页数量，默认 50), `ownerType`/`ownerId`（可选过滤）
 - **功能**: 支持 Excel 导入/导出 (Admin Only)。
+
+Excel 导入/导出（移自 Debug，Admin Only）：
+
+- 导出为附件：`POST /api/attachments/excel/export`（生成 `ownerType="system_export"` 的附件）
+- 从附件触发导入：`POST /api/attachments/{id}/excel/import?strategy=append|overwrite`（要求该附件为 `ownerType="system_import"`）
 
 ## 🛠️ 开发与维护
 

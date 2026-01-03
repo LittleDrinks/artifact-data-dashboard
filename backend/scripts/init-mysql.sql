@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS logs (
   target_id INT,
   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   details TEXT,
+  INDEX idx_logs_user_timestamp (user_id, timestamp),
+  INDEX idx_logs_action_timestamp (action, timestamp),
+  INDEX idx_logs_action_target (action, target_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

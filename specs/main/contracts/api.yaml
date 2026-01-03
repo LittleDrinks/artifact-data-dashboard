@@ -79,6 +79,47 @@ components:
       required:
         - data
         - meta
+
+    AiPluginsStatus:
+      type: object
+      properties:
+        configPath:
+          type: string
+        version:
+          type: integer
+        defaultProvider:
+          type: string
+        providers:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+        capabilities:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+        enabled:
+          type: boolean
+      required:
+        - configPath
+        - version
+        - defaultProvider
+        - providers
+        - capabilities
+        - enabled
+
+    AiPluginsStatusResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/AiPluginsStatus'
+      required:
+        - data
 security:
   - bearerAuth: []
 paths:
@@ -257,6 +298,29 @@ paths:
           description: 删除成功
         '403':
           description: 权限不足（仅管理员可删除）
+
+  /ai-plugins/status:
+    get:
+      summary: 获取 AI 插件状态（仅 Admin）（Get AI plugins status - Admin only）
+      responses:
+        '200':
+          description: 当前配置与启用状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiPluginsStatusResponse'
+        '401':
+          description: 未登录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /attachments/{id}/download:
     get:

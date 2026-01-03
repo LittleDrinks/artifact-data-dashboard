@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -141,22 +140,3 @@ def write_workbook(prepared: Dict[str, List[Dict[str, Any]]], output_path: Path)
             frame = build_frame(rows, columns)
             frame = frame.apply(lambda col: col.map(normalise_cell), axis=0)
             frame.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-
-
-def main(input_path: str, output_path: str) -> None:
-    source = Path(input_path)
-    if not source.exists():
-        raise FileNotFoundError(f"无法找到输入文件: {source}")
-
-    raw_payload = load_json(source)
-    prepared_payload = derive_export_payload(raw_payload)
-    write_workbook(prepared_payload, Path(output_path))
-    print(f"转换完成: {output_path}")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("用法: python convert_artifact_to_excel.py <artifact.json路径> <输出excel路径>")
-        sys.exit(1)
-
-    main(sys.argv[1], sys.argv[2])

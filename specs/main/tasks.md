@@ -21,8 +21,8 @@
 
 **Purpose**: 为后续改动提供一致的本地/容器运行与配置基线。
 
-- [ ] T001 补齐附件上传与 AI 插件相关环境变量示例在 backend/.env.example
-- [ ] T002 明确 v1.0.0 的交付范围与验收口径（链接到 plan/spec/contract）在 specs/main/plan.md
+- [X] T001 补齐附件上传与 AI 插件相关环境变量示例在 .env.example
+- [X] T002 明确 v1.0.0 的交付范围与验收口径（链接到 plan/spec/contract）在 specs/main/plan.md
 
 ---
 
@@ -30,8 +30,8 @@
 
 **Purpose**: 提供跨故事共用的最小基础约定（数据库/合同基础结构）。
 
-- [ ] T003 校验并对齐 logs/attachments 表结构（含 details 字段与索引）在 backend/scripts/init-mysql.sql
-- [ ] T004 提供可复用的分页与附件响应 schema（PaginationMeta/AttachmentsListResponse）在 specs/main/contracts/api.yaml
+- [X] T003 校验并对齐 logs/attachments 表结构（含 details 字段与索引）在 backend/scripts/init-mysql.sql
+- [X] T004 提供可复用的分页与附件响应 schema（PaginationMeta/AttachmentsListResponse）在 specs/main/contracts/api.yaml
 
 ---
 
@@ -47,14 +47,14 @@
 
 ### Implementation
 
-- [ ] T005 [US1] 实现/校验 `GET /api/attachments` 的 `page/limit` 默认值、过滤条件、COUNT 与 `meta` 在 backend/src/routes/attachment.routes.js
-- [ ] T006 [US1] 确保附件列表按 `id DESC`，并对 limit/offset 做安全校验在 backend/src/routes/attachment.routes.js
-- [ ] T007 [P] [US1] 前端 listAttachments 透传 ownerType/ownerId/page/limit 在 frontend/src/services/attachment.service.js
-- [ ] T008 [US1] 附件管理页使用服务端分页（Table 受控分页 + 切页/改 pageSize 触发请求）在 frontend/src/pages/Attachments.js
-- [ ] T009 [P] [US1] OpenAPI 对齐 `/attachments` 的 query 参数与响应 `data+meta` 在 specs/main/contracts/api.yaml
-- [ ] T010 [US1] Swagger 注释与规格一致（默认 limit=50、权限描述、meta 字段）在 backend/src/routes/attachment.routes.js
-- [ ] T011 [P] [US1] 文物详情附件区对齐响应结构与权限提示（上传/删除仅 admin）在 frontend/src/pages/Search.js
-- [ ] T012 [US1] 上传/删除附件写入审计日志 action=`upload_attachment`/`delete_attachment`（含 details）在 backend/src/routes/attachment.routes.js
+- [X] T005 [US1] 实现/校验 `GET /api/attachments` 的 `page/limit` 默认值、过滤条件、COUNT 与 `meta` 在 backend/src/routes/attachment.routes.js
+- [X] T006 [US1] 确保附件列表按 `id DESC`，并对 limit/offset 做安全校验在 backend/src/routes/attachment.routes.js
+- [X] T007 [P] [US1] 前端 listAttachments 透传 ownerType/ownerId/page/limit 在 frontend/src/services/attachment.service.js
+- [X] T008 [US1] 附件管理页使用服务端分页（Table 受控分页 + 切页/改 pageSize 触发请求）在 frontend/src/pages/Attachments.js
+- [X] T009 [P] [US1] OpenAPI 对齐 `/attachments` 的 query 参数与响应 `data+meta` 在 specs/main/contracts/api.yaml
+- [X] T010 [US1] Swagger 注释与规格一致（默认 limit=50、权限描述、meta 字段）在 backend/src/routes/attachment.routes.js
+- [X] T011 [P] [US1] 文物详情附件区对齐响应结构与权限提示（上传/删除仅 admin）在 frontend/src/pages/Search.js
+- [X] T012 [US1] 上传/删除附件写入审计日志 action=`upload_attachment`/`delete_attachment`（含 details）在 backend/src/routes/attachment.routes.js
 
 ---
 
@@ -69,11 +69,11 @@
 
 ### Implementation
 
-- [ ] T013 [US2] 对齐并冻结权威 Excel schema（sheets+columns）在 backend/src/config/excel-schema.js
-- [ ] T014 [P] [US2] 对齐 Python 侧 schema 常量与后端权威 schema 在 build_kg/convert_artifact_to_excel.py
-- [ ] T015 [US2] 校验并补齐值归一化规则实现（None/bool/list）在 build_kg/convert_artifact_to_excel.py
-- [ ] T016 [US2] 文档化导出复用方式与输入字段规范（保持“无独立脚本”）在 specs/main/spec.md
-- [ ] T017 [P] [US2] 实现 Excel 导入/导出逻辑（移自 debug）：导出生成附件，导入从附件触发，仅 admin 可用在 backend/src/routes/attachment.routes.js
+- [X] T013 [US2] 对齐并冻结权威 Excel schema（sheets+columns）在 backend/src/config/excel-schema.js
+- [X] T014 [P] [US2] 对齐 Python 侧 schema 常量与后端权威 schema 在 build_kg/convert_artifact_to_excel.py
+- [X] T015 [US2] 校验并补齐值归一化规则实现（None/bool/list）在 build_kg/convert_artifact_to_excel.py
+- [X] T016 [US2] 文档化导出复用方式与输入字段规范（保持“无独立脚本”）在 specs/main/spec.md
+- [X] T017 [P] [US2] 实现 Excel 导入/导出逻辑（移自 debug）：导出生成附件，导入从附件触发，仅 admin 可用在 backend/src/routes/attachment.routes.js
 
 ---
 
@@ -88,15 +88,15 @@
 
 ### Implementation
 
-- [ ] T018 [P] [US3] 定义 AI 插件配置文件结构与默认值在 backend/config/ai-plugins.json
-- [ ] T019 [US3] 实现配置加载、校验与缓存（失败降级但不影响启动）在 backend/src/services/ai/plugin-config.js
-- [ ] T020 [P] [US3] 实现 Provider 封装（至少 MCP Provider）在 backend/src/services/ai/providers/mcp.provider.js
-- [ ] T021 [P] [US3] 实现 Capability 管道（sanitize/logging 开关）在 backend/src/services/ai/capabilities/index.js
-- [ ] T022 [US3] 在聊天 SSE 路径接入 provider 选择与 capability 应用，并处理 provider 不可用分支在 backend/src/routes/chat.routes.js
-- [ ] T023 [US3] 将 AI 调用审计写入 MySQL logs（含 providerId、durationMs、结果状态）在 backend/src/routes/chat.routes.js
-- [ ] T024 [US3] 提供 admin-only 插件状态接口在 backend/src/routes/ai-plugins.routes.js
-- [ ] T025 [US3] 挂载 AI 插件路由并保持鉴权/角色校验在 backend/src/index.js
-- [ ] T026 [P] [US3] OpenAPI 增补 `/ai-plugins/status` 接口定义在 specs/main/contracts/api.yaml
+- [X] T018 [P] [US3] 定义 AI 插件配置文件结构与默认值在 backend/config/ai-plugins.json
+- [X] T019 [US3] 实现配置加载、校验与缓存（失败降级但不影响启动）在 backend/src/services/ai/plugin-config.js
+- [X] T020 [P] [US3] 实现 Provider 封装（至少 MCP Provider）在 backend/src/services/ai/providers/mcp.provider.js
+- [X] T021 [P] [US3] 实现 Capability 管道（sanitize/logging 开关）在 backend/src/services/ai/capabilities/index.js
+- [X] T022 [US3] 在聊天 SSE 路径接入 provider 选择与 capability 应用，并处理 provider 不可用分支在 backend/src/routes/chat.routes.js
+- [X] T023 [US3] 将 AI 调用审计写入 MySQL logs（含 providerId、durationMs、结果状态）在 backend/src/routes/chat.routes.js
+- [X] T024 [US3] 提供 admin-only 插件状态接口在 backend/src/routes/ai-plugins.routes.js
+- [X] T025 [US3] 挂载 AI 插件路由并保持鉴权/角色校验在 backend/src/index.js
+- [X] T026 [P] [US3] OpenAPI 增补 `/ai-plugins/status` 接口定义在 specs/main/contracts/api.yaml
 
 ---
 
@@ -104,8 +104,8 @@
 
 **Purpose**: 文档与运维验证，确保交付可运行且“规格/合同/实现”一致。
 
-- [ ] T027 [P] 更新运行与运维说明（附件分页默认值、AI 插件配置路径与重启生效）在 README.md
-- [ ] T028 [P] 记录 docker-compose 启动与关键接口 smoke checklist 在 specs/doc/diary.md
+- [X] T027 [P] 更新运行与运维说明（附件分页默认值、AI 插件配置路径与重启生效）在 README.md
+- [X] T028 [P] 记录 docker-compose 启动与关键接口 smoke checklist 在 doc/diary.md
 
 ---
 

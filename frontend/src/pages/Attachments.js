@@ -3,7 +3,14 @@ import { Alert, Button, Card, Input, message, Space, Spin, Table, Upload } from 
 import { DeleteOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 
 import { getCurrentUser } from '../services/auth.service';
-import { deleteAttachment, listAttachments, uploadAttachment, getAttachmentDownloadUrl } from '../services/attachment.service';
+import {
+  deleteAttachment,
+  exportKnowledgeGraphExcel,
+  getAttachmentDownloadUrl,
+  importKnowledgeGraphExcelFromAttachment,
+  listAttachments,
+  uploadAttachment
+} from '../services/attachment.service';
 import axios from 'axios';
 
 const formatBytes = (bytes) => {
@@ -22,6 +29,8 @@ const Attachments = () => {
   const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [importingExcel, setImportingExcel] = useState(false);
   const [error, setError] = useState(null);
   const [rows, setRows] = useState([]);
   const [ownerType, setOwnerType] = useState('');
@@ -193,6 +202,84 @@ const Attachments = () => {
     }
   };
 
+  const handleExportExcel = async () => {
+    try {
+      if (!isAdmin) {
+        message.error('权限不足：仅管理员可导出');
+        return;
+      }
+
+      setExportingExcel(true);
+      const resp = await exportKnowledgeGraphExcel();
+      const attachmentId = resp.data?.id;
+      message.success(attachmentId ? `导出成功，已生成附件 #${attachmentId}` : '导出成功');
+      refresh({ nextPage: 1 });
+    } catch (err) {
+      console.error('导出Excel失败:', err);
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可导出');
+      } else {
+        message.error(err.response?.data?.message || '导出失败');
+      }
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  const importExcelUploadProps = {
+    accept: '.xlsx',
+    maxCount: 1,
+    showUploadList: false,
+    customRequest: async ({ file, onSuccess, onError }) => {
+      try {
+        if (!isAdmin) {
+          message.error('权限不足：仅管理员可导入');
+          onError?.(new Error('forbidden'));
+          return;
+        }
+
+        const overwrite = window.confirm(
+          '是否使用 overwrite 全量覆盖导入？\n\n确定 = overwrite（会清空并重建 artifacts）\n取消 = append（仅新增）'
+        );
+        const strategy = overwrite ? 'overwrite' : 'append';
+
+        setImportingExcel(true);
+
+        // Step 1: Upload as attachment (ownerType=system_import)
+        const uploadResp = await uploadAttachment({
+          file,
+          ownerType: 'system_import',
+          ownerId: 0
+        });
+        const attachmentId = uploadResp.data?.id;
+        if (!attachmentId) {
+          throw new Error('上传成功但未返回附件ID');
+        }
+
+        // Step 2: Trigger import by attachment id
+        const importResp = await importKnowledgeGraphExcelFromAttachment({ id: attachmentId, strategy });
+        const result = importResp.data || {};
+
+        message.success(
+          `导入成功：inserted=${result.inserted ?? 0} updated=${result.updated ?? 0} skipped=${result.skipped ?? 0}`
+        );
+
+        onSuccess?.(result);
+        refresh({ nextPage: 1 });
+      } catch (err) {
+        console.error('导入Excel失败:', err);
+        if (err.response?.status === 403) {
+          message.error('权限不足：仅管理员可导入');
+        } else {
+          message.error(err.response?.data?.message || err.message || '导入失败');
+        }
+        onError?.(err);
+      } finally {
+        setImportingExcel(false);
+      }
+    }
+  };
+
   return (
     <div className="attachments-container">
       <Card
@@ -237,6 +324,17 @@ const Attachments = () => {
               上传附件
             </Button>
           </Upload>
+
+          {isAdmin ? (
+            <Space style={{ marginLeft: 12 }}>
+              <Button onClick={handleExportExcel} loading={exportingExcel}>
+                导出知识图谱Excel（生成附件）
+              </Button>
+              <Upload {...importExcelUploadProps}>
+                <Button loading={importingExcel}>上传并导入知识图谱Excel</Button>
+              </Upload>
+            </Space>
+          ) : null}
         </div>
 
         {loading ? (

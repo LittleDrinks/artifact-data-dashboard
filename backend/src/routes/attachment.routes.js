@@ -6,6 +6,7 @@ const fsp = require('fs/promises');
 const crypto = require('crypto');
 
 const { mysqlPool } = require('../config/database');
+const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
 
 const router = express.Router();
 
@@ -55,6 +56,57 @@ const writeLog = async ({ userId, action, targetId = null, details = null }) => 
   } catch (error) {
     console.warn('写入日志失败:', error.message);
   }
+};
+
+const createAttachmentFromBuffer = async ({
+  userId,
+  ownerType,
+  ownerId,
+  originalName,
+  mimeType,
+  buffer
+}) => {
+  await ensureUploadDir();
+
+  const ext = path.extname(originalName || '').slice(0, 20) || '.bin';
+  const random = crypto.randomBytes(16).toString('hex');
+  const storageName = `${Date.now()}_${random}${ext}`;
+
+  const filePath = path.resolve(UPLOAD_DIR, storageName);
+  if (!filePath.startsWith(RESOLVED_UPLOAD_DIR + path.sep)) {
+    throw new Error('非法文件路径');
+  }
+
+  await fsp.writeFile(filePath, buffer);
+
+  const [result] = await mysqlPool.execute(
+    `INSERT INTO attachments (owner_type, owner_id, uploaded_by, original_name, mime_type, size_bytes, storage_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      ownerType,
+      ownerId,
+      userId,
+      originalName,
+      mimeType,
+      buffer.length,
+      storageName,
+      new Date()
+    ]
+  );
+
+  const attachmentId = result.insertId;
+
+  return {
+    id: attachmentId,
+    ownerType,
+    ownerId,
+    uploadedBy: userId,
+    originalName,
+    mimeType,
+    sizeBytes: buffer.length,
+    createdAt: new Date().toISOString(),
+    downloadUrl: `/api/attachments/${attachmentId}/download`
+  };
 };
 
 /**
@@ -272,6 +324,130 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     console.error('获取附件列表错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/excel/export:
+ *   post:
+ *     summary: 导出知识图谱 Excel（移自 Debug，生成附件，仅 Admin）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: 导出成功（返回生成的附件元数据）
+ *       403:
+ *         description: 权限不足（仅管理员可导出）
+ */
+router.post('/excel/export', async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可导出Excel' });
+    }
+
+    const { buffer, filename } = await exportKnowledgeGraphXlsxBuffer();
+
+    const attachment = await createAttachmentFromBuffer({
+      userId: req.user.id,
+      ownerType: 'system_export',
+      ownerId: 0,
+      originalName: filename,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer
+    });
+
+    return res.status(201).json(attachment);
+  } catch (error) {
+    console.error('导出Excel错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/{id}/excel/import:
+ *   post:
+ *     summary: 从附件触发知识图谱 Excel 导入（移自 Debug，仅 Admin）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: strategy
+ *         schema:
+ *           type: string
+ *           default: append
+ *           enum: [append, overwrite]
+ *         description: 导入策略（默认 append：仅新增；overwrite：全量覆盖）
+ *     responses:
+ *       200:
+ *         description: 导入成功
+ *       400:
+ *         description: 参数无效/Excel schema 不匹配
+ *       403:
+ *         description: 权限不足（仅管理员可导入）
+ *       404:
+ *         description: 附件不存在
+ */
+router.post('/:id/excel/import', async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可导入Excel' });
+    }
+
+    const attachmentId = Number(req.params.id);
+    if (!Number.isFinite(attachmentId)) {
+      return res.status(400).json({ message: '附件ID无效' });
+    }
+
+    const [rows] = await mysqlPool.execute('SELECT * FROM attachments WHERE id = ?', [attachmentId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '附件不存在' });
+    }
+
+    const attachment = rows[0];
+    if (attachment.owner_type !== 'system_import') {
+      return res.status(400).json({ message: '该附件不是 system_import 类型，无法触发导入' });
+    }
+
+    const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);
+    if (!filePath.startsWith(RESOLVED_UPLOAD_DIR + path.sep)) {
+      return res.status(400).json({ message: '非法文件路径' });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: '文件不存在或已被删除' });
+    }
+
+    const buffer = await fsp.readFile(filePath);
+    const strategy = req.query.strategy ? String(req.query.strategy).trim() : 'append';
+
+    try {
+      const result = await importKnowledgeGraphFromXlsxBuffer({ buffer, strategy });
+      return res.status(200).json({
+        message: '导入成功',
+        ...result,
+        neo4jSynced: true
+      });
+    } catch (err) {
+      if (err && err.statusCode === 400) {
+        return res.status(400).json({
+          message: err.message,
+          issues: err.issues
+        });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error('导入Excel错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
