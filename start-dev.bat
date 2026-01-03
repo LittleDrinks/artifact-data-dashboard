@@ -16,11 +16,11 @@ echo [检查] Docker 正在运行...
 echo.
 
 REM 检查 .env 文件
-if not exist "backend\.env" (
-    echo [警告] backend\.env 文件不存在
+if not exist ".env" (
+    echo [警告] 根目录 .env 文件不存在
     echo [操作] 从 .env.example 创建 .env 文件...
-    copy "backend\.env.example" "backend\.env"
-    echo [完成] .env 文件已创建
+    copy ".env.example" ".env" >nul
+    echo [完成] 根目录 .env 文件已创建（请按需编辑敏感配置）
     echo.
 )
 

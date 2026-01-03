@@ -4,7 +4,13 @@ import jwtDecode from 'jwt-decode';
 const API_URL = '/api/auth/';
 
 // 设置axios默认配置
-axios.defaults.baseURL = process.env.REACT_APP_API_URL || '';
+const rawBaseURL = (process.env.REACT_APP_API_URL ?? '').trim();
+
+// 约定：
+// - 为空：同源请求（适用于前端与后端同域/同源或由反向代理统一入口的场景）
+// - 非空：应填写“后端服务根地址”，不要带上 `/api`，避免出现 `/api/api/...`
+const normalizedBaseURL = rawBaseURL.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+axios.defaults.baseURL = normalizedBaseURL;
 
 // 请求拦截器添加token
 axios.interceptors.request.use(

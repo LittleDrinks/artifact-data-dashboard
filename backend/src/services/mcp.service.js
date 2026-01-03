@@ -77,8 +77,13 @@ class MCPService {
   async ask(question, history = [], context = '') {
     try {
       // 检查API配置
-      if (!this.apiEndpoint || !this.apiKey) {
-        console.warn('MCP API 配置缺失，使用模拟回答');
+      if (!this.apiEndpoint) {
+        console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
+        return this.simulateResponse(question, history);
+      }
+
+      if (!this.apiKey) {
+        console.warn('[MCP] 未配置 API Key，将使用模拟模式');
         return this.simulateResponse(question, history);
       }
 
@@ -136,8 +141,16 @@ class MCPService {
       const isProd = process.env.NODE_ENV === 'production';
 
       // 检查API配置
-      if (!this.apiEndpoint || !this.apiKey) {
-        console.warn('[MCP] ⚠️ API 配置缺失，转为模拟模式');
+      if (!this.apiEndpoint) {
+        console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
+        const response = this.simulateResponse(question, history);
+        onData(response.content);
+        onEnd();
+        return;
+      }
+
+      if (!this.apiKey) {
+        console.warn('[MCP] 未配置 API Key，将使用模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
         onEnd();
@@ -145,9 +158,9 @@ class MCPService {
       }
 
       if (!isProd) {
-        console.log(`[MCP] 🚀 正在调用大模型: ${this.model}`);
-        console.log(`[MCP] 📡 端点: ${this.apiEndpoint}`);
-        console.log(`[MCP] ❓ 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
+        console.log(`[MCP] 正在调用大模型: ${this.model}`);
+        console.log(`[MCP] 端点: ${this.apiEndpoint}`);
+        console.log(`[MCP] 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
       }
 
       const messages = [];
@@ -249,7 +262,7 @@ class MCPService {
    */
   simulateResponse(question, history = []) {
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[MCP] ⚠️ 正在生成模拟响应 (Simulation Mode)');
+      console.log('[MCP] 正在生成模拟响应 (Simulation Mode)');
     }
 
     // 简单的关键词匹配

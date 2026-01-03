@@ -18,19 +18,12 @@ git clone https://github.com/LittleDrinks/artifact-data-dashboard.git
 cd artifact-data-dashboard
 
 # 2. 配置环境变量
-cp backend/.env.example backend/.env
-# 务必根据你的部署方式修改配置：
-# - 后端自身配置：backend/.env（后端容器/进程读取）
-#   - JWT密钥 (JWT_SECRET)
-#   - AI配置 (AI_API_KEY, AI_MODEL)
-#   - 后端连接数据库/图数据库/Redis 的账号密码（需与容器侧一致）
-# - 容器侧账号密码（MySQL/Neo4j/Redis 容器自身使用）：建议在“项目根目录”创建 .env（docker-compose 会自动读取）
-#   - MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD
-#   - NEO4J_USER / NEO4J_PASSWORD
-#   - REDIS_PASSWORD
-# 提示：如果你只改了 backend/.env，但没有同步改 docker-compose 的变量，可能导致后端无法连上容器。
-# Windows: notepad backend/.env
-# Linux/Mac: nano backend/.env
+cp .env.example .env
+# 说明：本项目的唯一“人工配置入口”为仓库根目录 `.env`：
+# - docker compose 通过 `env_file: ./.env` 将变量注入到后端/前端容器。
+# - `.env` 不得提交；`.env.example` 为可提交模板。
+# Windows: notepad .env
+# Linux/Mac: nano .env
 
 # 3. 启动服务 (生产环境)
 docker-compose -f docker-compose.prod.yml up -d --build
@@ -42,6 +35,13 @@ docker-compose up -d --build
 # docker compose ...
 ```
 
+运行模式切换（`APP_ENV`）：
+
+- PowerShell：`$env:APP_ENV='development'; docker compose up --build`
+- PowerShell（类生产）：`$env:APP_ENV='production'; docker compose up -d --build`
+- Bash：`APP_ENV=development docker compose up --build`
+- Bash（类生产）：`APP_ENV=production docker compose up -d --build`
+
 Windows 也可以直接使用脚本：
 
 - 开发环境：双击运行 `start-dev.bat`
@@ -52,12 +52,18 @@ Windows 也可以直接使用脚本：
 - **前端**: http://localhost:8080
 - **后端API (开发环境)**: http://localhost:3000/api-docs
 - **后端API (生产环境)**: http://localhost:13000/api-docs
-- **Neo4j Browser**: http://localhost:17474 (默认账号: neo4j / password；由 docker-compose 的 `NEO4J_USER`/`NEO4J_PASSWORD` 控制，建议同步更新 `backend/.env` 保持一致)
+- **Neo4j Browser**: http://localhost:17474 (默认账号: neo4j / password；由 docker-compose 的 `NEO4J_USER`/`NEO4J_PASSWORD` 控制，建议同步更新根目录 `.env` 保持一致)
 
 其他常用端口（开发环境 docker-compose.yml）：
 
 - **MySQL**: localhost:13306
-- **Redis**: localhost:16379 (默认密码: password；生产环境可通过 docker-compose 的 `REDIS_PASSWORD` 覆盖，后端也需同步更新 `backend/.env`)
+- **Redis**: localhost:16379 (默认密码: password；可通过根目录 `.env` 的 `REDIS_PASSWORD` 覆盖)
+
+最小验证（建议）：
+
+- 后端健康检查：`http://localhost:3000/health`（开发环境）
+- 后端 API 文档：`http://localhost:3000/api-docs`（开发环境）
+- 如启动失败：先运行 `view-logs.bat` 查看 backend 日志中的 JSON 诊断摘要
 
 ## 📖 使用指南 (Usage)
 
@@ -161,10 +167,32 @@ Excel 文件应包含以下工作表（Sheet），每个工作表对应一类实
 
 ### 环境变量（重要）
 
-后端通过 `backend/.env` 读取数据库/Neo4j/Redis 配置。
+配置入口：
 
-- `backend/.env.example` 默认按 Docker Compose 场景配置（容器内使用服务名 `mysql`/`neo4j`/`redis` 互联）。
-- 如果你选择在宿主机直接运行后端（不在容器里），需要把这些 host 改成 `localhost`，并使用 compose 暴露的宿主机端口（例如 MySQL 13306）。
+- 根目录 `.env`：唯一需要手动维护的配置文件（docker compose 会注入到容器内的 `process.env`）。
+- 根目录 `.env.example`：模板文件（用于生成 `.env`）。
+
+关于历史文件：
+
+- `backend/.env*`：已移除（不再作为配置入口），请只维护根目录 `.env`。
+
+如果你选择在宿主机直接运行 backend（不在容器里），仍建议从根目录 `.env` 提供相同的一组变量，并把 host/port 调整为宿主机地址与映射端口（例如 MySQL 13306）。
+
+### 排障路径（启动失败/连接失败）
+
+1) 查看后端启动诊断摘要（stdout / 容器日志）
+
+- 使用 `view-logs.bat` 选择 backend
+- 后端启动时会输出 JSON（不包含敏感值），重点关注：
+  - `missingRequired`: 缺失的必填配置
+  - `invalid`: 非法值/弱默认值（`APP_ENV=production` 时更严格）
+  - `profile` / `entrypoint`: 当前运行模式与启动入口
+
+2) 常见修复
+
+- `missingRequired` 非空：从 `.env.example` 重新生成 `.env` 并补齐缺失项
+- 数据库/缓存连接失败：检查 `.env` 里的 `*_HOST`/`*_PORT`/`*_PASSWORD` 是否与 compose 容器侧一致
+- Redis 报错 `auth`：确保 `docker-compose.yml` 的 `--requirepass` 与 `REDIS_PASSWORD` 一致
 
 ## 📄 许可证
 MIT License

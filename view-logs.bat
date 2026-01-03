@@ -4,6 +4,10 @@ echo 查看服务日志
 echo ========================================
 echo.
 
+echo [提示] 后端启动时会在 stdout 输出一段 JSON 诊断摘要（不包含敏感明文）。
+echo      如启动失败/配置缺失，请优先查看 backend 日志里的 missingRequired/invalid 字段。
+echo.
+
 echo 选择要查看的服务日志：
 echo 1. 所有服务
 echo 2. 前端 (frontend)

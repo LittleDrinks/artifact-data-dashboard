@@ -12,6 +12,8 @@ services:  # 前端服务
       - artifact-network
     restart: unless-stopped
     # 生产环境不需要卷挂载和npm命令
+    env_file:
+      - ./.env
   
   # 后端服务
   backend:
@@ -22,7 +24,10 @@ services:  # 前端服务
     ports:
       - "13000:3000"
     env_file:
-      - ./backend/.env
+      - ./.env
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - NODE_ENV=${NODE_ENV:-production}
     depends_on:
       - mysql
       - neo4j

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "artifact-data-dashboard://contracts/startup-diagnostics.schema.json",
+  "title": "StartupDiagnostics",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "profile",
+    "entrypoint",
+    "detectedSources",
+    "overrides",
+    "missingRequired",
+    "invalid",
+    "redactedKeys"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "description": "ISO8601 timestamp"
+    },
+    "profile": {
+      "type": "string",
+      "description": "Active runtime profile (e.g., development|production)"
+    },
+    "entrypoint": {
+      "type": "string",
+      "description": "Startup entrypoint (e.g., docker-compose.yml)"
+    },
+    "detectedSources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/configSource"
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/overrideEvent"
+      }
+    },
+    "missingRequired": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "invalid": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/invalidItem"
+      }
+    },
+    "redactedKeys": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "configSource": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["explicitOverride", "environment", "default"]
+        },
+        "details": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "overrideEvent": {
+      "type": "object",
+      "required": ["key", "from", "to"],
+      "properties": {
+        "key": { "type": "string" },
+        "from": { "$ref": "#/$defs/configSource" },
+        "to": { "$ref": "#/$defs/configSource" }
+      },
+      "additionalProperties": false
+    },
+    "invalidItem": {
+      "type": "object",
+      "required": ["key", "reason"],
+      "properties": {
+        "key": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

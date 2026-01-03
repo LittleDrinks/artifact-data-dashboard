@@ -1,4 +1,13 @@
-require('dotenv').config();
+const { loadAndValidateEnv } = require('./config/env');
+const { ok, diagnostics } = loadAndValidateEnv();
+
+// stdout: structured startup diagnostics (redacted)
+console.log(JSON.stringify(diagnostics));
+
+if (!ok) {
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');

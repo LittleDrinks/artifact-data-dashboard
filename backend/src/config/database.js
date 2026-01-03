@@ -37,8 +37,68 @@ const redisClient = redis.createClient({
   }
 });
 
+const classifyConnectionError = (service, err) => {
+  const code = err && (err.code || err.name);
+  const message = err && (err.message || String(err));
+
+  const lower = String(message || '').toLowerCase();
+
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return {
+      service,
+      kind: 'dns',
+      message: 'Host 解析失败（DNS/服务名不存在）',
+      suggestion: '检查对应 *_HOST 是否正确（compose 内通常是服务名：mysql/neo4j/redis）'
+    };
+  }
+
+  if (code === 'ECONNREFUSED') {
+    return {
+      service,
+      kind: 'port',
+      message: '连接被拒绝（端口未监听/服务未就绪）',
+      suggestion: '检查服务是否启动、端口映射是否正确，以及容器健康状态'
+    };
+  }
+
+  if (code === 'ER_ACCESS_DENIED_ERROR' || lower.includes('access denied') || lower.includes('wrongpass')) {
+    return {
+      service,
+      kind: 'auth',
+      message: '认证失败（用户名/密码不匹配）',
+      suggestion: '检查 .env 中密码是否与容器侧一致（MYSQL_PASSWORD/NEO4J_PASSWORD/REDIS_PASSWORD）'
+    };
+  }
+
+  if (code === 'ERR_BAD_DB_ERROR' || lower.includes('unknown database')) {
+    return {
+      service,
+      kind: 'database',
+      message: '数据库不存在',
+      suggestion: '确认 MYSQL_DATABASE 设置正确，或运行 reset_data.bat 初始化数据库'
+    };
+  }
+
+  if (code === 'ServiceUnavailable' || lower.includes('service unavailable')) {
+    return {
+      service,
+      kind: 'service',
+      message: '服务不可用/未就绪',
+      suggestion: '检查服务是否启动、网络是否连通，以及 NEO4J_URI 是否正确'
+    };
+  }
+
+  return {
+    service,
+    kind: 'unknown',
+    message: message || '未知错误',
+    suggestion: '查看完整错误栈与容器日志；重点核对 host/port/credential 是否一致'
+  };
+};
+
 redisClient.on('error', err => {
-  console.error('Redis客户端错误:', err);
+  const diag = classifyConnectionError('redis', err);
+  console.error('Redis客户端错误:', diag);
 });
 
 let redisConnectPromise = null;
@@ -64,39 +124,50 @@ const ensureRedisConnected = async () => {
     await ensureRedisConnected();
     console.log('Redis连接成功');
   } catch (err) {
-    console.error('Redis连接失败:', err);
+    const diag = classifyConnectionError('redis', err);
+    console.error('Redis连接失败:', diag);
   }
 })();
 
 // 测试数据库连接
 const testConnections = async () => {
+  let ok = true;
+
+  // 测试MySQL
   try {
-    // 测试MySQL
     const mysqlConnection = await mysqlPool.getConnection();
     mysqlConnection.release();
     console.log('MySQL连接成功');
+  } catch (err) {
+    ok = false;
+    const diag = classifyConnectionError('mysql', err);
+    console.error('MySQL连接失败:', diag);
+  }
 
-    // 测试Neo4j
+  // 测试Neo4j
+  try {
     const neo4jSession = neo4jDriver.session();
     await neo4jSession.run('RETURN 1 AS result');
     await neo4jSession.close();
     console.log('Neo4j连接成功');
-
-    // 测试Redis
-    try {
-      await ensureRedisConnected();
-      await redisClient.ping();
-      console.log('Redis连接成功');
-    } catch (redisErr) {
-      console.error('Redis连接测试失败:', redisErr);
-      return false;
-    }
-
-    return true;
   } catch (err) {
-    console.error('数据库连接测试失败:', err);
-    return false;
+    ok = false;
+    const diag = classifyConnectionError('neo4j', err);
+    console.error('Neo4j连接失败:', diag);
   }
+
+  // 测试Redis
+  try {
+    await ensureRedisConnected();
+    await redisClient.ping();
+    console.log('Redis连接成功');
+  } catch (err) {
+    ok = false;
+    const diag = classifyConnectionError('redis', err);
+    console.error('Redis连接失败:', diag);
+  }
+
+  return ok;
 };
 
 // 优雅关闭数据库连接
