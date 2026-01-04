@@ -75,3 +75,6 @@ __pycache__/
 venv/
 ENV/
 env/
+
+# SDD workflow files
+specs/
