@@ -210,6 +210,21 @@ const Chat = () => {
         if (focusId) {
           sessionStorage.setItem('chatGraphFocusNodeId', String(focusId));
         }
+
+        // 将问答返回的“核心实体”以高亮节点集合传递给图谱页面
+        // 默认策略：优先高亮 artifact 节点；若无 artifact，则高亮首个节点
+        const MAX_HIGHLIGHTS = 20;
+        const artifactIds = (message.data.nodes || [])
+          .filter(n => n && n.type === 'artifact' && n.id != null)
+          .map(n => String(n.id));
+        const highlightIds = (artifactIds.length > 0 ? artifactIds : (focusId ? [String(focusId)] : []))
+          .filter(Boolean)
+          .slice(0, MAX_HIGHLIGHTS);
+        if (highlightIds.length > 0) {
+          sessionStorage.setItem('chatGraphHighlightNodeIds', JSON.stringify(highlightIds));
+        } else {
+          sessionStorage.removeItem('chatGraphHighlightNodeIds');
+        }
       }
     } catch (e) {
       // ignore

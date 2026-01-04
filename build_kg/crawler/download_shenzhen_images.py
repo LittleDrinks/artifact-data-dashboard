@@ -201,13 +201,26 @@ def main() -> None:
             retries=args.retries,
             sleep_seconds=args.sleep,
         )
+
+        status_tag = ""
+        msg = ""
+
         if ok:
             if info.endswith(('.jpg','.jpeg','.png','.webp','.gif','.bmp','.tif','.tiff')):
                 downloaded += 1
+                status_tag = "OK"
+                msg = f"Saved"
             else:
                 skipped_or_existing += 1
+                status_tag = "SKIP"
+                msg = "Exists"
         else:
             failed += 1
+            status_tag = "FAIL"
+            msg = f"Error: {info}"
+
+        total_processed = downloaded + skipped_or_existing + failed
+        print(f"[{total_processed}] [{status_tag}] {task.artifact_id} | {task.artifact_name} | {task.filename} -> {msg}")
 
         if args.limit_images and args.limit_images > 0 and (downloaded + skipped_or_existing + failed) >= args.limit_images:
             break

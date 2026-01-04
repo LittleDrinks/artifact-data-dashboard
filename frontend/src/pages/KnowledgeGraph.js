@@ -79,6 +79,9 @@ const KnowledgeGraph = () => {
   const gSelectionRef = useRef(null);
   const hasAutoFitRef = useRef(false);
   const focusNodeIdRef = useRef(null);
+  const highlightNodeIdsRef = useRef(new Set());
+  const [highlightCount, setHighlightCount] = useState(0);
+  const highlightOverflowRef = useRef(false);
   const location = useLocation();
 
   // 方案B：默认拖拽释放；双击/Shift+拖拽可钉住节点
@@ -256,6 +259,58 @@ const KnowledgeGraph = () => {
     return applyTypeLimits(graphData, typeLimits);
   }, [applyTypeLimits, graphData, typeLimits]);
 
+  const MAX_HIGHLIGHTS = 20;
+  const normalizeIdList = useCallback((ids) => {
+    if (!Array.isArray(ids)) return [];
+    const uniq = [];
+    const seen = new Set();
+    for (const raw of ids) {
+      const id = raw == null ? '' : String(raw);
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      uniq.push(id);
+    }
+    return uniq;
+  }, []);
+
+  const replaceHighlights = useCallback((ids) => {
+    const list = normalizeIdList(ids);
+    highlightOverflowRef.current = list.length > MAX_HIGHLIGHTS;
+    const finalList = list.slice(0, MAX_HIGHLIGHTS);
+    highlightNodeIdsRef.current = new Set(finalList);
+    setHighlightCount(finalList.length);
+  }, [normalizeIdList]);
+
+  const clearAllHighlights = useCallback(() => {
+    highlightOverflowRef.current = false;
+    highlightNodeIdsRef.current = new Set();
+    setHighlightCount(0);
+  }, []);
+
+  const toggleHighlight = useCallback((id) => {
+    const sid = id == null ? '' : String(id);
+    if (!sid) return;
+
+    const next = new Set(highlightNodeIdsRef.current);
+    if (next.has(sid)) {
+      next.delete(sid);
+      highlightOverflowRef.current = false;
+      highlightNodeIdsRef.current = next;
+      setHighlightCount(next.size);
+      return;
+    }
+
+    if (next.size >= MAX_HIGHLIGHTS) {
+      highlightOverflowRef.current = true;
+      return;
+    }
+
+    next.add(sid);
+    highlightNodeIdsRef.current = next;
+    setHighlightCount(next.size);
+  }, []);
+
   const displayedTypeCounts = useMemo(() => {
     const map = new Map();
     for (const n of displayedGraphData.nodes || []) {
@@ -273,16 +328,19 @@ const KnowledgeGraph = () => {
     
     try {
       const response = await getGraphData(searchKeyword);
-      setGraphData({
+      const nextGraph = {
         nodes: response.data.nodes,
         edges: response.data.edges
-      });
+      };
+      setGraphData(nextGraph);
       hasAutoFitRef.current = false;
       setError(null);
+      return nextGraph;
     } catch (err) {
       console.error('获取知识图谱数据失败:', err);
       setError('获取知识图谱数据失败，请稍后重试');
       setGraphData({ nodes: [], edges: [] });
+      return null;
     } finally {
       setLoading(false);
     }
@@ -313,6 +371,19 @@ const KnowledgeGraph = () => {
             focusNodeIdRef.current = null;
           }
 
+          try {
+            const raw = sessionStorage.getItem('chatGraphHighlightNodeIds');
+            if (raw) {
+              const parsedIds = JSON.parse(raw);
+              replaceHighlights(parsedIds);
+              sessionStorage.removeItem('chatGraphHighlightNodeIds');
+            } else if (focusNodeIdRef.current) {
+              replaceHighlights([String(focusNodeIdRef.current)]);
+            }
+          } catch (e) {
+            // ignore
+          }
+
           setGraphData(parsed);
           setLoading(false);
           setError(null);
@@ -326,7 +397,7 @@ const KnowledgeGraph = () => {
     }
 
     fetchGraphData();
-  }, [fetchGraphData, location.state]);
+  }, [fetchGraphData, location.state, replaceHighlights, toggleHighlight]);
 
   // 清理D3模拟
   useEffect(() => {
@@ -338,8 +409,30 @@ const KnowledgeGraph = () => {
   }, []);
   
   // 处理搜索
-  const handleSearch = () => {
-    fetchGraphData(keyword);
+  const deriveSearchHighlights = useCallback((kw, nodes) => {
+    const text = (kw || '').trim();
+    if (!text) return [];
+    const lowered = text.toLowerCase();
+    const ids = [];
+    for (const n of (nodes || [])) {
+      const label = (n?.label || '').toString();
+      const isMatch = label.toLowerCase().includes(lowered);
+      if (isMatch) ids.push(String(n.id));
+    }
+    // 优先匹配到的节点；若无匹配，则退化为 artifact 节点
+    if (ids.length > 0) return ids;
+    return (nodes || []).filter(n => n?.type === 'artifact').map(n => String(n.id));
+  }, []);
+
+  const handleSearch = async () => {
+    const kw = (keyword || '').trim();
+    const next = await fetchGraphData(kw);
+    if (!kw) {
+      clearAllHighlights();
+      return;
+    }
+    const ids = deriveSearchHighlights(kw, next?.nodes || []);
+    replaceHighlights(ids);
   };
   
   // 处理节点点击
@@ -540,6 +633,13 @@ const KnowledgeGraph = () => {
 
         event.stopPropagation();
 
+        // Ctrl/⌘ + 单击：切换高亮（支持多选，不打开详情）
+        const ctrlPressed = Boolean(event?.ctrlKey || event?.metaKey || (event?.sourceEvent && (event.sourceEvent.ctrlKey || event.sourceEvent.metaKey)));
+        if (ctrlPressed) {
+          toggleHighlight(d.id);
+          return;
+        }
+
         // 方案B：Shift+单击切换钉住/解钉（不打开详情）
         const shiftPressed = Boolean(event?.shiftKey || (event?.sourceEvent && event.sourceEvent.shiftKey));
         if (shiftPressed) {
@@ -602,6 +702,27 @@ const KnowledgeGraph = () => {
             pinnedPositionsRef.current.set(id, { x: d.fx, y: d.fy });
           }
         }));
+
+    // 高亮：添加发光滤镜
+    const defs = svg.select('defs');
+    const glowId = 'node-glow';
+    if (!defs.select(`#${glowId}`).node()) {
+      const filter = defs.append('filter')
+        .attr('id', glowId)
+        .attr('x', '-50%')
+        .attr('y', '-50%')
+        .attr('width', '200%')
+        .attr('height', '200%');
+
+      filter.append('feGaussianBlur')
+        .attr('in', 'SourceGraphic')
+        .attr('stdDeviation', 3)
+        .attr('result', 'blur');
+
+      const merge = filter.append('feMerge');
+      merge.append('feMergeNode').attr('in', 'blur');
+      merge.append('feMergeNode').attr('in', 'SourceGraphic');
+    }
 
     // 绘制节点标签（可选）
     const label = displaySettings.showNodeLabels
@@ -705,6 +826,63 @@ const KnowledgeGraph = () => {
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [displayedGraphData, forceSettings, displaySettings, graphHeight]);
+
+  // 高亮样式更新：不重建布局，只更新节点/边的视觉表现
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    const highlightSet = highlightNodeIdsRef.current;
+    const hasHighlight = highlightSet && highlightSet.size > 0;
+
+    const baseR = 20;
+    const hiR = Math.round(baseR * 1.4);
+    const dimR = Math.max(2, Math.round(baseR * 0.6));
+
+    const hiFill = '#FFEA00';
+    const dimFill = '#d9d9d9';
+    const glow = 'url(#node-glow)';
+
+    svg.selectAll('circle')
+      .attr('r', d => {
+        if (!hasHighlight) return baseR;
+        return highlightSet.has(String(d.id)) ? hiR : dimR;
+      })
+      .attr('fill', d => {
+        if (!hasHighlight) return getNodeColor(d.type);
+        return highlightSet.has(String(d.id)) ? hiFill : dimFill;
+      })
+      .attr('opacity', d => {
+        if (!hasHighlight) return 1;
+        return highlightSet.has(String(d.id)) ? 1 : 0.55;
+      })
+      .attr('filter', d => {
+        if (!hasHighlight) return null;
+        return highlightSet.has(String(d.id)) ? glow : null;
+      });
+
+    svg.selectAll('line')
+      .attr('stroke', hasHighlight ? '#e0e0e0' : '#ccc')
+      .attr('opacity', hasHighlight ? 0.65 : 1);
+
+    svg.selectAll('text.node-label')
+      .attr('fill', d => {
+        if (!hasHighlight) return '#333';
+        return highlightSet.has(String(d.id)) ? '#333' : '#999';
+      })
+      .attr('dy', d => {
+        if (!hasHighlight) return 35;
+        return highlightSet.has(String(d.id)) ? 45 : 25;
+      })
+      .attr('opacity', d => {
+        if (!hasHighlight) return 1;
+        return highlightSet.has(String(d.id)) ? 1 : 0.7;
+      });
+
+    svg.selectAll('text.link-label')
+      .attr('fill', hasHighlight ? '#999' : '#666')
+      .attr('opacity', hasHighlight ? 0.7 : 1);
+  }, [displayedGraphData.nodes, displayedGraphData.edges, highlightCount]);
 
   // 图谱快捷键（避免在输入框聚焦时触发）
   useEffect(() => {
@@ -836,6 +1014,14 @@ const KnowledgeGraph = () => {
               loading={loading}
             >
               探索
+            </Button>
+
+            <Button
+              style={{ marginLeft: 8 }}
+              onClick={clearAllHighlights}
+              disabled={highlightCount === 0}
+            >
+              清除高亮
             </Button>
           </div>
 

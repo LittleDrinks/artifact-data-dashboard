@@ -219,13 +219,16 @@ def crawl(limit: int, page_size: int, start_page: int, sleep_seconds: float) -> 
             artifact = fetch_one_artifact(session, uuid, row, sleep_seconds=sleep_seconds)
         except Exception as exc:
             # 跳过失败项，继续爬下一条
+            print(f"[FAIL] UUID={uuid} Name={name}: {exc}")
             continue
 
         # 再次确认名称中文
         if not has_cjk(artifact.name):
+            print(f"[SKIP] UUID={uuid} Name={artifact.name} (Non-CJK)")
             continue
 
         results.append(artifact.to_dict())
+        print(f"[{len(results)}/{limit}] [OK] {artifact.name} ({artifact.artifact_id})")
         if len(results) >= limit:
             break
 
