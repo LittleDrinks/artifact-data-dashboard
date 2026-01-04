@@ -89,6 +89,9 @@ const KnowledgeGraph = () => {
   const pinnedPositionsRef = useRef(new Map());
   const [pinnedCount, setPinnedCount] = useState(0);
 
+  // 从 Chat 跳转时：把“高亮集合”自动钉住一次（在 D3 初始化后应用）
+  const autoPinNodeIdsRef = useRef(null);
+
   const setPinnedForSelected = useCallback((nextPinned) => {
     const entity = selectedEntity;
     if (!entity?.id) return;
@@ -113,6 +116,10 @@ const KnowledgeGraph = () => {
     } else {
       pinnedSet.delete(id);
       pinnedPositionsRef.current.delete(id);
+      // 若该节点来自 Chat 跳转的 focus，取消钉住时一并清掉 focus，避免黑框“看起来取消不了”
+      if (focusNodeIdRef.current && String(focusNodeIdRef.current) === id) {
+        focusNodeIdRef.current = null;
+      }
       if (simNode) {
         simNode.fx = null;
         simNode.fy = null;
@@ -363,6 +370,8 @@ const KnowledgeGraph = () => {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed && parsed.nodes && parsed.edges) {
+          let nextAutoPinIds = null;
+
           try {
             const focusId = sessionStorage.getItem('chatGraphFocusNodeId');
             focusNodeIdRef.current = focusId ? String(focusId) : null;
@@ -376,12 +385,20 @@ const KnowledgeGraph = () => {
             if (raw) {
               const parsedIds = JSON.parse(raw);
               replaceHighlights(parsedIds);
+              if (Array.isArray(parsedIds) && parsedIds.length > 0) {
+                nextAutoPinIds = parsedIds.map(String);
+              }
               sessionStorage.removeItem('chatGraphHighlightNodeIds');
             } else if (focusNodeIdRef.current) {
               replaceHighlights([String(focusNodeIdRef.current)]);
+              nextAutoPinIds = [String(focusNodeIdRef.current)];
             }
           } catch (e) {
             // ignore
+          }
+
+          if (Array.isArray(nextAutoPinIds) && nextAutoPinIds.length > 0) {
+            autoPinNodeIdsRef.current = new Set(nextAutoPinIds.filter(Boolean));
           }
 
           setGraphData(parsed);
@@ -492,6 +509,12 @@ const KnowledgeGraph = () => {
     
     const zoom = d3.zoom()
       .scaleExtent([0.1, 4])
+      // 降低滚轮缩放灵敏度（默认值对部分鼠标/触控板会显得过于“跳”）
+      .wheelDelta((event) => {
+        // d3 默认实现会考虑 deltaMode，这里保持同样思路但把整体幅度调小
+        const modeScale = event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? 800 : 1);
+        return (-event.deltaY * modeScale) / 1500;
+      })
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
       });
@@ -533,6 +556,37 @@ const KnowledgeGraph = () => {
 
     simulationRef.current = simulation;
 
+    // 从 Chat 跳转时：把高亮节点集合自动钉住一次（真钉住：写入 pinnedSet + 设置 fx/fy）
+    const applyAutoPinOnce = () => {
+      const autoPinIds = autoPinNodeIdsRef.current;
+      if (!autoPinIds || autoPinIds.size === 0) return;
+
+      const pinnedSet = pinnedNodeIdsRef.current;
+      for (const rawId of autoPinIds) {
+        const id = String(rawId);
+        if (!id) continue;
+        const n = nodes.find(x => String(x.id) === id);
+        if (!n) continue;
+
+        pinnedSet.add(id);
+        const px = Number.isFinite(n.x) ? n.x : width / 2;
+        const py = Number.isFinite(n.y) ? n.y : height / 2;
+        pinnedPositionsRef.current.set(id, { x: px, y: py });
+        n.fx = px;
+        n.fy = py;
+      }
+
+      setPinnedCount(pinnedSet.size);
+      // 轻微推动一下，让布局稳定到“钉住态”
+      simulation.alphaTarget(0.08).restart();
+      simulation.alphaTarget(0);
+
+      // 只应用一次，避免后续搜索/刷新重复钉住
+      autoPinNodeIdsRef.current = null;
+    };
+
+    applyAutoPinOnce();
+
     // 创建箭头标记
     svg.append('defs').selectAll('marker')
       .data(['arrow'])
@@ -572,17 +626,19 @@ const KnowledgeGraph = () => {
       : null;
 
     // 绘制节点
-    const focusId = focusNodeIdRef.current;
+    const getFocusId = () => focusNodeIdRef.current;
     const updatePinnedStyles = () => {
       g.selectAll('circle')
         .attr('stroke', n => {
           const id = String(n.id);
           if (pinnedNodeIdsRef.current.has(id)) return '#000';
+          const focusId = getFocusId();
           return (focusId && String(n.id) === String(focusId) ? '#000' : '#fff');
         })
         .attr('stroke-width', n => {
           const id = String(n.id);
           if (pinnedNodeIdsRef.current.has(id)) return 4;
+          const focusId = getFocusId();
           return (focusId && String(n.id) === String(focusId) ? 4 : 2);
         });
     };
@@ -596,6 +652,10 @@ const KnowledgeGraph = () => {
         pinnedPositionsRef.current.delete(id);
         d.fx = null;
         d.fy = null;
+        // 若该节点是从 Chat 跳转时的 focus，高亮黑框应当随“解钉”一并消失
+        if (focusNodeIdRef.current && String(focusNodeIdRef.current) === id) {
+          focusNodeIdRef.current = null;
+        }
       } else {
         pinnedSet.add(id);
         const px = Number.isFinite(d.x) ? d.x : width / 2;
@@ -618,11 +678,13 @@ const KnowledgeGraph = () => {
       .attr('stroke', d => {
         const id = String(d.id);
         if (pinnedNodeIdsRef.current.has(id)) return '#000';
+        const focusId = getFocusId();
         return (focusId && String(d.id) === String(focusId) ? '#000' : '#fff');
       })
       .attr('stroke-width', d => {
         const id = String(d.id);
         if (pinnedNodeIdsRef.current.has(id)) return 4;
+        const focusId = getFocusId();
         return (focusId && String(d.id) === String(focusId) ? 4 : 2);
       })
       .style('cursor', 'pointer')
@@ -655,6 +717,7 @@ const KnowledgeGraph = () => {
           .attr('stroke-width', 3);
       })
       .on('mouseout', function(event, d) {
+        const focusId = getFocusId();
         const isFocus = focusId && String(d.id) === String(focusId);
         const isPinned = pinnedNodeIdsRef.current.has(String(d.id));
         d3.select(this)

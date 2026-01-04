@@ -94,5 +94,4 @@ if %errorlevel% neq 0 (
 	exit /b 1
 )
 
-echo [完成] 数据已重置。
-pause
+echo [完成] 数据已重置，请重启系统。

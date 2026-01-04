@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Input, message, Modal, Space, Spin, Table, Upload } from 'antd';
+import { Alert, Button, Card, Input, message, Space, Spin, Table, Upload, Progress } from 'antd';
 import { DeleteOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 
 import { getCurrentUser } from '../services/auth.service';
@@ -28,7 +28,6 @@ const Attachments = () => {
   const [user] = useState(() => getCurrentUser());
   const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
   const [error, setError] = useState(null);
@@ -40,16 +39,32 @@ const Attachments = () => {
   const [total, setTotal] = useState(0);
   const limitRef = useRef(limit);
 
-  const [batchOpen, setBatchOpen] = useState(false);
-  const [batchFiles, setBatchFiles] = useState([]);
-  const [batchResults, setBatchResults] = useState([]);
-  const [batchUploading, setBatchUploading] = useState(false);
-  const batchAbortRef = useRef(false);
-  const currentUploadAbortRef = useRef(null);
+  const [uploadQueue, setUploadQueue] = useState([]);
+  const uploadAbortMapRef = useRef(new Map());
+  const uploadActiveCountRef = useRef(0);
+  const uploadShouldRefreshRef = useRef(false);
+  const uploadQueueRef = useRef(uploadQueue);
+
+  useEffect(() => {
+    uploadQueueRef.current = uploadQueue;
+  }, [uploadQueue]);
 
   useEffect(() => {
     limitRef.current = limit;
   }, [limit]);
+
+  useEffect(() => {
+    return () => {
+      for (const abort of uploadAbortMapRef.current.values()) {
+        try {
+          abort?.();
+        } catch (e) {
+          // ignore
+        }
+      }
+      uploadAbortMapRef.current.clear();
+    };
+  }, []);
 
   const refresh = useCallback(async ({ nextPage, nextLimit } = {}) => {
     setLoading(true);
@@ -77,6 +92,14 @@ const Attachments = () => {
       setLoading(false);
     }
   }, [ownerType, ownerId]);
+
+  useEffect(() => {
+    const hasActive = uploadQueue.some((item) => item.status === 'queued' || item.status === 'uploading');
+    if (!hasActive && uploadShouldRefreshRef.current) {
+      uploadShouldRefreshRef.current = false;
+      refresh({ nextPage: 1 });
+    }
+  }, [refresh, uploadQueue]);
 
   useEffect(() => {
     refresh({ nextPage: 1 });
@@ -176,114 +199,143 @@ const Attachments = () => {
     ];
   }, [user, refresh]);
 
-  const uploadProps = {
-    maxCount: 1,
-    showUploadList: false,
-    customRequest: async ({ file, onSuccess, onError }) => {
-      try {
-        if (!isAdmin) {
-          message.error('权限不足：仅管理员可上传');
-          onError?.(new Error('forbidden'));
-          return;
-        }
-        setUploading(true);
-        const controller = new AbortController();
-        currentUploadAbortRef.current = () => controller.abort();
-        const resp = await uploadAttachment({
-          file,
-          ownerType: ownerType.trim() || undefined,
-          ownerId: ownerId.trim() || undefined,
-          signal: controller.signal
-        });
-        message.success('上传成功');
-        onSuccess?.(resp.data);
-        refresh();
-      } catch (err) {
-        console.error('上传失败:', err);
-        if (err.code === 'ERR_CANCELED') {
-          message.info('已取消上传');
-          onError?.(err);
-          return;
-        }
-        if (err.response?.status === 403) {
-          message.error('权限不足：仅管理员可上传');
-        } else {
-          message.error(err.response?.data?.message || '上传失败');
-        }
-        onError?.(err);
-      } finally {
-        setUploading(false);
-        currentUploadAbortRef.current = null;
-      }
-    }
-  };
+  const UPLOAD_CONCURRENCY = 2;
 
-  const batchUploadProps = {
-    multiple: true,
-    accept: 'image/*',
-    fileList: batchFiles,
-    beforeUpload: () => false,
-    onChange: (info) => {
-      setBatchFiles(info.fileList || []);
-    },
-    onRemove: (file) => {
-      setBatchFiles((prev) => prev.filter((f) => f.uid !== file.uid));
-    }
-  };
-
-  const handleBatchUpload = async () => {
-    if (!isAdmin) {
-      message.error('权限不足：仅管理员可上传');
-      return;
-    }
-
-    if (!batchFiles.length) {
-      message.warning('请先选择图片');
-      return;
-    }
-
-    batchAbortRef.current = false;
-    setBatchUploading(true);
-    setBatchResults([]);
-
-    const results = [];
-    for (const fileItem of batchFiles) {
-      if (batchAbortRef.current) {
+  const pumpUploadQueue = useCallback(async () => {
+    while (uploadActiveCountRef.current < UPLOAD_CONCURRENCY) {
+      const next = uploadQueueRef.current.find((item) => item.status === 'queued');
+      if (!next) {
         break;
       }
-      const file = fileItem.originFileObj;
-      if (!file) {
-        results.push({ name: fileItem.name, ok: false, error: '文件无效' });
-        continue;
-      }
 
-      try {
+      uploadActiveCountRef.current += 1;
+
+      (async () => {
         const controller = new AbortController();
-        currentUploadAbortRef.current = () => controller.abort();
-        const resp = await uploadAttachment({
-          file,
-          ownerType: ownerType.trim() || undefined,
-          ownerId: ownerId.trim() || undefined,
-          signal: controller.signal
-        });
-        results.push({ name: file.name, ok: true, id: resp.data?.id });
-      } catch (err) {
-        if (err.code === 'ERR_CANCELED') {
-          results.push({ name: file.name, ok: false, error: '已取消' });
-          batchAbortRef.current = true;
-        } else {
-        results.push({ name: file.name, ok: false, error: err.response?.data?.message || err.message || '上传失败' });
+        uploadAbortMapRef.current.set(next.uid, () => controller.abort());
+
+        setUploadQueue((prev) =>
+          prev.map((item) =>
+            item.uid === next.uid
+              ? {
+                  ...item,
+                  status: 'uploading',
+                  percent: 0
+                }
+              : item
+          )
+        );
+
+        try {
+          const resp = await uploadAttachment({
+            file: next.file,
+            ownerType: ownerType.trim() || undefined,
+            ownerId: ownerId.trim() || undefined,
+            signal: controller.signal,
+            onUploadProgress: (evt) => {
+              const totalBytes = Number(evt.total || 0);
+              const loadedBytes = Number(evt.loaded || 0);
+              const percent = totalBytes > 0 ? Math.min(99, Math.round((loadedBytes / totalBytes) * 100)) : 0;
+              setUploadQueue((prev) =>
+                prev.map((item) => (item.uid === next.uid ? { ...item, percent } : item))
+              );
+            }
+          });
+
+          uploadShouldRefreshRef.current = true;
+          setUploadQueue((prev) =>
+            prev.map((item) =>
+              item.uid === next.uid
+                ? {
+                    ...item,
+                    status: 'done',
+                    percent: 100,
+                    attachmentId: resp.data?.id
+                  }
+                : item
+            )
+          );
+        } catch (err) {
+          if (err.code === 'ERR_CANCELED') {
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.uid === next.uid ? { ...item, status: 'canceled', error: '已取消' } : item
+              )
+            );
+          } else if (err.response?.status === 403) {
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.uid === next.uid ? { ...item, status: 'error', error: '权限不足' } : item
+              )
+            );
+          } else {
+            setUploadQueue((prev) =>
+              prev.map((item) =>
+                item.uid === next.uid
+                  ? { ...item, status: 'error', error: err.response?.data?.message || err.message || '上传失败' }
+                  : item
+              )
+            );
+          }
+        } finally {
+          uploadAbortMapRef.current.delete(next.uid);
+          uploadActiveCountRef.current = Math.max(0, uploadActiveCountRef.current - 1);
+
+          pumpUploadQueue();
         }
+      })();
+    }
+  }, [ownerId, ownerType]);
+
+  useEffect(() => {
+    pumpUploadQueue();
+  }, [pumpUploadQueue, uploadQueue]);
+
+  const enqueueUploads = useCallback(
+    (files = []) => {
+      if (!isAdmin) {
+        message.error('权限不足：仅管理员可上传');
+        return;
       }
 
-      setBatchResults([...results]);
-    }
+      const now = Date.now();
+      const nextItems = files
+        .filter(Boolean)
+        .map((file, index) => ({
+          uid: `${now}-${index}-${file.uid || file.name || 'file'}`,
+          name: file.name,
+          file,
+          status: 'queued',
+          percent: 0
+        }));
 
-    setBatchUploading(false);
-    currentUploadAbortRef.current = null;
-    message.success(batchAbortRef.current ? '已取消批量上传' : '批量上传完成');
-    refresh({ nextPage: 1 });
+      if (!nextItems.length) {
+        return;
+      }
+
+      setUploadQueue((prev) => [...nextItems, ...prev]);
+    },
+    [isAdmin]
+  );
+
+  const uploadPickerProps = {
+    multiple: true,
+    showUploadList: false,
+    customRequest: ({ file, onSuccess }) => {
+      // 选中即入队上传（真正的上传由队列调度执行）
+      enqueueUploads([file]);
+      onSuccess?.('queued');
+    }
   };
+
+  const queueStats = useMemo(() => {
+    const totalCount = uploadQueue.length;
+    const finishedCount = uploadQueue.filter((item) => ['done', 'error', 'canceled'].includes(item.status)).length;
+    const percent = totalCount > 0 ? Math.round((finishedCount / totalCount) * 100) : 0;
+    const uploadingCount = uploadQueue.filter((item) => item.status === 'uploading').length;
+    const queuedCount = uploadQueue.filter((item) => item.status === 'queued').length;
+    return { totalCount, finishedCount, percent, uploadingCount, queuedCount };
+  }, [uploadQueue]);
 
   const handleExportExcel = async () => {
     try {
@@ -401,100 +453,75 @@ const Attachments = () => {
           />
         ) : null}
 
-        <div style={{ marginBottom: 16 }}>
-          <Upload {...uploadProps}>
-            <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-              上传附件
-            </Button>
-          </Upload>
-
-          {isAdmin ? (
-            <Button
-              style={{ marginLeft: 12 }}
-              icon={<UploadOutlined />}
-              onClick={() => {
-                setBatchOpen(true);
-                setBatchResults([]);
-              }}
-            >
-              批量上传
-            </Button>
-          ) : null}
-
-          {isAdmin ? (
-            <Space style={{ marginLeft: 12 }}>
-              <Button onClick={handleExportExcel} loading={exportingExcel}>
-                导出知识图谱Excel（生成附件）
-              </Button>
-              <Upload {...importExcelUploadProps}>
-                <Button loading={importingExcel}>上传并导入知识图谱Excel</Button>
-              </Upload>
-            </Space>
-          ) : null}
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', margin: '40px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 12, color: '#999' }}>加载中...</div>
-          </div>
-        ) : (
-          <Table
-            rowKey="id"
-            columns={columns}
-            dataSource={rows}
-            pagination={{
-              current: page,
-              pageSize: limit,
-              total,
-              showSizeChanger: true
-            }}
-            onChange={(nextPagination) => {
-              refresh({
-                nextPage: nextPagination.current,
-                nextLimit: nextPagination.pageSize
-              });
-            }}
-          />
-        )}
-      </Card>
-
-      <Modal
-        title="批量上传图片"
-        open={batchOpen}
-        maskClosable={false}
-        onCancel={() => {
-          // 允许随时关闭：中途关闭则取消当前上传
-          batchAbortRef.current = true;
-          currentUploadAbortRef.current?.();
-          setBatchUploading(false);
-          setBatchOpen(false);
-          setBatchFiles([]);
-          setBatchResults([]);
-        }}
-        onOk={handleBatchUpload}
-        okButtonProps={{ loading: batchUploading, disabled: !batchFiles.length }}
-        cancelButtonProps={{ disabled: false }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <Upload {...batchUploadProps}>
-            <Button icon={<UploadOutlined />}>选择多张图片</Button>
-          </Upload>
-          <div style={{ marginTop: 8, color: 'rgba(0,0,0,0.45)' }}>
-            选择后点击“确定”开始上传（逐个上传）。
-          </div>
-        </div>
-
-        {batchResults.length > 0 && (
-          <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #f0f0f0', padding: 8 }}>
-            {batchResults.map((r, idx) => (
-              <div key={`${r.name}-${idx}`} style={{ marginBottom: 6 }}>
-                {r.ok ? `✅ ${r.name} -> #${r.id}` : `❌ ${r.name} - ${r.error}`}
+        <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {isAdmin ? (
+              <div style={{ marginBottom: 16 }}>
+                <Space>
+                  <Button onClick={handleExportExcel} loading={exportingExcel}>
+                    导出知识图谱Excel（生成附件）
+                  </Button>
+                  <Upload {...importExcelUploadProps}>
+                    <Button loading={importingExcel}>上传并导入知识图谱Excel</Button>
+                  </Upload>
+                </Space>
               </div>
-            ))}
+            ) : null}
+
+            {loading ? (
+              <div style={{ textAlign: 'center', margin: '40px 0' }}>
+                <Spin size="large" />
+                <div style={{ marginTop: 12, color: '#999' }}>加载中...</div>
+              </div>
+            ) : (
+              <Table
+                rowKey="id"
+                columns={columns}
+                dataSource={rows}
+                pagination={{
+                  current: page,
+                  pageSize: limit,
+                  total,
+                  showSizeChanger: true
+                }}
+                onChange={(nextPagination) => {
+                  refresh({
+                    nextPage: nextPagination.current,
+                    nextLimit: nextPagination.pageSize
+                  });
+                }}
+              />
+            )}
           </div>
-        )}
-      </Modal>
+
+          <div style={{ width: 320, flex: '0 0 320px' }}>
+            <Card size="small" title="上传" bodyStyle={{ padding: 12 }}>
+              <div style={{ marginBottom: 12 }}>
+                <Upload {...uploadPickerProps}>
+                  <Button
+                    type="primary"
+                    icon={<UploadOutlined />}
+                    disabled={!isAdmin}
+                    loading={queueStats.uploadingCount > 0 || queueStats.queuedCount > 0}
+                    block
+                  >
+                    选择文件上传
+                  </Button>
+                </Upload>
+              </div>
+
+              <div style={{ marginBottom: 8 }}>
+                <Progress percent={queueStats.percent} size="small" />
+                <div style={{ marginTop: 6, color: 'rgba(0,0,0,0.45)' }}>
+                  {queueStats.totalCount > 0
+                    ? `已完成 ${queueStats.finishedCount}/${queueStats.totalCount}（队列中：${queueStats.queuedCount}，上传中：${queueStats.uploadingCount}）`
+                    : '未选择文件'}
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 };

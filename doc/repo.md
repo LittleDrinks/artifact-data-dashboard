@@ -6,9 +6,9 @@
 
 ## Part 1. 本学期实训过程概述
 
-进入计算思维实训2阶段，我的核心任务是解决实训1（repo1）版本遗留的问题，让项目从“只有基础架构”逐步落地为可用系统。实训1在实际测试中暴露出接口缺少安全校验、数据批量管理能力弱、文物关联关系不直观等问题。
+进入计算思维实训2阶段，我的核心任务是解决实训1（repo1）版本遗留的问题，让项目从“只有基础架构”落地为可用系统。实训1在实际测试中暴露出接口缺少安全校验、数据批量管理能力弱、文物关联关系不直观三个问题。
 
-本阶段我以“先补安全 → 再提效（查询/批量） → 再补关系表达（图谱） → 最后增强交互（问答）”的顺序推进，实现登录鉴权、关键词搜索分页、Excel导入导出、知识图谱可视化、智能问答等功能，并补充真实数据源，形成完整业务闭环。
+本阶段我以“先补安全 → 再提效（查询/批量） → 再补关系表达（图谱） → 最后增强交互（问答）”的顺序推进，实现登录鉴权、关键词搜索分页、Excel导入导出、知识图谱可视化、智能问答功能，并补充真实数据源，形成完整业务闭环。
 
 **技术栈与架构概览**
 
@@ -84,13 +84,13 @@ module.exports = {
 };
 ```
 
-后端将 token 有效期设置为 24 小时，并配套实现个人信息查询与角色区分；前端通过 axios 拦截器统一携带 token、并在遇到 401 时做跳转处理。JWT 密钥等敏感配置放入 `.env`，并补全 `.env.example`，降低部署出错概率。
+后端将 token 有效期设置为 24 小时，并配套实现个人信息查询与角色区分；前端通过 axios 拦截器统一携带 token、并在遇到 401 时做跳转处理。JWT 密钥与 API 配置放入 `.env`，并补全 `.env.example`，降低部署出错概率。
 
 ### 2. 搜索与详情：关键词检索 + 分页（MySQL）
 
 实训1阶段只能表格翻页浏览，缺少“快速定位目标文物”的能力。我将核心需求拆解为两点：关键词检索与分页。
 
-后端使用 MySQL `LIKE` 做模糊匹配，并通过 `limit/offset` 控制每页数量。接口同时返回 `total/totalPages` 等分页元数据。
+后端使用 MySQL `LIKE` 做模糊匹配，并通过 `limit/offset` 控制每页数量。接口同时返回分页元数据（`total`、`page`、`limit`、`totalPages`、`keyword`）。
 
 代码节选：backend/src/routes/artifact.routes.js（第247-328行）
 
@@ -246,63 +246,81 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 
 ### 4. 知识图谱（Neo4j）：结构化关系表达与可视化查询
 
-表格能展示属性，但难以表达“文物—类别—年代”等多对多关系。我将关系建模为图：文物节点（Artifact）、类别节点（Category）、年代节点（Era）等，并定义 `BELONG_TO`、`IN_ERA` 等关系。
+表格能展示属性，但难以表达“文物—类别—年代”的多对多关系。我将关系建模为图：文物节点（Artifact）、类别节点（Category）、年代节点（Era），并定义 `BELONG_TO`、`IN_ERA` 关系。
 
 后端通过 Neo4j Driver 执行 Cypher 查询。问答模块在检索阶段会将问题拆成多个关键词，逐个检索并合并去重后的图谱节点与关系。
 
 代码节选：backend/src/routes/chat.routes.js（第537-606行）
 
 ```js
-// 通用检索：将问题拆成多个关键词，分别检索并汇总结果
-const extraction = extractKeywordsService(question, {
-	maxKeywords: 4,
-	keepIntent: true,
-	debug: process.env.DEBUG_KEYWORDS === 'true',
-	logSource: 'graph'
-});
-const keywords = extraction.keywords || [];
-if (keywords.length === 0) return null;
+		} else {
+			// 通用检索：将问题拆成多个关键词，分别检索并汇总结果
+			const extraction = extractKeywordsService(question, {
+				maxKeywords: 4,
+				keepIntent: true,
+				debug: process.env.DEBUG_KEYWORDS === 'true',
+				logSource: 'graph'
+			});
+			const keywords = extraction.keywords || [];
+			if (keywords.length === 0) return null;
 
-cypherQuery = `
-	MATCH (a:Artifact)
-	WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
-	OPTIONAL MATCH (a)-[r]-(n)
-	RETURN a, r, n LIMIT 10
-`;
+			cypherQuery = `
+				MATCH (a:Artifact)
+				WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
+				OPTIONAL MATCH (a)-[r]-(n)
+				RETURN a, r, n LIMIT 10
+			`;
 
-// 逐关键词查询并合并结果（去重）
-const nodes = new Set();
-const edges = new Set();
+			responseText = `以下是与"${keywords.join('、')}"相关的文物信息，您可以在图谱中探索它们的关系。`;
 
-for (const keyword of keywords) {
-	params = { keyword };
-	const result = await session.run(cypherQuery, params);
-	result.records.forEach(record => {
-		const keys = record.keys;
-		keys.forEach(key => {
-			const value = record.get(key);
-			if (value && value.labels) {
-				const props = value.properties || {};
-				nodes.add(JSON.stringify({
-					id: value.identity.toString(),
-					label: props.name || props.label || props.title || value.identity.toString(),
-					type: value.labels[0].toLowerCase()
-				}));
-			} else if (value && value.type) {
-				edges.add(JSON.stringify({
-					id: value.identity.toString(),
-					source: value.start.toString(),
-					target: value.end.toString(),
-					label: value.type
-				}));
+			// 逐关键词查询并合并结果（去重）
+			const nodes = new Set();
+			const edges = new Set();
+
+			for (const keyword of keywords) {
+				params = { keyword };
+				const result = await session.run(cypherQuery, params);
+				result.records.forEach(record => {
+					const keys = record.keys;
+					keys.forEach(key => {
+						const value = record.get(key);
+						if (value && value.labels) {
+							const props = value.properties || {};
+							nodes.add(JSON.stringify({
+								id: value.identity.toString(),
+								label: props.name || props.label || props.title || value.identity.toString(),
+								type: value.labels[0].toLowerCase()
+							}));
+						} else if (value && value.type) {
+							edges.add(JSON.stringify({
+								id: value.identity.toString(),
+								source: value.start.toString(),
+								target: value.end.toString(),
+								label: value.type
+							}));
+						}
+					});
+				});
 			}
-		});
-	});
-}
 
-if (nodes.size === 0 && edges.size === 0) {
-	return null;
-}
+			if (nodes.size === 0 && edges.size === 0) {
+				return null;
+			}
+
+			return {
+				text: responseText,
+				data: {
+					nodes: Array.from(nodes).map(node => JSON.parse(node)).slice(0, 60),
+					edges: Array.from(edges).map(edge => JSON.parse(edge)).slice(0, 120)
+				}
+			};
+		}
+    
+		if (!cypherQuery) {
+			return null;
+		}
+    
+		// 执行Cypher查询
 ```
 
 ### 5. 智能问答：自然语言 → 分词/意图 → 结构化查询 → 生成回答
@@ -316,14 +334,21 @@ if (nodes.size === 0 && edges.size === 0) {
 3) 基于关键词检索知识图谱（Neo4j）与关系型库（MySQL），得到结构化证据
 4) 将结构化信息整理为“上下文”，再调用大模型生成回答并返回前端
 
+代码节选：backend/src/services/keyword.service.js（第118-145行）
+
 ```js
-// 关键词抽取（nodejieba + 停用词过滤 + 自定义词典）
-// backend/src/services/keyword.service.js（第120-145行、第184-255行）
+function normalizeText(text) {
+	return String(text || '')
+		.replace(/[\s,.?!，。？！:：;；()（）"“”'’、《》【】\[\]{}<>]+/g, ' ')
+		.replace(/[、/]/g, ' ')
+		.trim();
+}
 
 function detectIntent(question) {
 	const q = String(question || '');
 	if (!q) return undefined;
 
+	// 粗粒度意图分类：只在明确出现疑问词时返回
 	const intentMap = [
 		{ intent: 'who', patterns: ['谁', '哪位'] },
 		{ intent: 'when', patterns: ['何时', '什么时候', '哪年', '哪一年', '年代', '朝代'] },
@@ -341,37 +366,118 @@ function detectIntent(question) {
 }
 ```
 
-代码节选：backend/src/services/keyword.service.js（第184-214行）
+代码节选：backend/src/services/keyword.service.js（第184-286行）
 
 ```js
 function extractKeywords(text, options = {}) {
-	const { keepIntent = true } = options;
+	const {
+		keepIntent = true,
+		debug = false,
+		maxKeywords = DEFAULT_MAX_KEYWORDS,
+		phraseMergeMode = process.env.PHRASE_MERGE_MODE || 'conservative',
+		logSource,
+		requestId
+	} = options;
 
+	const startedAt = Date.now();
 	const raw = String(text || '').trim();
 	if (!raw) {
-		return { keywords: [], intent: keepIntent ? detectIntent(raw) : undefined };
+		return { keywords: [], intent: keepIntent ? detectIntent(raw) : undefined, rawTokens: [], debug: debug ? { reason: 'empty' } : undefined };
 	}
 
 	loadJiebaOnce();
+	const stopwords = loadStopwords();
+	const phraseSet = loadPhraseDictionary();
+	const quoted = extractQuotedPhrases(raw);
 
 	let tokens = [];
+	let tokenizer = 'nodejieba';
+
 	try {
 		const normalized = normalizeText(raw);
-		tokens = normalized ? nodejieba.cut(normalized, true) : [];
+		if (!normalized) {
+			tokens = [];
+		} else {
+			tokens = nodejieba.cut(normalized, true);
+		}
 	} catch {
+		tokenizer = 'fallback';
 		tokens = fallbackTokenize(raw);
 	}
 
+	// 额外合并：仅在 max-match 时做 token 级合并
+	const mergeMode = phraseMergeMode === 'max-match' ? 'max-match' : 'conservative';
+	if (mergeMode === 'max-match') {
+		tokens = maxMatchMerge(tokens, phraseSet);
+	}
+
+	// 过滤：停用词、长度、标点
+	const filtered = tokens
+		.map(t => String(t).trim())
+		.filter(Boolean)
+		.filter(t => !stopwords.has(t))
+		.filter(t => t.length <= 30);
+
+	// candidates = quoted 优先 + filtered
+	const candidates = [...quoted, ...filtered];
+
+	// 去重保序，并默认过滤 1 字（除 quoted 中 CJK 单字）
+	const seen = new Set();
+	const keywords = [];
+	for (const t of candidates) {
+		if (!t) continue;
+		const isQuoted = quoted.includes(t);
+		if (t.length === 1 && !(isQuoted && isCjkSingleChar(t))) continue;
+		if (seen.has(t)) continue;
+		seen.add(t);
+		keywords.push(t);
+		if (keywords.length >= Number(maxKeywords) || keywords.length >= DEFAULT_MAX_KEYWORDS) break;
+	}
+
 	const intent = keepIntent ? detectIntent(raw) : undefined;
-	// ...后续过滤停用词、短词、去重并生成 keywords
+
+	// 疑问词不计入 keywords：保持简单实现（intent 为 who/what/...）
+	const debugObj = debug
+		? {
+			tokenizer,
+			phraseMergeMode: mergeMode,
+			stopwordsCount: stopwords.size,
+			phraseCount: phraseSet.size,
+			quoted,
+			rawTokens: tokens
+		}
+		: undefined;
+
+	maybeLogExtraction({
+		level: resolveKeywordLogLevel(),
+		source: logSource,
+		requestId,
+		question: raw,
+		tokenizer,
+		phraseMergeMode: mergeMode,
+		stopwordsCount: stopwords.size,
+		phraseCount: phraseSet.size,
+		quotedCount: quoted.length,
+		rawTokensCount: tokens.length,
+		keywords,
+		intent,
+		durationMs: Date.now() - startedAt
+	});
+
+	return {
+		keywords,
+		intent,
+		rawTokens: debug ? tokens : undefined,
+		debug: debugObj
+	};
 }
 ```
 
-代码节选：backend/src/routes/chat.routes.js（第96-135行）
+代码节选：backend/src/routes/chat.routes.js（第100-134行）
 
 ```js
-// 路由层：检索图谱/关系库，并构建上下文
 const graphResponse = await handleGraphQueries(question);
+// 尝试获取关系型数据库数据
 const relationalData = await handleRelationalQueries(question);
 
 let context = '';
@@ -406,25 +512,36 @@ if (relationalData) {
 }
 ```
 
-代码节选：backend/src/services/mcp.service.js（第70-123行）
+代码节选：backend/src/services/mcp.service.js（第90-117行）
 
 ```js
-// 服务层：携带“检索上下文 + 历史对话 + 当前问题”调用大模型
-messages.push({ role: 'system', content: this.buildSystemPrompt(context) });
-messages.push(...history);
-messages.push({ role: 'user', content: question });
+			const messages = [];
 
-const requestBody = {
-	model: this.model,
-	messages: messages,
-	temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
-	max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
-};
+			// 添加系统提示词和上下文
+			messages.push({
+				role: 'system',
+				content: this.buildSystemPrompt(context)
+			});
 
-const response = await axios.post(this.apiEndpoint, requestBody, {
-	headers: this.headers,
-	timeout: 30000
-});
+			// 添加历史记录
+			messages.push(...history);
+
+			// 添加当前问题
+			messages.push({ role: 'user', content: question });
+
+			// 构建请求体
+			const requestBody = {
+				model: this.model,
+				messages: messages,
+				temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+				max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+			};
+
+			// 发送请求到MCP API
+			const response = await axios.post(this.apiEndpoint, requestBody, {
+				headers: this.headers,
+				timeout: 30000 // 30秒超时
+			});
 ```
 
 前端提供 Chat 页面交互，并用 Redis 保存 7 天内聊天记录。针对“中文分词与关键词抽取”的效果问题，我维护自定义词典与停用词表，提升检索命中率。
@@ -435,22 +552,64 @@ const response = await axios.post(this.apiEndpoint, requestBody, {
 
 ### 6. 附件与调试：统一文件管理流程与权限控制
 
-实训1阶段文件上传下载缺少规范，难以追踪与管理。为支撑 Excel 导入/导出、系统附件沉淀与运维排查，我实现统一的附件管理能力：分页查询、上传/下载、删除等，并将敏感操作（上传、删除、系统导入）限制为管理员。
+实训1阶段文件上传下载缺少规范，难以追踪与管理。为支撑 Excel 导入/导出、系统附件沉淀与运维排查，我实现统一的附件管理能力：分页查询、上传、下载、删除，并将敏感操作（上传、删除、系统导入）限制为管理员。
 
-代码节选：backend/src/routes/attachment.routes.js（第1-48行、第143-176行）
+代码节选：backend/src/routes/attachment.routes.js（第1-60行）
 
 ```js
+const express = require('express');
 const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const crypto = require('crypto');
+const AdmZip = require('adm-zip');
+const XLSX = require('xlsx');
+
+const { mysqlPool } = require('../config/database');
+const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
+const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/attachment.service');
+const { IntegrityService, parseBool } = require('../services/integrity.service');
+const { getStorageDriver } = require('../services/storage');
+const { writeAuditLog } = require('../services/audit.service');
+
+const router = express.Router();
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
+const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
+const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 20);
+const MAX_UPLOAD_SIZE_BYTES = Math.max(1, MAX_UPLOAD_SIZE_MB) * 1024 * 1024;
+
+const ensureUploadDir = async () => {
+  await fsp.mkdir(UPLOAD_DIR, { recursive: true });
+};
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    ensureUploadDir()
+      .then(() => cb(null, UPLOAD_DIR))
+      .catch((error) => cb(error));
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').slice(0, 20);
+    const random = crypto.randomBytes(16).toString('hex');
+    cb(null, `${Date.now()}_${random}${ext}`);
+  }
+});
 
 const upload = multer({
-	storage,
-	limits: {
-		fileSize: MAX_UPLOAD_SIZE_BYTES
-	}
+  storage,
+  limits: {
+    fileSize: MAX_UPLOAD_SIZE_BYTES
+  }
 });
 
 const isAdmin = (req) => req.user && req.user.role === 'admin';
+```
 
+代码节选：backend/src/routes/attachment.routes.js（第143-205行）
+
+```js
 router.post('/upload', upload.single('file'), async (req, res) => {
 	try {
 		if (!isAdmin(req)) {
@@ -466,6 +625,14 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 			? Number(req.body.ownerId)
 			: null;
 
+		if (ownerType && ownerType.length > 50) {
+			return res.status(400).json({ message: 'ownerType过长' });
+		}
+		if (ownerId !== null && !Number.isFinite(ownerId)) {
+			return res.status(400).json({ message: 'ownerId无效' });
+		}
+
+		// 统一走附件处理逻辑（hash/缩略图/去重）
 		const result = await attachmentService.ingestLocalFile({
 			uploadedBy: req.user.id,
 			ownerType,
@@ -476,6 +643,35 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 		});
 
 		const attachmentId = result.id;
+
+		await writeLog({
+			userId: req.user.id,
+			action: 'upload_attachment',
+			targetId: attachmentId,
+			details: JSON.stringify({
+				ownerType,
+				ownerId,
+				originalName: normalizeOriginalName(req.file.originalname),
+				mimeType: req.file.mimetype || 'application/octet-stream',
+				sizeBytes: req.file.size
+			})
+		});
+
+		return res.status(201).json({
+			id: attachmentId,
+			ownerType,
+			ownerId,
+			originalName: normalizeOriginalName(req.file.originalname),
+			mimeType: req.file.mimetype,
+			sizeBytes: req.file.size,
+			createdAt: new Date().toISOString(),
+			downloadUrl: `/api/attachments/${attachmentId}/download`
+		});
+	} catch (error) {
+		console.error('上传附件错误:', error);
+		return res.status(500).json({ message: '服务器内部错误' });
+	}
+});
 ```
 
 ## 结语
