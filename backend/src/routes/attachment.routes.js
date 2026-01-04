@@ -4,9 +4,15 @@ const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const crypto = require('crypto');
+const AdmZip = require('adm-zip');
+const XLSX = require('xlsx');
 
 const { mysqlPool } = require('../config/database');
 const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
+const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/attachment.service');
+const { IntegrityService, parseBool } = require('../services/integrity.service');
+const { getStorageDriver } = require('../services/storage');
+const { writeAuditLog } = require('../services/audit.service');
 
 const router = express.Router();
 
@@ -47,16 +53,11 @@ const canReadAttachment = (req, attachmentRow) => Boolean(req.user && attachment
 // 删除权限：仅管理员
 const canDeleteAttachment = (req) => Boolean(req.user && isAdmin(req));
 
-const writeLog = async ({ userId, action, targetId = null, details = null }) => {
-  try {
-    await mysqlPool.execute(
-      'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
-      [userId, action, targetId, new Date(), details]
-    );
-  } catch (error) {
-    console.warn('写入日志失败:', error.message);
-  }
-};
+const writeLog = writeAuditLog;
+
+const attachmentService = new AttachmentService();
+const integrityService = new IntegrityService();
+const storageDriver = getStorageDriver();
 
 const createAttachmentFromBuffer = async ({
   userId,
@@ -161,22 +162,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ message: 'ownerId无效' });
     }
 
-    const [result] = await mysqlPool.execute(
-      `INSERT INTO attachments (owner_type, owner_id, uploaded_by, original_name, mime_type, size_bytes, storage_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)` ,
-      [
-        ownerType,
-        ownerId,
-        req.user.id,
-        req.file.originalname,
-        req.file.mimetype || 'application/octet-stream',
-        req.file.size,
-        req.file.filename,
-        new Date()
-      ]
-    );
+    // 统一走附件处理逻辑（hash/缩略图/去重）
+    const result = await attachmentService.ingestLocalFile({
+      uploadedBy: req.user.id,
+      ownerType,
+      ownerId,
+      filePath: req.file.path,
+      originalName: normalizeOriginalName(req.file.originalname),
+      mimeType: req.file.mimetype || 'application/octet-stream'
+    });
 
-    const attachmentId = result.insertId;
+    const attachmentId = result.id;
 
     await writeLog({
       userId: req.user.id,
@@ -185,7 +181,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       details: JSON.stringify({
         ownerType,
         ownerId,
-        originalName: req.file.originalname,
+        originalName: normalizeOriginalName(req.file.originalname),
         mimeType: req.file.mimetype || 'application/octet-stream',
         sizeBytes: req.file.size
       })
@@ -195,7 +191,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       id: attachmentId,
       ownerType,
       ownerId,
-      originalName: req.file.originalname,
+      originalName: normalizeOriginalName(req.file.originalname),
       mimeType: req.file.mimetype,
       sizeBytes: req.file.size,
       createdAt: new Date().toISOString(),
@@ -203,6 +199,301 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     console.error('上传附件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/bulk:
+ *   post:
+ *     summary: 批量上传 ZIP（仅 Admin）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *               ownerType:
+ *                 type: string
+ *               ownerId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: 返回导入结果（每个文件对应的 attachmentId）
+ */
+router.post('/bulk', upload.single('file'), async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可批量上传附件' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: '未找到上传文件' });
+    }
+
+    const ownerType = req.body.ownerType ? String(req.body.ownerType).trim() : null;
+    const ownerId = req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
+      ? Number(req.body.ownerId)
+      : null;
+
+    const ext = path.extname(req.file.originalname || '').toLowerCase();
+    if (ext !== '.zip') {
+      return res.status(400).json({ message: '仅支持上传 .zip 文件' });
+    }
+
+    const zip = new AdmZip(req.file.path);
+    const entries = zip.getEntries().filter(e => !e.isDirectory);
+
+    const maxEntries = Number(process.env.ATTACHMENT_ZIP_MAX_ENTRIES || 2000);
+    if (entries.length > maxEntries) {
+      return res.status(400).json({ message: `ZIP 文件条目过多（>${maxEntries}）` });
+    }
+
+    const results = [];
+    for (const entry of entries) {
+      const entryName = entry.entryName || '';
+      if (!entryName || entryName.startsWith('__MACOSX/')) {
+        continue;
+      }
+
+      const baseName = normalizeOriginalName(path.basename(entryName));
+      const entryExt = path.extname(baseName).toLowerCase();
+      if (!entryExt) {
+        continue;
+      }
+
+      const buffer = entry.getData();
+      const mimeType = guessMimeType(baseName);
+
+      try {
+        const { id, deduped } = await attachmentService.ingestBuffer({
+          uploadedBy: req.user.id,
+          ownerType,
+          ownerId,
+          originalName: baseName,
+          mimeType,
+          buffer
+        });
+        results.push({ filename: baseName, attachmentId: id, deduped });
+      } catch (err) {
+        results.push({ filename: baseName, error: err.message });
+      }
+    }
+
+    await writeLog({
+      userId: req.user.id,
+      action: 'bulk_upload_attachments',
+      targetId: null,
+      details: JSON.stringify({
+        originalName: req.file.originalname,
+        count: results.length,
+        ownerType,
+        ownerId
+      })
+    });
+
+    return res.status(200).json({
+      message: '批量上传完成',
+      data: results
+    });
+  } catch (error) {
+    console.error('批量上传附件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/import-dir:
+ *   post:
+ *     summary: 从服务器目录导入图片（仅 Admin，白名单）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/import-dir', async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可导入' });
+    }
+
+    const dir = req.body && req.body.dir ? String(req.body.dir).trim() : '';
+    const ownerType = req.body && req.body.ownerType ? String(req.body.ownerType).trim() : null;
+    const ownerId = req.body && req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
+      ? Number(req.body.ownerId)
+      : null;
+
+    const resolvedDir = storageDriver.assertImportDirAllowed(dir);
+    const files = await storageDriver.listFilesRecursive(resolvedDir);
+    const imageFiles = files.filter(p => {
+      const ext = path.extname(p).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg'].includes(ext);
+    });
+
+    const envMaxFiles = Number(process.env.ATTACHMENT_IMPORT_MAX_FILES || 5000);
+    const bodyMaxFilesRaw = req.body && req.body.maxFiles !== undefined && req.body.maxFiles !== null ? Number(req.body.maxFiles) : null;
+    const resolvedMaxFiles = Number.isFinite(bodyMaxFilesRaw) && bodyMaxFilesRaw > 0
+      ? Math.min(Math.floor(bodyMaxFilesRaw), envMaxFiles)
+      : envMaxFiles;
+
+    const sliced = imageFiles.slice(0, resolvedMaxFiles);
+    const results = [];
+
+    for (const fp of sliced) {
+      const originalName = path.basename(fp);
+      try {
+        const { id, deduped } = await attachmentService.ingestLocalFile({
+          uploadedBy: req.user.id,
+          ownerType,
+          ownerId,
+          filePath: fp,
+          originalName,
+          mimeType: guessMimeType(originalName)
+        });
+        results.push({ filePath: fp, attachmentId: id, deduped });
+      } catch (err) {
+        results.push({ filePath: fp, error: err.message });
+      }
+    }
+
+    await writeLog({
+      userId: req.user.id,
+      action: 'import_dir_attachments',
+      targetId: null,
+      details: JSON.stringify({ dir: resolvedDir, count: results.length, ownerType, ownerId })
+    });
+
+    return res.status(200).json({
+      message: '目录导入完成',
+      totalFiles: imageFiles.length,
+      processed: sliced.length,
+      maxFiles: resolvedMaxFiles,
+      data: results
+    });
+  } catch (error) {
+    console.error('目录导入附件错误:', error);
+    return res.status(500).json({ message: error.message || '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/integrity:
+ *   get:
+ *     summary: 悬空图片检测（红/黄）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/integrity', async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可查看完整性报告' });
+    }
+
+    const includeFiles = parseBool(req.query.includeFiles, false);
+    const limit = req.query.limit !== undefined ? Number(req.query.limit) : 200;
+    const report = await integrityService.getReport({ includeFileExistence: includeFiles, limit });
+    return res.status(200).json(report);
+  } catch (error) {
+    console.error('完整性检测错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/excel/link-import:
+ *   post:
+ *     summary: 从 Excel 导入文物-图片关联（仅 Admin）
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/excel/link-import', upload.single('file'), async (req, res) => {
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可导入关联Excel' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: '请上传Excel文件' });
+    }
+
+    const buffer = await fsp.readFile(req.file.path);
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames.find(n => n.toLowerCase() === 'artifactattachments') || workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+    let linked = 0;
+    const errors = [];
+
+    for (const row of rows) {
+      const rawArtifactId = row.artifact_id ?? row.artifactId ?? row.owner_id ?? row.ownerId;
+      const artifactId = rawArtifactId !== undefined && rawArtifactId !== null && String(rawArtifactId).trim() !== ''
+        ? Number(rawArtifactId)
+        : null;
+      const refCell = row.file_reference ?? row.fileReference ?? row.attachment ?? row.attachments ?? '';
+
+      if (!artifactId || !Number.isFinite(artifactId)) {
+        continue;
+      }
+
+      const refs = String(refCell)
+        .split(/[,;，；\n\r\t]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      for (const ref of refs) {
+        try {
+          let attachmentId = null;
+          if (/^\d+$/.test(ref)) {
+            attachmentId = Number(ref);
+          } else {
+            const [aRows] = await mysqlPool.execute(
+              'SELECT id FROM attachments WHERE original_name = ? ORDER BY id DESC LIMIT 1',
+              [ref]
+            );
+            attachmentId = aRows && aRows[0] ? aRows[0].id : null;
+          }
+
+          if (!attachmentId) {
+            errors.push({ artifactId, ref, error: '未找到对应附件' });
+            continue;
+          }
+
+          await mysqlPool.execute(
+            `INSERT INTO attachment_refs (attachment_id, owner_type, owner_id, relation_type)
+             VALUES (?, 'artifact', ?, 'image')`,
+            [attachmentId, artifactId]
+          );
+          linked += 1;
+        } catch (err) {
+          errors.push({ artifactId, ref, error: err.message });
+        }
+      }
+    }
+
+    await writeLog({
+      userId: req.user.id,
+      action: 'import_attachment_links_excel',
+      targetId: null,
+      details: JSON.stringify({ sheet: sheetName, linked, errorCount: errors.length })
+    });
+
+    return res.status(200).json({ message: '导入完成', linked, errors });
+  } catch (error) {
+    console.error('导入关联Excel错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -593,6 +884,19 @@ router.delete('/:id', async (req, res) => {
     const attachment = rows[0];
     if (!canDeleteAttachment(req)) {
       return res.status(403).json({ message: '权限不足：仅管理员可删除附件' });
+    }
+
+    try {
+      const [refRows] = await mysqlPool.execute(
+        'SELECT COUNT(*) AS cnt FROM attachment_refs WHERE attachment_id = ?',
+        [attachmentId]
+      );
+      const cnt = Number(refRows?.[0]?.cnt || 0);
+      if (cnt > 0) {
+        return res.status(409).json({ message: '该附件已被引用，无法删除（请先解除引用）' });
+      }
+    } catch (err) {
+      // attachment_refs 可能尚未迁移，忽略
     }
 
     const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);

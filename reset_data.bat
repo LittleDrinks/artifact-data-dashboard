@@ -1,12 +1,12 @@
 @echo off
 
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "ENV_FILE=.env"
 
 if not exist "%ENV_FILE%" (
-	echo [é”™è¯¯] æ ¹ç›®å½• %ENV_FILE% ä¸å­˜åœ¨ã€‚
-	echo [æ“ä½œ] è¯·å…ˆä» .env.example ç”Ÿæˆ .env å¹¶å¡«å†™ MYSQL_ROOT_PASSWORDã€‚
+	echo [´íÎó] ¸ùÄ¿Â¼ %ENV_FILE% ²»´æÔÚ¡£
+	echo [²Ù×÷] ÇëÏÈ´Ó .env.example Éú³É .env ²¢ÌîĞ´ MYSQL_ROOT_PASSWORD¡£
 	echo.
 	pause
 	exit /b 1
@@ -15,33 +15,84 @@ if not exist "%ENV_FILE%" (
 set "MYSQL_ROOT_PASSWORD="
 set "MYSQL_DATABASE=artifact_dashboard"
 
+set "NEO4J_USER=neo4j"
+set "NEO4J_PASSWORD=password"
+
 for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^MYSQL_ROOT_PASSWORD=" "%ENV_FILE%"`) do set "MYSQL_ROOT_PASSWORD=%%B"
 for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^MYSQL_DATABASE=" "%ENV_FILE%"`) do set "MYSQL_DATABASE=%%B"
 
+for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^NEO4J_USER=" "%ENV_FILE%"`) do set "NEO4J_USER=%%B"
+for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^NEO4J_PASSWORD=" "%ENV_FILE%"`) do set "NEO4J_PASSWORD=%%B"
+
 if "%MYSQL_ROOT_PASSWORD%"=="" (
-	echo [é”™è¯¯] æœªåœ¨ %ENV_FILE% ä¸­æ‰¾åˆ° MYSQL_ROOT_PASSWORDã€‚
-	echo [æ“ä½œ] è¯·åœ¨ .env ä¸­è®¾ç½® MYSQL_ROOT_PASSWORD=... åé‡è¯•ã€‚
+	echo [´íÎó] Î´ÔÚ %ENV_FILE% ÖĞÕÒµ½ MYSQL_ROOT_PASSWORD¡£
+	echo [²Ù×÷] ÇëÔÚ .env ÖĞÉèÖÃ MYSQL_ROOT_PASSWORD=... ºóÖØÊÔ¡£
 	echo.
 	pause
 	exit /b 1
 )
 
-echo [æ“ä½œ] å°†é‡ç½® MySQL æ•°æ®åº“ï¼š%MYSQL_DATABASE%
+echo [²Ù×÷] ½«ÖØÖÃ MySQL Êı¾İ¿â£º%MYSQL_DATABASE%
+echo [²Ù×÷] ½«Í¬Ê±ÖØÖÃ Neo4j Í¼Êı¾İ¿â£¨É¾³ı neo4j-data / neo4j-logs volumes£©
 echo.
+
+rem --- Reset Neo4j (data is stored in named volumes; rebuild won't clear volumes) ---
+rem Stop neo4j service if present
+docker compose stop neo4j >nul 2>&1
+
+rem Remove neo4j container to release volumes (ignore errors if container not found)
+docker rm -f artifact-dashboard-neo4j >nul 2>&1
+
+rem Remove neo4j named volumes (ignore errors if not found)
+docker volume rm artifact-data-dashboard_neo4j-data >nul 2>&1
+docker volume rm artifact-data-dashboard_neo4j-logs >nul 2>&1
+
+rem Start neo4j again
+docker compose up -d neo4j
+if %errorlevel% neq 0 (
+	echo [´íÎó] Neo4j ÖØÖÃ/Æô¶¯Ê§°Ü£¬Çë¼ì²é docker compose ÊÇ·ñ¿ÉÓÃ¡£
+	pause
+	exit /b 1
+)
+
+echo [²Ù×÷] µÈ´ı Neo4j ¾ÍĞ÷...
+set "NEO4J_READY=0"
+for /L %%i in (1,1,60) do (
+	docker exec artifact-dashboard-neo4j cypher-shell -u %NEO4J_USER% -p %NEO4J_PASSWORD% "RETURN 1;" >nul 2>&1
+	if !errorlevel! equ 0 (
+		set "NEO4J_READY=1"
+		goto :neo4j_ready
+	)
+	timeout /t 2 /nobreak >nul
+)
+:neo4j_ready
+if "%NEO4J_READY%"=="0" (
+	echo [´íÎó] Neo4j Î´ÔÚÔ¤ÆÚÊ±¼äÄÚ¾ÍĞ÷¡£
+	pause
+	exit /b 1
+)
+
+echo [²Ù×÷] ³õÊ¼»¯ Neo4j Í¼Êı¾İ£¨Ê¾ÀıÖªÊ¶Í¼Æ×£©...
+docker compose run --rm -T -e NEO4J_URI=bolt://neo4j:7687 -e NEO4J_USER=%NEO4J_USER% -e NEO4J_PASSWORD=%NEO4J_PASSWORD% backend node scripts/init-neo4j.js
+if %errorlevel% neq 0 (
+	echo [´íÎó] Neo4j ³õÊ¼»¯½Å±¾Ö´ĞĞÊ§°Ü¡£
+	pause
+	exit /b 1
+)
 
 docker exec -i artifact-dashboard-mysql mysql -uroot -p%MYSQL_ROOT_PASSWORD% -e "DROP DATABASE IF EXISTS %MYSQL_DATABASE%; CREATE DATABASE %MYSQL_DATABASE% CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 if %errorlevel% neq 0 (
-	echo [é”™è¯¯] æ‰§è¡Œæ•°æ®åº“é‡ç½®å¤±è´¥ï¼Œè¯·æ£€æŸ¥å®¹å™¨æ˜¯å¦è¿è¡Œä»¥åŠ MYSQL_ROOT_PASSWORD æ˜¯å¦æ­£ç¡®ã€‚
+	echo [´íÎó] Ö´ĞĞÊı¾İ¿âÖØÖÃÊ§°Ü£¬Çë¼ì²éÈİÆ÷ÊÇ·ñÔËĞĞÒÔ¼° MYSQL_ROOT_PASSWORD ÊÇ·ñÕıÈ·¡£
 	pause
 	exit /b 1
 )
 
 docker exec -i artifact-dashboard-mysql mysql -uroot -p%MYSQL_ROOT_PASSWORD% %MYSQL_DATABASE% < backend/scripts/init-mysql.sql
 if %errorlevel% neq 0 (
-	echo [é”™è¯¯] å¯¼å…¥ init-mysql.sql å¤±è´¥ã€‚
+	echo [´íÎó] µ¼Èë init-mysql.sql Ê§°Ü¡£
 	pause
 	exit /b 1
 )
 
-echo [å®Œæˆ] æ•°æ®å·²é‡ç½®ã€‚
+echo [Íê³É] Êı¾İÒÑÖØÖÃ¡£
 pause

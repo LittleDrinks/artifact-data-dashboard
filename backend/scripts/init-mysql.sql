@@ -67,10 +67,31 @@ CREATE TABLE IF NOT EXISTS attachments (
   mime_type VARCHAR(100) NOT NULL,
   size_bytes BIGINT NOT NULL,
   storage_name VARCHAR(255) NOT NULL,
+  `hash` VARCHAR(64) NULL,
+  meta JSON NULL,
+  status ENUM('processing','ok','failed') NOT NULL DEFAULT 'ok',
+  thumbnail_storage_name VARCHAR(255) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_attachments_owner (owner_type, owner_id),
+  INDEX idx_attachments_hash (`hash`),
+  INDEX idx_attachments_status (status),
   INDEX idx_attachments_uploaded_by (uploaded_by),
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 创建attachment_refs表（附件引用关系）
+CREATE TABLE IF NOT EXISTS attachment_refs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  attachment_id INT NOT NULL,
+  owner_type VARCHAR(50) NOT NULL,
+  owner_id BIGINT UNSIGNED NOT NULL,
+  relation_type VARCHAR(50) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_attachment_refs_owner (owner_type, owner_id),
+  INDEX idx_attachment_refs_attachment (attachment_id),
+  CONSTRAINT fk_attachment_refs_attachment
+    FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 插入管理员账户

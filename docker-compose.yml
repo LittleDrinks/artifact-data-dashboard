@@ -24,7 +24,7 @@ services:
       - WDS_SOCKET_PORT=8080
       - REACT_APP_WDS_SOCKET_HOST=0.0.0.0
       - REACT_APP_WDS_SOCKET_PORT=8080
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-}
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:3000}
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -43,6 +43,8 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-development}
       - NODE_ENV=${NODE_ENV:-development}
+      - ATTACHMENT_IMPORT_DIR_WHITELIST=/data/images_shenzhen
+      - ATTACHMENT_UPLOAD_CONCURRENCY=${ATTACHMENT_UPLOAD_CONCURRENCY:-2}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -60,6 +62,7 @@ services:
       - ./backend/scripts:/app/scripts
       - ./backend/config:/app/config
       - uploads-data:/app/uploads
+      - ./build_kg/crawler/images_shenzhen:/data/images_shenzhen:ro
 
   # MySQL数据库
   mysql:

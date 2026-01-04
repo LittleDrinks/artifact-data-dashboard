@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Input, Button, List, Card, Tag, Pagination, Spin, Empty, Alert, Modal, Table, Image, Space, Upload, message } from 'antd';
 import { SearchOutlined, EnvironmentOutlined, ClockCircleOutlined, TagOutlined } from '@ant-design/icons';
 import { searchArtifacts, getArtifactById, updateArtifact, deleteArtifact } from '../services/artifact.service';
@@ -118,6 +118,9 @@ const ArtifactSearch = () => {
   const [attachmentsError, setAttachmentsError] = useState(null);
   const [attachments, setAttachments] = useState([]);
 
+  const detailArtifactIdRef = useRef(null);
+  const currentUploadAbortRef = useRef(null);
+
   const [editOpen, setEditOpen] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
 
@@ -177,6 +180,10 @@ const ArtifactSearch = () => {
   const openDetailModal = async (artifact) => {
     const artifactIdFromList = resolveArtifactId(artifact);
 
+    detailArtifactIdRef.current = artifactIdFromList;
+    setAttachments([]);
+    setAttachmentsError(null);
+
     setDetailVisible(true);
     setDetailLoading(true);
     setDetailAlert(null);
@@ -226,9 +233,14 @@ const ArtifactSearch = () => {
   };
 
   const closeDetailModal = () => {
+    currentUploadAbortRef.current?.();
+    currentUploadAbortRef.current = null;
     setDetailVisible(false);
     setSelectedArtifact(null);
     setDetailAlert(null);
+    detailArtifactIdRef.current = null;
+    setAttachments([]);
+    setAttachmentsError(null);
   };
 
   const openEditModal = () => {
@@ -315,20 +327,30 @@ const ArtifactSearch = () => {
     setAttachmentsLoading(true);
     try {
       const resp = await listAttachments({ ownerType: 'artifact', ownerId: artifactId });
-      setAttachments(resp.data?.data || []);
-      setAttachmentsError(null);
+      if (detailArtifactIdRef.current === artifactId) {
+        setAttachments(resp.data?.data || []);
+        setAttachmentsError(null);
+      }
     } catch (err) {
       console.error('加载附件失败:', err);
-      setAttachments([]);
-      setAttachmentsError(err.response?.data?.message || '加载附件失败');
+      if (detailArtifactIdRef.current === artifactId) {
+        setAttachments([]);
+        setAttachmentsError(err.response?.data?.message || '加载附件失败');
+      }
     } finally {
-      setAttachmentsLoading(false);
+      if (detailArtifactIdRef.current === artifactId) {
+        setAttachmentsLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (detailVisible && selectedArtifact?.id) {
-      refreshAttachments(selectedArtifact.id);
+    const artifactId = detailArtifactIdRef.current;
+    if (detailVisible && artifactId) {
+      refreshAttachments(artifactId);
+    } else if (!detailVisible) {
+      currentUploadAbortRef.current?.();
+      currentUploadAbortRef.current = null;
     }
   }, [detailVisible, selectedArtifact?.id, refreshAttachments]);
 
@@ -382,7 +404,8 @@ const ArtifactSearch = () => {
   };
 
   const uploadAttachmentProps = {
-    maxCount: 1,
+    multiple: true,
+    maxCount: 200,
     showUploadList: false,
     customRequest: async ({ file, onSuccess, onError }) => {
       if (!isAdmin) {
@@ -390,23 +413,32 @@ const ArtifactSearch = () => {
         onError?.(new Error('forbidden'));
         return;
       }
-      if (!selectedArtifact?.id) {
+      const artifactId = detailArtifactIdRef.current;
+      if (!artifactId) {
         message.error('无法确定文物编号');
         onError?.(new Error('missing_artifact_id'));
         return;
       }
       try {
         setAttachmentsUploading(true);
+        const controller = new AbortController();
+        currentUploadAbortRef.current = () => controller.abort();
         const resp = await uploadAttachment({
           file,
           ownerType: 'artifact',
-          ownerId: selectedArtifact.id
+          ownerId: artifactId,
+          signal: controller.signal
         });
         message.success('上传成功');
         onSuccess?.(resp.data);
-        await refreshAttachments(selectedArtifact.id);
+        await refreshAttachments(artifactId);
       } catch (err) {
         console.error('上传附件失败:', err);
+        if (err.code === 'ERR_CANCELED') {
+          message.info('已取消上传');
+          onError?.(err);
+          return;
+        }
         if (err.response?.status === 403) {
           message.error('权限不足：仅管理员可上传');
         } else {
@@ -415,6 +447,7 @@ const ArtifactSearch = () => {
         onError?.(err);
       } finally {
         setAttachmentsUploading(false);
+        currentUploadAbortRef.current = null;
       }
     }
   };

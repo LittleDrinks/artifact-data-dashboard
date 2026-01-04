@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Input, message, Space, Spin, Table, Upload } from 'antd';
+import { Alert, Button, Card, Input, message, Modal, Space, Spin, Table, Upload } from 'antd';
 import { DeleteOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 
 import { getCurrentUser } from '../services/auth.service';
@@ -39,6 +39,13 @@ const Attachments = () => {
   const [limit, setLimit] = useState(10);
   const [total, setTotal] = useState(0);
   const limitRef = useRef(limit);
+
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchFiles, setBatchFiles] = useState([]);
+  const [batchResults, setBatchResults] = useState([]);
+  const [batchUploading, setBatchUploading] = useState(false);
+  const batchAbortRef = useRef(false);
+  const currentUploadAbortRef = useRef(null);
 
   useEffect(() => {
     limitRef.current = limit;
@@ -180,16 +187,24 @@ const Attachments = () => {
           return;
         }
         setUploading(true);
+        const controller = new AbortController();
+        currentUploadAbortRef.current = () => controller.abort();
         const resp = await uploadAttachment({
           file,
           ownerType: ownerType.trim() || undefined,
-          ownerId: ownerId.trim() || undefined
+          ownerId: ownerId.trim() || undefined,
+          signal: controller.signal
         });
         message.success('上传成功');
         onSuccess?.(resp.data);
         refresh();
       } catch (err) {
         console.error('上传失败:', err);
+        if (err.code === 'ERR_CANCELED') {
+          message.info('已取消上传');
+          onError?.(err);
+          return;
+        }
         if (err.response?.status === 403) {
           message.error('权限不足：仅管理员可上传');
         } else {
@@ -198,8 +213,76 @@ const Attachments = () => {
         onError?.(err);
       } finally {
         setUploading(false);
+        currentUploadAbortRef.current = null;
       }
     }
+  };
+
+  const batchUploadProps = {
+    multiple: true,
+    accept: 'image/*',
+    fileList: batchFiles,
+    beforeUpload: () => false,
+    onChange: (info) => {
+      setBatchFiles(info.fileList || []);
+    },
+    onRemove: (file) => {
+      setBatchFiles((prev) => prev.filter((f) => f.uid !== file.uid));
+    }
+  };
+
+  const handleBatchUpload = async () => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可上传');
+      return;
+    }
+
+    if (!batchFiles.length) {
+      message.warning('请先选择图片');
+      return;
+    }
+
+    batchAbortRef.current = false;
+    setBatchUploading(true);
+    setBatchResults([]);
+
+    const results = [];
+    for (const fileItem of batchFiles) {
+      if (batchAbortRef.current) {
+        break;
+      }
+      const file = fileItem.originFileObj;
+      if (!file) {
+        results.push({ name: fileItem.name, ok: false, error: '文件无效' });
+        continue;
+      }
+
+      try {
+        const controller = new AbortController();
+        currentUploadAbortRef.current = () => controller.abort();
+        const resp = await uploadAttachment({
+          file,
+          ownerType: ownerType.trim() || undefined,
+          ownerId: ownerId.trim() || undefined,
+          signal: controller.signal
+        });
+        results.push({ name: file.name, ok: true, id: resp.data?.id });
+      } catch (err) {
+        if (err.code === 'ERR_CANCELED') {
+          results.push({ name: file.name, ok: false, error: '已取消' });
+          batchAbortRef.current = true;
+        } else {
+        results.push({ name: file.name, ok: false, error: err.response?.data?.message || err.message || '上传失败' });
+        }
+      }
+
+      setBatchResults([...results]);
+    }
+
+    setBatchUploading(false);
+    currentUploadAbortRef.current = null;
+    message.success(batchAbortRef.current ? '已取消批量上传' : '批量上传完成');
+    refresh({ nextPage: 1 });
   };
 
   const handleExportExcel = async () => {
@@ -326,6 +409,19 @@ const Attachments = () => {
           </Upload>
 
           {isAdmin ? (
+            <Button
+              style={{ marginLeft: 12 }}
+              icon={<UploadOutlined />}
+              onClick={() => {
+                setBatchOpen(true);
+                setBatchResults([]);
+              }}
+            >
+              批量上传
+            </Button>
+          ) : null}
+
+          {isAdmin ? (
             <Space style={{ marginLeft: 12 }}>
               <Button onClick={handleExportExcel} loading={exportingExcel}>
                 导出知识图谱Excel（生成附件）
@@ -362,6 +458,43 @@ const Attachments = () => {
           />
         )}
       </Card>
+
+      <Modal
+        title="批量上传图片"
+        open={batchOpen}
+        maskClosable={false}
+        onCancel={() => {
+          // 允许随时关闭：中途关闭则取消当前上传
+          batchAbortRef.current = true;
+          currentUploadAbortRef.current?.();
+          setBatchUploading(false);
+          setBatchOpen(false);
+          setBatchFiles([]);
+          setBatchResults([]);
+        }}
+        onOk={handleBatchUpload}
+        okButtonProps={{ loading: batchUploading, disabled: !batchFiles.length }}
+        cancelButtonProps={{ disabled: false }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Upload {...batchUploadProps}>
+            <Button icon={<UploadOutlined />}>选择多张图片</Button>
+          </Upload>
+          <div style={{ marginTop: 8, color: 'rgba(0,0,0,0.45)' }}>
+            选择后点击“确定”开始上传（逐个上传）。
+          </div>
+        </div>
+
+        {batchResults.length > 0 && (
+          <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid #f0f0f0', padding: 8 }}>
+            {batchResults.map((r, idx) => (
+              <div key={`${r.name}-${idx}`} style={{ marginBottom: 6 }}>
+                {r.ok ? `✅ ${r.name} -> #${r.id}` : `❌ ${r.name} - ${r.error}`}
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

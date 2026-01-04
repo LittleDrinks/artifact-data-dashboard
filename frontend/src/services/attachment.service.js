@@ -2,7 +2,14 @@ import axios from 'axios';
 
 const BASE = '/api/attachments';
 
-export const uploadAttachment = async ({ file, ownerType, ownerId }) => {
+// Ensure baseURL is configured even if auth.service hasn't run yet.
+const rawBaseURL = (process.env.REACT_APP_API_URL ?? '').trim();
+const normalizedBaseURL = rawBaseURL.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+if (normalizedBaseURL && axios.defaults.baseURL !== normalizedBaseURL) {
+  axios.defaults.baseURL = normalizedBaseURL;
+}
+
+export const uploadAttachment = async ({ file, ownerType, ownerId, signal, onUploadProgress } = {}) => {
   const form = new FormData();
   form.append('file', file);
   if (ownerType !== undefined && ownerType !== null && String(ownerType).trim() !== '') {
@@ -14,7 +21,9 @@ export const uploadAttachment = async ({ file, ownerType, ownerId }) => {
   return axios.post(`${BASE}/upload`, form, {
     headers: {
       'Content-Type': 'multipart/form-data'
-    }
+    },
+    signal,
+    onUploadProgress
   });
 };
 
