@@ -193,11 +193,194 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 
 省略：backend/src/services/excel-kg.service.js（第509-653行）
 
-### 4. 知识图谱（Neo4j）：结构化关系表达与可视化查询
+### 4. 知识图谱（Neo4j + D3-force）：结构化关系表达与可视化交互
 
-表格能展示属性，但难以表达“文物—类别—年代”的多对多关系。我将关系建模为图：文物节点（Artifact）、类别节点（Category）、年代节点（Era），并定义 `BELONG_TO`、`IN_ERA` 关系。
+表格能展示属性，但难以表达“文物—类别—年代”的多对多关系。我将关系建模为图：文物节点（Artifact）、类别节点（Category）、年代节点（Era），并通过关系边把多对多结构显式化。
 
-后端通过 Neo4j Driver 执行 Cypher 查询。问答模块在检索阶段会将问题拆成多个关键词，逐个检索并合并去重后的图谱节点与关系。
+本项目中 **Neo4j 的数据侧接口已完成**：后端对查询结果做裁剪，统一返回 `nodes/edges` 给前端渲染。
+
+代码节选：backend/src/routes/graph.routes.js（第200-223行）
+
+```js
+    // 过滤掉指向被裁剪节点的边
+    const keptEdges = allEdges.filter(e => keptIds.has(e.source) && keptIds.has(e.target));
+
+    return res.status(200).json({
+      nodes: keptNodes,
+      edges: keptEdges
+    });
+```
+
+前端通过图谱服务拉取数据并进入可视化页面。
+
+代码节选：frontend/src/services/graph.service.js（第1-15行）
+
+```js
+import axios from 'axios';
+
+const API_URL = '/api/graph/';
+
+export const getGraphData = async (keyword = '', limit = 200) => {
+  return axios.get(API_URL + 'artifacts', {
+    params: { keyword, limit }
+  });
+};
+```
+
+知识图谱的重点实现落在前端：使用 **D3-force 力导向布局**，对 `nodes/edges` 进行布局计算，并配套缩放/拖拽/钉住等交互。
+
+代码节选：frontend/src/pages/KnowledgeGraph.js（第488-556行）
+
+```js
+  // D3力导向图初始化和更新
+  useEffect(() => {
+    if (!svgRef.current || displayedGraphData.nodes.length === 0) {
+      return;
+    }
+
+    const width = 1000;
+    const height = graphHeight || 600;
+    
+    // 清空之前的内容
+    d3.select(svgRef.current).selectAll('*').remove();
+
+    const svg = d3.select(svgRef.current)
+      .attr('width', '100%')
+      .attr('height', height)
+      .attr('viewBox', [0, 0, width, height]);
+
+    // 添加缩放功能
+    const g = svg.append('g');
+    
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 4])
+      .wheelDelta((event) => {
+        const modeScale = event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? 800 : 1);
+        return (-event.deltaY * modeScale) / 1500;
+      })
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
+      });
+    
+    svg.call(zoom);
+
+    // 准备数据
+    const nodes = displayedGraphData.nodes.map(d => {
+      const node = { ...d, x: width / 2, y: height / 2 };
+      const id = String(node.id);
+      const pinned = pinnedPositionsRef.current.get(id);
+      if (pinned && Number.isFinite(pinned.x) && Number.isFinite(pinned.y)) {
+        node.fx = pinned.x;
+        node.fy = pinned.y;
+      }
+      return node;
+    });
+    const links = displayedGraphData.edges.map(d => ({ ...d }));
+
+    // 创建力模拟
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links)
+        .id(d => d.id)
+        .distance(forceSettings.linkDistance)
+        .strength(forceSettings.linkStrength))
+      .force('charge', d3.forceManyBody()
+        .strength(forceSettings.chargeStrength)
+        .distanceMax(forceSettings.chargeDistanceMax))
+      .force('center', d3.forceCenter(width / 2, height / 2).strength(forceSettings.centerStrength))
+      .force('collision', d3.forceCollide().radius(forceSettings.collisionRadius))
+      .force('x', d3.forceX(width / 2).strength(forceSettings.xStrength))
+      .force('y', d3.forceY(height / 2).strength(forceSettings.yStrength))
+      .alphaDecay(forceSettings.alphaDecay)
+      .velocityDecay(forceSettings.velocityDecay);
+```
+
+为保证交互体验，图谱支持拖拽节点，并通过 Shift+拖拽将节点“钉住”（固定 `fx/fy`），从而在解释关系链路时保持布局稳定。
+
+代码节选：frontend/src/pages/KnowledgeGraph.js（第722-772行）
+
+```js
+      .call(d3.drag()
+        .on('start', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.1).restart();
+          d.__dragMoved = false;
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on('drag', (event, d) => {
+          d.__dragMoved = true;
+          d.fx = event.x;
+          d.fy = event.y;
+
+          // 若已钉住，则实时更新固定位置
+          const id = String(d.id);
+          if (pinnedNodeIdsRef.current.has(id)) {
+            pinnedPositionsRef.current.set(id, { x: d.fx, y: d.fy });
+          }
+        })
+        .on('end', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          const id = String(d.id);
+          const pinnedSet = pinnedNodeIdsRef.current;
+
+          // Shift+拖拽：松手时钉住（或更新钉住位置）；取消钉住请用 Shift+单击
+          const shiftPressed = Boolean((event?.sourceEvent && event.sourceEvent.shiftKey) || event?.shiftKey);
+          if (shiftPressed && d.__dragMoved) {
+            pinnedSet.add(id);
+            pinnedPositionsRef.current.set(id, { x: d.fx, y: d.fy });
+            setPinnedCount(pinnedSet.size);
+            updatePinnedStyles();
+            return;
+          }
+
+          // 默认：拖拽松手释放（除非已钉住）
+          if (!pinnedSet.has(id)) {
+            d.fx = null;
+            d.fy = null;
+          } else {
+            pinnedPositionsRef.current.set(id, { x: d.fx, y: d.fy });
+          }
+        }));
+```
+
+后端未实现“跳转到指定节点”的定位参数：后端只返回 `nodes/edges`，图谱页的 focus 节点由前端根据返回节点集合自行选取，并通过 `sessionStorage` 传递给图谱页面。
+
+代码节选：frontend/src/pages/Chat.js（第198-234行）
+
+```js
+  const openGraphFromMessage = (message) => {
+    try {
+      if (message?.data) {
+        sessionStorage.setItem('chatGraphData', JSON.stringify(message.data));
+
+        const focusId =
+          message.data.nodes?.find(n => n.type === 'artifact')?.id ||
+          message.data.nodes?.[0]?.id ||
+          null;
+        if (focusId) {
+          sessionStorage.setItem('chatGraphFocusNodeId', String(focusId));
+        }
+
+        const MAX_HIGHLIGHTS = 20;
+        const artifactIds = (message.data.nodes || [])
+          .filter(n => n && n.type === 'artifact' && n.id != null)
+          .map(n => String(n.id));
+        const highlightIds = (artifactIds.length > 0 ? artifactIds : (focusId ? [String(focusId)] : []))
+          .filter(Boolean)
+          .slice(0, MAX_HIGHLIGHTS);
+        if (highlightIds.length > 0) {
+          sessionStorage.setItem('chatGraphHighlightNodeIds', JSON.stringify(highlightIds));
+        } else {
+          sessionStorage.removeItem('chatGraphHighlightNodeIds');
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    navigate('/knowledge-graph?from=chat');
+  };
+```
+
+问答模块在检索阶段会将问题拆成多个关键词，逐个检索并合并去重后的图谱节点与关系。
 
 代码节选：backend/src/routes/chat.routes.js（第537-559行）
 

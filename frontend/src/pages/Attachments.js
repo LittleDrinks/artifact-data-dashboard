@@ -8,6 +8,9 @@ import {
   exportKnowledgeGraphExcel,
   getAttachmentDownloadUrl,
   importKnowledgeGraphExcelFromAttachment,
+  bulkUploadZip,
+  importArtifactAttachmentLinksExcel,
+  importAttachmentsFromDir,
   listAttachments,
   uploadAttachment
 } from '../services/attachment.service';
@@ -30,6 +33,16 @@ const Attachments = () => {
   const [loading, setLoading] = useState(true);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
+  const [bulkZipUploading, setBulkZipUploading] = useState(false);
+  const [bulkZipFileList, setBulkZipFileList] = useState([]);
+  const [bulkZipResult, setBulkZipResult] = useState(null);
+  const [linkExcelImporting, setLinkExcelImporting] = useState(false);
+  const [linkExcelFileList, setLinkExcelFileList] = useState([]);
+  const [linkExcelResult, setLinkExcelResult] = useState(null);
+  const [dirImporting, setDirImporting] = useState(false);
+  const [dirImportDir, setDirImportDir] = useState('/data/import/crawler');
+  const [dirImportMaxFiles, setDirImportMaxFiles] = useState('');
+  const [dirImportResult, setDirImportResult] = useState(null);
   const [error, setError] = useState(null);
   const [rows, setRows] = useState([]);
   const [ownerType, setOwnerType] = useState('');
@@ -478,6 +491,134 @@ const Attachments = () => {
     }
   };
 
+  const bulkZipUploadProps = {
+    accept: '.zip',
+    maxCount: 1,
+    fileList: bulkZipFileList,
+    beforeUpload: (file) => {
+      setBulkZipFileList([file]);
+      setBulkZipResult(null);
+      return false;
+    },
+    onRemove: () => {
+      setBulkZipFileList([]);
+      setBulkZipResult(null);
+    }
+  };
+
+  const linkExcelUploadProps = {
+    accept: '.xlsx',
+    maxCount: 1,
+    fileList: linkExcelFileList,
+    beforeUpload: (file) => {
+      setLinkExcelFileList([file]);
+      setLinkExcelResult(null);
+      return false;
+    },
+    onRemove: () => {
+      setLinkExcelFileList([]);
+      setLinkExcelResult(null);
+    }
+  };
+
+  const handleBulkZipUpload = async () => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可批量上传');
+      return;
+    }
+
+    if (!bulkZipFileList.length) {
+      message.warning('请先选择 ZIP 文件');
+      return;
+    }
+
+    try {
+      setBulkZipUploading(true);
+      const file = bulkZipFileList[0]?.originFileObj || bulkZipFileList[0];
+      const resp = await bulkUploadZip({ file });
+      const items = Array.isArray(resp.data?.data) ? resp.data.data : [];
+      const okCount = items.filter((it) => it && it.attachmentId).length;
+      const errCount = items.filter((it) => it && it.error).length;
+      setBulkZipResult({ okCount, errCount, items });
+      message.success(`ZIP 上传完成：成功 ${okCount}，失败 ${errCount}`);
+      refresh({ nextPage: 1 });
+    } catch (err) {
+      console.error('ZIP 批量上传失败:', err);
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可批量上传');
+      } else {
+        message.error(err.response?.data?.message || err.message || 'ZIP 上传失败');
+      }
+    } finally {
+      setBulkZipUploading(false);
+    }
+  };
+
+  const handleLinkExcelImport = async () => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可导入关联');
+      return;
+    }
+
+    if (!linkExcelFileList.length) {
+      message.warning('请先选择 Excel 文件（data.xlsx）');
+      return;
+    }
+
+    try {
+      setLinkExcelImporting(true);
+      const file = linkExcelFileList[0]?.originFileObj || linkExcelFileList[0];
+      const resp = await importArtifactAttachmentLinksExcel({ file });
+      setLinkExcelResult(resp.data || null);
+      message.success(`关联导入完成：linked=${resp.data?.linked ?? 0}`);
+    } catch (err) {
+      console.error('关联导入失败:', err);
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可导入关联');
+      } else {
+        message.error(err.response?.data?.message || err.message || '关联导入失败');
+      }
+    } finally {
+      setLinkExcelImporting(false);
+    }
+  };
+
+  const handleDirImport = async () => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可导入目录');
+      return;
+    }
+
+    const dir = String(dirImportDir || '').trim();
+    if (!dir) {
+      message.warning('请填写容器内目录路径');
+      return;
+    }
+
+    try {
+      setDirImporting(true);
+      setDirImportResult(null);
+      const resp = await importAttachmentsFromDir({
+        dir,
+        ownerType: ownerType.trim() || undefined,
+        ownerId: ownerId.trim() || undefined,
+        maxFiles: dirImportMaxFiles.trim() || undefined
+      });
+      setDirImportResult(resp.data || null);
+      message.success(`目录导入完成：processed=${resp.data?.processed ?? 0}`);
+      refresh({ nextPage: 1 });
+    } catch (err) {
+      console.error('目录导入失败:', err);
+      if (err.response?.status === 403) {
+        message.error('权限不足：仅管理员可导入目录');
+      } else {
+        message.error(err.response?.data?.message || err.message || '目录导入失败');
+      }
+    } finally {
+      setDirImporting(false);
+    }
+  };
+
   return (
     <div className="attachments-container">
       <Card
@@ -529,6 +670,117 @@ const Attachments = () => {
                   </Upload>
                 </Space>
               </div>
+            ) : null}
+
+            {isAdmin ? (
+              <Card size="small" title="附件挂载（无需导入文件夹）" style={{ marginBottom: 16 }}>
+                <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
+                  <div>1) 上传 ZIP：ZIP 内建议以 artifact_id 作为第一层目录（例如 123/xxx.jpg）。</div>
+                  <div>2) 上传 data.xlsx：会读取 ArtifactAttachments sheet，把图片关联到文物。</div>
+                </div>
+
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space wrap>
+                    <Upload {...bulkZipUploadProps}>
+                      <Button icon={<UploadOutlined />} disabled={bulkZipUploading}>
+                        选择 ZIP
+                      </Button>
+                    </Upload>
+                    <Button type="primary" onClick={handleBulkZipUpload} loading={bulkZipUploading}>
+                      上传 ZIP
+                    </Button>
+                  </Space>
+
+                  {bulkZipResult ? (
+                    <Alert
+                      type={bulkZipResult.errCount > 0 ? 'warning' : 'success'}
+                      showIcon
+                      message={`ZIP 结果：成功 ${bulkZipResult.okCount}，失败 ${bulkZipResult.errCount}`}
+                      description={
+                        bulkZipResult.errCount > 0 ? (
+                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
+                            {JSON.stringify(
+                              bulkZipResult.items.filter((it) => it && it.error).slice(0, 20),
+                              null,
+                              2
+                            )}
+                          </pre>
+                        ) : null
+                      }
+                    />
+                  ) : null}
+
+                  <Space wrap>
+                    <Upload {...linkExcelUploadProps}>
+                      <Button icon={<UploadOutlined />} disabled={linkExcelImporting}>
+                        选择 data.xlsx
+                      </Button>
+                    </Upload>
+                    <Button type="primary" onClick={handleLinkExcelImport} loading={linkExcelImporting}>
+                      执行关联导入
+                    </Button>
+                  </Space>
+
+                  {linkExcelResult ? (
+                    <Alert
+                      type={(linkExcelResult.errors || []).length > 0 ? 'warning' : 'success'}
+                      showIcon
+                      message={`关联结果：linked=${linkExcelResult.linked ?? 0} errors=${(linkExcelResult.errors || []).length}`}
+                      description={
+                        (linkExcelResult.errors || []).length > 0 ? (
+                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
+                            {JSON.stringify((linkExcelResult.errors || []).slice(0, 20), null, 2)}
+                          </pre>
+                        ) : null
+                      }
+                    />
+                  ) : null}
+                </Space>
+              </Card>
+            ) : null}
+
+            {isAdmin ? (
+              <Card size="small" title="目录导入（适合超大数据，需 Docker 挂载）" style={{ marginBottom: 16 }}>
+                <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
+                  <div>把本地目录通过 Docker 挂载到后端容器，再填“容器内路径”导入。</div>
+                  <div>白名单前缀：/data/import/crawler</div>
+                </div>
+
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <Input
+                    value={dirImportDir}
+                    onChange={(e) => setDirImportDir(e.target.value)}
+                    placeholder="容器内目录路径，例如 /data/import/crawler/shenzhen/images_shenzhen"
+                  />
+                  <Input
+                    value={dirImportMaxFiles}
+                    onChange={(e) => setDirImportMaxFiles(e.target.value)}
+                    placeholder="maxFiles（可选，留空使用默认）"
+                  />
+                  <Button type="primary" onClick={handleDirImport} loading={dirImporting}>
+                    开始导入目录
+                  </Button>
+
+                  {dirImportResult ? (
+                    <Alert
+                      type={(dirImportResult.data || []).some((it) => it && it.error) ? 'warning' : 'success'}
+                      showIcon
+                      message={`目录导入：totalFiles=${dirImportResult.totalFiles ?? 0} processed=${dirImportResult.processed ?? 0}`}
+                      description={
+                        (dirImportResult.data || []).some((it) => it && it.error) ? (
+                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
+                            {JSON.stringify(
+                              (dirImportResult.data || []).filter((it) => it && it.error).slice(0, 20),
+                              null,
+                              2
+                            )}
+                          </pre>
+                        ) : null
+                      }
+                    />
+                  ) : null}
+                </Space>
+              </Card>
             ) : null}
 
             {loading ? (

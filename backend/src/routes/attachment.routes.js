@@ -280,6 +280,11 @@ router.post('/bulk', upload.single('file'), async (req, res) => {
         continue;
       }
 
+      const relativePath = String(entryName)
+        .replace(/\\/g, '/')
+        .replace(/^\.\/?/, '')
+        .trim();
+
       const baseName = normalizeOriginalName(path.basename(entryName));
       const entryExt = path.extname(baseName).toLowerCase();
       if (!entryExt) {
@@ -296,7 +301,14 @@ router.post('/bulk', upload.single('file'), async (req, res) => {
           ownerId,
           originalName: baseName,
           mimeType,
-          buffer
+          buffer,
+          extraMeta: relativePath
+            ? {
+              source: {
+                relativePath
+              }
+            }
+            : null
         });
         results.push({ filename: baseName, attachmentId: id, deduped });
       } catch (err) {
