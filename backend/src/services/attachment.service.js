@@ -10,6 +10,18 @@ const { getUploadQueue } = require('./queue/upload-queue');
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg']);
 
+const mergeMeta = (baseMeta, extraMeta) => {
+  const baseOk = baseMeta && typeof baseMeta === 'object';
+  const extraOk = extraMeta && typeof extraMeta === 'object';
+  if (baseOk && extraOk) {
+    return { ...baseMeta, ...extraMeta };
+  }
+  if (extraOk) {
+    return { ...extraMeta };
+  }
+  return baseOk ? baseMeta : null;
+};
+
 const fixUtf8Mojibake = (value) => {
   const input = String(value || '');
   // 如果字符串里含有典型 latin1 误解码的高位字符（例如 é¾...），尝试 latin1 -> utf8 纠正
@@ -82,6 +94,66 @@ class AttachmentService {
 
     this._schema = null;
     this._schemaPromise = null;
+  }
+
+  async _withMySqlLock(lockKey, fn, { timeoutSeconds = 10 } = {}) {
+    const key = String(lockKey || '').slice(0, 200);
+    if (!key) {
+      return fn();
+    }
+
+    const [[acquired]] = await mysqlPool.execute(
+      'SELECT GET_LOCK(?, ?) AS ok',
+      [key, Math.max(0, Number(timeoutSeconds) || 0)]
+    );
+
+    if (!acquired || Number(acquired.ok) !== 1) {
+      throw new Error('获取上传锁超时，请稍后重试');
+    }
+
+    try {
+      return await fn();
+    } finally {
+      try {
+        await mysqlPool.execute('SELECT RELEASE_LOCK(?)', [key]);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  async _findExistingByHashForOwner({ hash, ownerType, ownerId }) {
+    const schema = await this._ensureSchema();
+    if (!schema.hasHash) {
+      return null;
+    }
+
+    const fields = ['id', 'storage_name'];
+    if (schema.hasThumbnailStorageName) {
+      fields.push('thumbnail_storage_name');
+    }
+    if (schema.hasMeta) {
+      fields.push('meta');
+    }
+
+    const where = [
+      '`hash` = ?',
+      // null-safe equality for optional owner fields
+      'owner_type <=> ?',
+      'owner_id <=> ?'
+    ];
+    const params = [hash, ownerType, ownerId];
+
+    if (schema.hasStatus) {
+      where.push("status = 'ok'");
+    }
+
+    const [rows] = await mysqlPool.execute(
+      `SELECT ${fields.join(', ')} FROM attachments WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT 1`,
+      params
+    );
+
+    return rows && rows[0] ? rows[0] : null;
   }
 
   async _ensureSchema() {
@@ -246,7 +318,7 @@ class AttachmentService {
     };
   }
 
-  async ingestBuffer({ uploadedBy, ownerType = null, ownerId = null, originalName, mimeType = null, buffer }) {
+  async ingestBuffer({ uploadedBy, ownerType = null, ownerId = null, originalName, mimeType = null, buffer, extraMeta = null }) {
     if (!buffer || !Buffer.isBuffer(buffer)) {
       throw new Error('buffer 无效');
     }
@@ -257,69 +329,95 @@ class AttachmentService {
     const resolvedMime = mimeType || guessMimeType(normalizedName);
     const hash = schema.hasHash ? computeSha256FromBuffer(buffer) : null;
 
-    const existing = hash ? await this._findExistingByHash(hash) : null;
-    if (existing) {
-      const existingMeta = existing.meta;
-      const parsedMeta = existingMeta
-        ? (typeof existingMeta === 'string' ? JSON.parse(existingMeta) : existingMeta)
+    const run = async () => {
+      // 1) 如果同一个 owner 下已经有相同 hash 的记录，直接返回已有记录，避免重复行
+      const existingForOwner = hash
+        ? await this._findExistingByHashForOwner({ hash, ownerType, ownerId })
         : null;
+      if (existingForOwner) {
+        return { id: existingForOwner.id, deduped: true };
+      }
+
+      // 2) 若 hash 已存在（别的 owner），复用其存储文件/缩略图，但为当前 owner 插入一行
+      const existing = hash ? await this._findExistingByHash(hash) : null;
+      if (existing) {
+        const existingMeta = existing.meta;
+        const parsedMeta = existingMeta
+          ? (typeof existingMeta === 'string' ? JSON.parse(existingMeta) : existingMeta)
+          : null;
+
+        const mergedMeta = mergeMeta(parsedMeta, extraMeta);
+
+        const attachmentId = await this._insertAttachmentRow({
+          ownerType,
+          ownerId,
+          uploadedBy,
+          originalName: normalizedName,
+          mimeType: resolvedMime,
+          sizeBytes: buffer.length,
+          storageName: existing.storage_name,
+          hash,
+          thumbnailStorageName: existing.thumbnail_storage_name,
+          meta: mergedMeta,
+          status: 'ok'
+        });
+
+        return { id: attachmentId, deduped: true };
+      }
+
+      // 3) 新内容：写入存储并入库
+      const storageName = genStorageName(normalizedName);
+      await this.storage.writeBuffer(storageName, buffer);
+
+      let thumb = null;
+      let meta = null;
+
+      const ext = path.extname(normalizedName || '').toLowerCase();
+      if (IMAGE_EXTS.has(ext)) {
+        try {
+          const { metadata, thumbnails } = await this._generateThumbnailsFromBuffer(buffer, storageName);
+          thumb = thumbnails.small;
+          meta = {
+            width: metadata.width || null,
+            height: metadata.height || null,
+            format: metadata.format || null,
+            thumbnails
+          };
+        } catch (err) {
+          meta = { thumbnailError: err.message };
+        }
+      }
+
+      meta = mergeMeta(meta, extraMeta);
+
       const attachmentId = await this._insertAttachmentRow({
         ownerType,
         ownerId,
         uploadedBy,
-        originalName,
+        originalName: normalizedName,
         mimeType: resolvedMime,
         sizeBytes: buffer.length,
-        storageName: existing.storage_name,
+        storageName,
         hash,
-        thumbnailStorageName: existing.thumbnail_storage_name,
-        meta: parsedMeta,
+        thumbnailStorageName: thumb,
+        meta,
         status: 'ok'
       });
 
-      return { id: attachmentId, deduped: true };
+      return { id: attachmentId, deduped: false };
+    };
+
+    if (hash) {
+      const lockKey = computeSha256FromBuffer(
+        Buffer.from(`attachments:ingest|${hash}|${ownerType || 'null'}|${ownerId ?? 'null'}`)
+      );
+      return this._withMySqlLock(lockKey, run);
     }
 
-    const storageName = genStorageName(normalizedName);
-    await this.storage.writeBuffer(storageName, buffer);
-
-    let thumb = null;
-    let meta = null;
-
-    const ext = path.extname(normalizedName || '').toLowerCase();
-    if (IMAGE_EXTS.has(ext)) {
-      try {
-        const { metadata, thumbnails } = await this._generateThumbnailsFromBuffer(buffer, storageName);
-        thumb = thumbnails.small;
-        meta = {
-          width: metadata.width || null,
-          height: metadata.height || null,
-          format: metadata.format || null,
-          thumbnails
-        };
-      } catch (err) {
-        meta = { thumbnailError: err.message };
-      }
-    }
-
-    const attachmentId = await this._insertAttachmentRow({
-      ownerType,
-      ownerId,
-      uploadedBy,
-      originalName: normalizedName,
-      mimeType: resolvedMime,
-      sizeBytes: buffer.length,
-      storageName,
-      hash,
-      thumbnailStorageName: thumb,
-      meta,
-      status: 'ok'
-    });
-
-    return { id: attachmentId, deduped: false };
+    return run();
   }
 
-  async ingestLocalFile({ uploadedBy, ownerType = null, ownerId = null, filePath, originalName, mimeType = null }) {
+  async ingestLocalFile({ uploadedBy, ownerType = null, ownerId = null, filePath, originalName, mimeType = null, extraMeta = null }) {
     const stat = await fsp.stat(filePath);
     if (!stat.isFile()) {
       throw new Error('不是文件');
@@ -329,39 +427,64 @@ class AttachmentService {
 
     const schema = await this._ensureSchema();
     const hash = schema.hasHash ? await computeSha256FromFile(filePath) : null;
-    const existing = hash ? await this._findExistingByHash(hash) : null;
 
-    if (existing) {
-      const existingMeta = existing.meta;
-      const parsedMeta = existingMeta
-        ? (typeof existingMeta === 'string' ? JSON.parse(existingMeta) : existingMeta)
+    const run = async () => {
+      // 1) 同 owner 下已存在相同 hash：直接返回已有记录
+      const existingForOwner = hash
+        ? await this._findExistingByHashForOwner({ hash, ownerType, ownerId })
         : null;
-      const attachmentId = await this._insertAttachmentRow({
+      if (existingForOwner) {
+        return { id: existingForOwner.id, deduped: true };
+      }
+
+      // 2) 其他 owner 已存在相同 hash：复用存储文件，插入新行
+      const existing = hash ? await this._findExistingByHash(hash) : null;
+      if (existing) {
+        const existingMeta = existing.meta;
+        const parsedMeta = existingMeta
+          ? (typeof existingMeta === 'string' ? JSON.parse(existingMeta) : existingMeta)
+          : null;
+
+        const mergedMeta = mergeMeta(parsedMeta, extraMeta);
+
+        const attachmentId = await this._insertAttachmentRow({
+          ownerType,
+          ownerId,
+          uploadedBy,
+          originalName: normalizedName,
+          mimeType: mimeType || guessMimeType(normalizedName),
+          sizeBytes: stat.size,
+          storageName: existing.storage_name,
+          hash,
+          thumbnailStorageName: existing.thumbnail_storage_name,
+          meta: mergedMeta,
+          status: 'ok'
+        });
+
+        return { id: attachmentId, deduped: true };
+      }
+
+      // 3) 新内容：读入 buffer 交给 ingestBuffer 处理（含缩略图/入库）
+      const buffer = await fsp.readFile(filePath);
+      return this.ingestBuffer({
+        uploadedBy,
         ownerType,
         ownerId,
-        uploadedBy,
         originalName: normalizedName,
-        mimeType: mimeType || guessMimeType(normalizedName),
-        sizeBytes: stat.size,
-        storageName: existing.storage_name,
-        hash,
-        thumbnailStorageName: existing.thumbnail_storage_name,
-        meta: parsedMeta,
-        status: 'ok'
+        mimeType,
+        buffer,
+        extraMeta
       });
+    };
 
-      return { id: attachmentId, deduped: true };
+    if (hash) {
+      const lockKey = computeSha256FromBuffer(
+        Buffer.from(`attachments:ingest|${hash}|${ownerType || 'null'}|${ownerId ?? 'null'}`)
+      );
+      return this._withMySqlLock(lockKey, run);
     }
 
-    const buffer = await fsp.readFile(filePath);
-    return this.ingestBuffer({
-      uploadedBy,
-      ownerType,
-      ownerId,
-      originalName: normalizedName,
-      mimeType,
-      buffer
-    });
+    return run();
   }
 
   async ingestBuffersWithQueue(items) {

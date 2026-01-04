@@ -44,6 +44,7 @@ const Attachments = () => {
   const uploadActiveCountRef = useRef(0);
   const uploadShouldRefreshRef = useRef(false);
   const uploadQueueRef = useRef(uploadQueue);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     uploadQueueRef.current = uploadQueue;
@@ -85,7 +86,14 @@ const Attachments = () => {
       setError(null);
     } catch (err) {
       console.error('加载附件失败:', err);
-      setError(err.response?.data?.message || '加载附件失败，请稍后重试');
+      const data = err.response?.data;
+      const resolvedMessage =
+        (typeof data === 'string' && data.trim()) ||
+        data?.message ||
+        data?.error?.message ||
+        err.message ||
+        '加载附件失败，请稍后重试';
+      setError(resolvedMessage);
       setRows([]);
       setTotal(0);
     } finally {
@@ -135,10 +143,17 @@ const Attachments = () => {
       refresh();
     } catch (err) {
       console.error('删除失败:', err);
+      const data = err.response?.data;
+      const resolvedMessage =
+        (typeof data === 'string' && data.trim()) ||
+        data?.message ||
+        data?.error?.message ||
+        err.message ||
+        '删除失败';
       if (err.response?.status === 403) {
         message.error('权限不足：仅管理员可删除');
       } else {
-        message.error(err.response?.data?.message || '删除失败');
+        message.error(resolvedMessage);
       }
     }
   };
@@ -201,6 +216,24 @@ const Attachments = () => {
 
   const UPLOAD_CONCURRENCY = 2;
 
+  const buildDedupeKey = useCallback((file) => {
+    if (!file) {
+      return '';
+    }
+    const name = String(file.name || '').trim();
+    const size = Number(file.size || 0);
+    const lastModified = Number(file.lastModified || 0);
+    return `${name}@@${size}@@${lastModified}`;
+  }, []);
+
+  const setUploadQueueWithRef = useCallback((updater) => {
+    setUploadQueue((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      uploadQueueRef.current = next;
+      return next;
+    });
+  }, []);
+
   const pumpUploadQueue = useCallback(async () => {
     while (uploadActiveCountRef.current < UPLOAD_CONCURRENCY) {
       const next = uploadQueueRef.current.find((item) => item.status === 'queued');
@@ -208,23 +241,25 @@ const Attachments = () => {
         break;
       }
 
+      // 关键点：在开始异步上传前，先把该条目原子地标记为 uploading。
+      // 否则 while 循环可能在 React state 更新前重复选中同一个 queued 项，导致同一文件上传两次。
+      setUploadQueueWithRef((prev) =>
+        prev.map((item) =>
+          item.uid === next.uid
+            ? {
+                ...item,
+                status: 'uploading',
+                percent: 0
+              }
+            : item
+        )
+      );
+
       uploadActiveCountRef.current += 1;
 
       (async () => {
         const controller = new AbortController();
         uploadAbortMapRef.current.set(next.uid, () => controller.abort());
-
-        setUploadQueue((prev) =>
-          prev.map((item) =>
-            item.uid === next.uid
-              ? {
-                  ...item,
-                  status: 'uploading',
-                  percent: 0
-                }
-              : item
-          )
-        );
 
         try {
           const resp = await uploadAttachment({
@@ -236,14 +271,14 @@ const Attachments = () => {
               const totalBytes = Number(evt.total || 0);
               const loadedBytes = Number(evt.loaded || 0);
               const percent = totalBytes > 0 ? Math.min(99, Math.round((loadedBytes / totalBytes) * 100)) : 0;
-              setUploadQueue((prev) =>
+              setUploadQueueWithRef((prev) =>
                 prev.map((item) => (item.uid === next.uid ? { ...item, percent } : item))
               );
             }
           });
 
           uploadShouldRefreshRef.current = true;
-          setUploadQueue((prev) =>
+          setUploadQueueWithRef((prev) =>
             prev.map((item) =>
               item.uid === next.uid
                 ? {
@@ -257,19 +292,19 @@ const Attachments = () => {
           );
         } catch (err) {
           if (err.code === 'ERR_CANCELED') {
-            setUploadQueue((prev) =>
+            setUploadQueueWithRef((prev) =>
               prev.map((item) =>
                 item.uid === next.uid ? { ...item, status: 'canceled', error: '已取消' } : item
               )
             );
           } else if (err.response?.status === 403) {
-            setUploadQueue((prev) =>
+            setUploadQueueWithRef((prev) =>
               prev.map((item) =>
                 item.uid === next.uid ? { ...item, status: 'error', error: '权限不足' } : item
               )
             );
           } else {
-            setUploadQueue((prev) =>
+            setUploadQueueWithRef((prev) =>
               prev.map((item) =>
                 item.uid === next.uid
                   ? { ...item, status: 'error', error: err.response?.data?.message || err.message || '上传失败' }
@@ -285,7 +320,7 @@ const Attachments = () => {
         }
       })();
     }
-  }, [ownerId, ownerType]);
+  }, [ownerId, ownerType, setUploadQueueWithRef]);
 
   useEffect(() => {
     pumpUploadQueue();
@@ -298,33 +333,61 @@ const Attachments = () => {
         return;
       }
 
-      const now = Date.now();
-      const nextItems = files
-        .filter(Boolean)
-        .map((file, index) => ({
-          uid: `${now}-${index}-${file.uid || file.name || 'file'}`,
-          name: file.name,
-          file,
-          status: 'queued',
-          percent: 0
-        }));
+      setUploadQueueWithRef((prev) => {
+        const nextItems = [];
+        let dedupedCount = 0;
 
-      if (!nextItems.length) {
-        return;
-      }
+        for (const file of files.filter(Boolean)) {
+          const dedupeKey = buildDedupeKey(file);
+          const isDuplicate =
+            prev.some((item) => item.dedupeKey === dedupeKey && !['error', 'canceled'].includes(item.status)) ||
+            nextItems.some((item) => item.dedupeKey === dedupeKey);
 
-      setUploadQueue((prev) => [...nextItems, ...prev]);
+          if (dedupeKey && isDuplicate) {
+            dedupedCount += 1;
+            continue;
+          }
+
+          nextItems.push({
+            uid: dedupeKey || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            dedupeKey,
+            name: file.name,
+            file,
+            status: 'queued',
+            percent: 0
+          });
+        }
+
+        if (dedupedCount > 0) {
+          message.info(`已忽略 ${dedupedCount} 个重复文件`);
+        }
+
+        if (!nextItems.length) {
+          return prev;
+        }
+
+        return [...nextItems, ...prev];
+      });
     },
-    [isAdmin]
+    [buildDedupeKey, isAdmin, setUploadQueueWithRef]
   );
 
-  const uploadPickerProps = {
-    multiple: true,
-    showUploadList: false,
-    customRequest: ({ file, onSuccess }) => {
-      // 选中即入队上传（真正的上传由队列调度执行）
-      enqueueUploads([file]);
-      onSuccess?.('queued');
+  const handlePickFiles = () => {
+    if (!isAdmin) {
+      message.error('权限不足：仅管理员可上传');
+      return;
+    }
+    fileInputRef.current?.click?.();
+  };
+
+  const handleFileInputChange = (event) => {
+    const files = Array.from(event?.target?.files || []).filter(Boolean);
+    if (files.length) {
+      enqueueUploads(files);
+    }
+    // 允许重复选择同名文件/同一文件
+    if (event?.target) {
+      event.target.value = '';
     }
   };
 
@@ -497,17 +560,23 @@ const Attachments = () => {
           <div style={{ width: 320, flex: '0 0 320px' }}>
             <Card size="small" title="上传" bodyStyle={{ padding: 12 }}>
               <div style={{ marginBottom: 12 }}>
-                <Upload {...uploadPickerProps}>
-                  <Button
-                    type="primary"
-                    icon={<UploadOutlined />}
-                    disabled={!isAdmin}
-                    loading={queueStats.uploadingCount > 0 || queueStats.queuedCount > 0}
-                    block
-                  >
-                    选择文件上传
-                  </Button>
-                </Upload>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={handleFileInputChange}
+                />
+                <Button
+                  type="primary"
+                  icon={<UploadOutlined />}
+                  disabled={!isAdmin}
+                  loading={queueStats.uploadingCount > 0 || queueStats.queuedCount > 0}
+                  block
+                  onClick={handlePickFiles}
+                >
+                  选择文件上传
+                </Button>
               </div>
 
               <div style={{ marginBottom: 8 }}>

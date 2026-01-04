@@ -57,9 +57,22 @@ app.use(helmet());
 app.use(morgan('combined'));
 
 // 限流配置
+// NOTE: 批量上传会产生大量请求，开发环境默认放宽限流；生产环境保持更严格的默认值。
+const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const defaultMax = process.env.NODE_ENV === 'production' ? 100 : 2000;
+const max = Number(process.env.RATE_LIMIT_MAX || defaultMax);
+
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15分钟
-  max: 100 // 每个IP在windowMs时间内最多请求100次
+  windowMs: Number.isFinite(windowMs) && windowMs > 0 ? windowMs : 15 * 60 * 1000,
+  max: Number.isFinite(max) && max > 0 ? max : defaultMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    return res.status(429).json({
+      message: '请求过于频繁，请稍后重试',
+      statusCode: 429
+    });
+  }
 });
 app.use(limiter);
 

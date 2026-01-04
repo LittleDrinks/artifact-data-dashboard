@@ -59,6 +59,20 @@ const attachmentService = new AttachmentService();
 const integrityService = new IntegrityService();
 const storageDriver = getStorageDriver();
 
+let _attachmentsHasMeta = null;
+const ensureAttachmentsHasMeta = async () => {
+  if (_attachmentsHasMeta !== null) {
+    return _attachmentsHasMeta;
+  }
+  try {
+    const [rows] = await mysqlPool.execute("SHOW COLUMNS FROM attachments LIKE 'meta'");
+    _attachmentsHasMeta = Boolean(rows && rows.length);
+  } catch {
+    _attachmentsHasMeta = false;
+  }
+  return _attachmentsHasMeta;
+};
+
 const createAttachmentFromBuffer = async ({
   userId,
   ownerType,
@@ -352,13 +366,22 @@ router.post('/import-dir', async (req, res) => {
     for (const fp of sliced) {
       const originalName = path.basename(fp);
       try {
+        const relativePath = path
+          .relative(resolvedDir, fp)
+          .split(path.sep)
+          .join('/');
         const { id, deduped } = await attachmentService.ingestLocalFile({
           uploadedBy: req.user.id,
           ownerType,
           ownerId,
           filePath: fp,
           originalName,
-          mimeType: guessMimeType(originalName)
+          mimeType: guessMimeType(originalName),
+          extraMeta: {
+            source: {
+              relativePath
+            }
+          }
         });
         results.push({ filePath: fp, attachmentId: id, deduped });
       } catch (err) {
@@ -460,11 +483,25 @@ router.post('/excel/link-import', upload.single('file'), async (req, res) => {
           if (/^\d+$/.test(ref)) {
             attachmentId = Number(ref);
           } else {
-            const [aRows] = await mysqlPool.execute(
-              'SELECT id FROM attachments WHERE original_name = ? ORDER BY id DESC LIMIT 1',
-              [ref]
-            );
-            attachmentId = aRows && aRows[0] ? aRows[0].id : null;
+            const hasMeta = await ensureAttachmentsHasMeta();
+            if (hasMeta) {
+              const [aRows] = await mysqlPool.execute(
+                `SELECT id
+                 FROM attachments
+                 WHERE original_name = ?
+                    OR JSON_UNQUOTE(JSON_EXTRACT(meta, '$.source.relativePath')) = ?
+                 ORDER BY id DESC
+                 LIMIT 1`,
+                [ref, ref]
+              );
+              attachmentId = aRows && aRows[0] ? aRows[0].id : null;
+            } else {
+              const [aRows] = await mysqlPool.execute(
+                'SELECT id FROM attachments WHERE original_name = ? ORDER BY id DESC LIMIT 1',
+                [ref]
+              );
+              attachmentId = aRows && aRows[0] ? aRows[0].id : null;
+            }
           }
 
           if (!attachmentId) {
@@ -473,7 +510,7 @@ router.post('/excel/link-import', upload.single('file'), async (req, res) => {
           }
 
           await mysqlPool.execute(
-            `INSERT INTO attachment_refs (attachment_id, owner_type, owner_id, relation_type)
+            `INSERT IGNORE INTO attachment_refs (attachment_id, owner_type, owner_id, relation_type)
              VALUES (?, 'artifact', ?, 'image')`,
             [attachmentId, artifactId]
           );

@@ -32,55 +32,55 @@ const jwt = require('jsonwebtoken');
 
 // 认证中间件
 const authMiddleware = (req, res, next) => {
-	try {
-		const authHeader = req.headers.authorization;
-    
-		if (!authHeader || !authHeader.startsWith('Bearer ')) {
-			return res.status(401).json({ message: '未授权：无效的Token格式' });
-		}
-    
-		const token = authHeader.split(' ')[1];
-    
-		if (!token) {
-			return res.status(401).json({ message: '未授权：Token不存在' });
-		}
-    
-		const decoded = jwt.verify(token, process.env.JWT_SECRET);
-		req.user = decoded;
-    
-		next();
-	} catch (error) {
-		if (error.name === 'TokenExpiredError') {
-			return res.status(401).json({ message: '未授权：Token已过期' });
-		}
-    
-		if (error.name === 'JsonWebTokenError') {
-			return res.status(401).json({ message: '未授权：无效的Token' });
-		}
-    
-		console.error('认证中间件错误:', error);
-		return res.status(500).json({ message: '服务器内部错误' });
-	}
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ message: '未授权：无效的Token格式' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ message: '未授权：Token不存在' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+
+    next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: '未授权：Token已过期' });
+    }
+
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ message: '未授权：无效的Token' });
+    }
+
+    console.error('认证中间件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
 };
 
 // 角色验证中间件
 const roleMiddleware = (roles = []) => {
-	return (req, res, next) => {
-		if (!req.user) {
-			return res.status(401).json({ message: '未授权：用户信息不存在' });
-		}
-    
-		if (roles.length && !roles.includes(req.user.role)) {
-			return res.status(403).json({ message: '禁止访问：权限不足' });
-		}
-    
-		next();
-	};
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: '未授权：用户信息不存在' });
+    }
+
+    if (roles.length && !roles.includes(req.user.role)) {
+      return res.status(403).json({ message: '禁止访问：权限不足' });
+    }
+
+    next();
+  };
 };
 
 module.exports = {
-	authMiddleware,
-	roleMiddleware
+  authMiddleware,
+  roleMiddleware
 };
 ```
 
@@ -96,75 +96,86 @@ module.exports = {
 
 ```js
 router.get('/search', async (req, res) => {
-	try {
-		const keyword = typeof req.query.keyword === 'string' ? req.query.keyword.trim() : '';
-		if (!keyword) {
-			return res.status(400).json({ message: '搜索关键词为必填项' });
-		}
+  try {
+    const keyword = typeof req.query.keyword === 'string' ? req.query.keyword.trim() : '';
+    if (!keyword) {
+      return res.status(400).json({ message: '搜索关键词为必填项' });
+    }
 
-		const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
-		const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 10 });
-		const offset = (page - 1) * limit;
+    const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
+    const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 10 });
+    const offset = (page - 1) * limit;
 
-		const searchPattern = `%${keyword}%`;
+    const searchPattern = `%${keyword}%`;
 
-		const listSql = `
-			SELECT *
-			FROM artifacts
-			WHERE name LIKE ?
-				 OR description LIKE ?
-				 OR location LIKE ?
-				 OR category LIKE ?
-				 OR era LIKE ?
-			ORDER BY id DESC
-			LIMIT ${limit} OFFSET ${offset}
-		`;
+    const listSql = `
+      SELECT *
+      FROM artifacts
+      WHERE name LIKE ?
+         OR description LIKE ?
+         OR location LIKE ?
+         OR category LIKE ?
+         OR era LIKE ?
+      ORDER BY id DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
-		const listParams = [
-			searchPattern,
-			searchPattern,
-			searchPattern,
-			searchPattern,
-			searchPattern
-		];
+    const listParams = [
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern
+    ];
 
-		const [artifacts] = await mysqlPool.execute(listSql, listParams);
+    const [artifacts] = await mysqlPool.execute(listSql, listParams);
 
-		const countSql = `
-			SELECT COUNT(*) as total
-			FROM artifacts
-			WHERE name LIKE ?
-				 OR description LIKE ?
-				 OR location LIKE ?
-				 OR category LIKE ?
-				 OR era LIKE ?
-		`;
+    const countSql = `
+      SELECT COUNT(*) as total
+      FROM artifacts
+      WHERE name LIKE ?
+         OR description LIKE ?
+         OR location LIKE ?
+         OR category LIKE ?
+         OR era LIKE ?
+    `;
 
-		const [countRows] = await mysqlPool.execute(countSql, [
-			searchPattern,
-			searchPattern,
-			searchPattern,
-			searchPattern,
-			searchPattern
-		]);
+    const [countRows] = await mysqlPool.execute(countSql, [
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      searchPattern
+    ]);
 
-		const total = countRows?.[0]?.total ?? 0;
-		const totalPages = Math.ceil(total / limit);
+    const total = countRows?.[0]?.total ?? 0;
+    const totalPages = Math.ceil(total / limit);
 
-		return res.status(200).json({
-			data: artifacts,
-			meta: {
-				total,
-				page,
-				limit,
-				totalPages,
-				keyword
-			}
-		});
-	} catch (error) {
-		console.error('搜索文物错误:', error);
-		return res.status(500).json({ message: '服务器内部错误' });
-	}
+    if (req.user && req.user.id) {
+      try {
+        await mysqlPool.execute(
+          'INSERT INTO logs (user_id, action, target_id, timestamp, details) VALUES (?, ?, ?, ?, ?)',
+          [req.user.id, 'search', null, new Date(), JSON.stringify({ keyword })]
+        );
+      } catch (logError) {
+        console.error('记录搜索日志错误:', logError);
+      }
+    }
+
+    return res.status(200).json({
+      data: artifacts,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        keyword
+      }
+    });
+  } catch (error) {
+    console.error('搜索文物错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
 });
 ```
 
@@ -250,77 +261,78 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 
 后端通过 Neo4j Driver 执行 Cypher 查询。问答模块在检索阶段会将问题拆成多个关键词，逐个检索并合并去重后的图谱节点与关系。
 
-代码节选：backend/src/routes/chat.routes.js（第537-606行）
+代码节选：backend/src/routes/chat.routes.js（第537-605行）
 
 ```js
-		} else {
-			// 通用检索：将问题拆成多个关键词，分别检索并汇总结果
-			const extraction = extractKeywordsService(question, {
-				maxKeywords: 4,
-				keepIntent: true,
-				debug: process.env.DEBUG_KEYWORDS === 'true',
-				logSource: 'graph'
-			});
-			const keywords = extraction.keywords || [];
-			if (keywords.length === 0) return null;
+    } else {
+      // 通用检索：将问题拆成多个关键词，分别检索并汇总结果
+      const extraction = extractKeywordsService(question, {
+        maxKeywords: 4,
+        keepIntent: true,
+        debug: process.env.DEBUG_KEYWORDS === 'true',
+        logSource: 'graph'
+      });
+      const keywords = extraction.keywords || [];
+      if (keywords.length === 0) return null;
 
-			cypherQuery = `
-				MATCH (a:Artifact)
-				WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
-				OPTIONAL MATCH (a)-[r]-(n)
-				RETURN a, r, n LIMIT 10
-			`;
+      cypherQuery = `
+        MATCH (a:Artifact)
+        WHERE a.name CONTAINS $keyword OR a.description CONTAINS $keyword
+        OPTIONAL MATCH (a)-[r]-(n)
+        RETURN a, r, n LIMIT 10
+      `;
 
-			responseText = `以下是与"${keywords.join('、')}"相关的文物信息，您可以在图谱中探索它们的关系。`;
+      responseText = `以下是与"${keywords.join('、')}"相关的文物信息，您可以在图谱中探索它们的关系。`;
 
-			// 逐关键词查询并合并结果（去重）
-			const nodes = new Set();
-			const edges = new Set();
+      // 逐关键词查询并合并结果（去重）
+      const nodes = new Set();
+      const edges = new Set();
 
-			for (const keyword of keywords) {
-				params = { keyword };
-				const result = await session.run(cypherQuery, params);
-				result.records.forEach(record => {
-					const keys = record.keys;
-					keys.forEach(key => {
-						const value = record.get(key);
-						if (value && value.labels) {
-							const props = value.properties || {};
-							nodes.add(JSON.stringify({
-								id: value.identity.toString(),
-								label: props.name || props.label || props.title || value.identity.toString(),
-								type: value.labels[0].toLowerCase()
-							}));
-						} else if (value && value.type) {
-							edges.add(JSON.stringify({
-								id: value.identity.toString(),
-								source: value.start.toString(),
-								target: value.end.toString(),
-								label: value.type
-							}));
-						}
-					});
-				});
-			}
+      for (const keyword of keywords) {
+        params = { keyword };
+        const result = await session.run(cypherQuery, params);
+        result.records.forEach(record => {
+          const keys = record.keys;
+          keys.forEach(key => {
+            const value = record.get(key);
+            if (value && value.labels) {
+              const props = value.properties || {};
+              nodes.add(JSON.stringify({
+                id: value.identity.toString(),
+                label: props.name || props.label || props.title || value.identity.toString(),
+                type: value.labels[0].toLowerCase()
+              }));
+            } else if (value && value.type) {
+              edges.add(JSON.stringify({
+                id: value.identity.toString(),
+                source: value.start.toString(),
+                target: value.end.toString(),
+                label: value.type
+              }));
+            }
+          });
+        });
+      }
 
-			if (nodes.size === 0 && edges.size === 0) {
-				return null;
-			}
+      if (nodes.size === 0 && edges.size === 0) {
+        return null;
+      }
 
-			return {
-				text: responseText,
-				data: {
-					nodes: Array.from(nodes).map(node => JSON.parse(node)).slice(0, 60),
-					edges: Array.from(edges).map(edge => JSON.parse(edge)).slice(0, 120)
-				}
-			};
-		}
+      return {
+        text: responseText,
+        data: {
+          nodes: Array.from(nodes).map(node => JSON.parse(node)).slice(0, 60),
+          edges: Array.from(edges).map(edge => JSON.parse(edge)).slice(0, 120)
+        }
+      };
+    }
     
-		if (!cypherQuery) {
-			return null;
-		}
+    if (!cypherQuery) {
+      return null;
+    }
     
-		// 执行Cypher查询
+    // 执行Cypher查询
+    const result = await session.run(cypherQuery, params);
 ```
 
 ### 5. 智能问答：自然语言 → 分词/意图 → 结构化查询 → 生成回答
@@ -338,31 +350,31 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 
 ```js
 function normalizeText(text) {
-	return String(text || '')
-		.replace(/[\s,.?!，。？！:：;；()（）"“”'’、《》【】\[\]{}<>]+/g, ' ')
-		.replace(/[、/]/g, ' ')
-		.trim();
+  return String(text || '')
+    .replace(/[\s,.?!，。？！:：;；()（）"“”'’、《》【】\[\]{}<>]+/g, ' ')
+    .replace(/[、/]/g, ' ')
+    .trim();
 }
 
 function detectIntent(question) {
-	const q = String(question || '');
-	if (!q) return undefined;
+  const q = String(question || '');
+  if (!q) return undefined;
 
-	// 粗粒度意图分类：只在明确出现疑问词时返回
-	const intentMap = [
-		{ intent: 'who', patterns: ['谁', '哪位'] },
-		{ intent: 'when', patterns: ['何时', '什么时候', '哪年', '哪一年', '年代', '朝代'] },
-		{ intent: 'where', patterns: ['哪里', '何处', '在哪', '地点', '出土', '发现于'] },
-		{ intent: 'how', patterns: ['如何', '怎么', '怎样'] },
-		{ intent: 'why', patterns: ['为什么', '为何'] },
-		{ intent: 'what', patterns: ['什么', '是啥', '是什么'] }
-	];
+  // 粗粒度意图分类：只在明确出现疑问词时返回
+  const intentMap = [
+    { intent: 'who', patterns: ['谁', '哪位'] },
+    { intent: 'when', patterns: ['何时', '什么时候', '哪年', '哪一年', '年代', '朝代'] },
+    { intent: 'where', patterns: ['哪里', '何处', '在哪', '地点', '出土', '发现于'] },
+    { intent: 'how', patterns: ['如何', '怎么', '怎样'] },
+    { intent: 'why', patterns: ['为什么', '为何'] },
+    { intent: 'what', patterns: ['什么', '是啥', '是什么'] }
+  ];
 
-	for (const item of intentMap) {
-		if (item.patterns.some(p => q.includes(p))) return item.intent;
-	}
+  for (const item of intentMap) {
+    if (item.patterns.some(p => q.includes(p))) return item.intent;
+  }
 
-	return undefined;
+  return undefined;
 }
 ```
 
@@ -370,178 +382,179 @@ function detectIntent(question) {
 
 ```js
 function extractKeywords(text, options = {}) {
-	const {
-		keepIntent = true,
-		debug = false,
-		maxKeywords = DEFAULT_MAX_KEYWORDS,
-		phraseMergeMode = process.env.PHRASE_MERGE_MODE || 'conservative',
-		logSource,
-		requestId
-	} = options;
+  const {
+    keepIntent = true,
+    debug = false,
+    maxKeywords = DEFAULT_MAX_KEYWORDS,
+    phraseMergeMode = process.env.PHRASE_MERGE_MODE || 'conservative',
+    logSource,
+    requestId
+  } = options;
 
-	const startedAt = Date.now();
-	const raw = String(text || '').trim();
-	if (!raw) {
-		return { keywords: [], intent: keepIntent ? detectIntent(raw) : undefined, rawTokens: [], debug: debug ? { reason: 'empty' } : undefined };
-	}
+  const startedAt = Date.now();
+  const raw = String(text || '').trim();
+  if (!raw) {
+    return { keywords: [], intent: keepIntent ? detectIntent(raw) : undefined, rawTokens: [], debug: debug ? { reason: 'empty' } : undefined };
+  }
 
-	loadJiebaOnce();
-	const stopwords = loadStopwords();
-	const phraseSet = loadPhraseDictionary();
-	const quoted = extractQuotedPhrases(raw);
+  loadJiebaOnce();
+  const stopwords = loadStopwords();
+  const phraseSet = loadPhraseDictionary();
+  const quoted = extractQuotedPhrases(raw);
 
-	let tokens = [];
-	let tokenizer = 'nodejieba';
+  let tokens = [];
+  let tokenizer = 'nodejieba';
 
-	try {
-		const normalized = normalizeText(raw);
-		if (!normalized) {
-			tokens = [];
-		} else {
-			tokens = nodejieba.cut(normalized, true);
-		}
-	} catch {
-		tokenizer = 'fallback';
-		tokens = fallbackTokenize(raw);
-	}
+  try {
+    const normalized = normalizeText(raw);
+    if (!normalized) {
+      tokens = [];
+    } else {
+      tokens = nodejieba.cut(normalized, true);
+    }
+  } catch {
+    tokenizer = 'fallback';
+    tokens = fallbackTokenize(raw);
+  }
 
-	// 额外合并：仅在 max-match 时做 token 级合并
-	const mergeMode = phraseMergeMode === 'max-match' ? 'max-match' : 'conservative';
-	if (mergeMode === 'max-match') {
-		tokens = maxMatchMerge(tokens, phraseSet);
-	}
+  // 额外合并：仅在 max-match 时做 token 级合并
+  const mergeMode = phraseMergeMode === 'max-match' ? 'max-match' : 'conservative';
+  if (mergeMode === 'max-match') {
+    tokens = maxMatchMerge(tokens, phraseSet);
+  }
 
-	// 过滤：停用词、长度、标点
-	const filtered = tokens
-		.map(t => String(t).trim())
-		.filter(Boolean)
-		.filter(t => !stopwords.has(t))
-		.filter(t => t.length <= 30);
+  // 过滤：停用词、长度、标点
+  const filtered = tokens
+    .map(t => String(t).trim())
+    .filter(Boolean)
+    .filter(t => !stopwords.has(t))
+    .filter(t => t.length <= 30);
 
-	// candidates = quoted 优先 + filtered
-	const candidates = [...quoted, ...filtered];
+  // candidates = quoted 优先 + filtered
+  const candidates = [...quoted, ...filtered];
 
-	// 去重保序，并默认过滤 1 字（除 quoted 中 CJK 单字）
-	const seen = new Set();
-	const keywords = [];
-	for (const t of candidates) {
-		if (!t) continue;
-		const isQuoted = quoted.includes(t);
-		if (t.length === 1 && !(isQuoted && isCjkSingleChar(t))) continue;
-		if (seen.has(t)) continue;
-		seen.add(t);
-		keywords.push(t);
-		if (keywords.length >= Number(maxKeywords) || keywords.length >= DEFAULT_MAX_KEYWORDS) break;
-	}
+  // 去重保序，并默认过滤 1 字（除 quoted 中 CJK 单字）
+  const seen = new Set();
+  const keywords = [];
+  for (const t of candidates) {
+    if (!t) continue;
+    const isQuoted = quoted.includes(t);
+    if (t.length === 1 && !(isQuoted && isCjkSingleChar(t))) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    keywords.push(t);
+    if (keywords.length >= Number(maxKeywords) || keywords.length >= DEFAULT_MAX_KEYWORDS) break;
+  }
 
-	const intent = keepIntent ? detectIntent(raw) : undefined;
+  const intent = keepIntent ? detectIntent(raw) : undefined;
 
-	// 疑问词不计入 keywords：保持简单实现（intent 为 who/what/...）
-	const debugObj = debug
-		? {
-			tokenizer,
-			phraseMergeMode: mergeMode,
-			stopwordsCount: stopwords.size,
-			phraseCount: phraseSet.size,
-			quoted,
-			rawTokens: tokens
-		}
-		: undefined;
+  // 疑问词不计入 keywords：保持简单实现（intent 为 who/what/...）
+  const debugObj = debug
+    ? {
+        tokenizer,
+        phraseMergeMode: mergeMode,
+        stopwordsCount: stopwords.size,
+        phraseCount: phraseSet.size,
+        quoted,
+        rawTokens: tokens
+      }
+    : undefined;
 
-	maybeLogExtraction({
-		level: resolveKeywordLogLevel(),
-		source: logSource,
-		requestId,
-		question: raw,
-		tokenizer,
-		phraseMergeMode: mergeMode,
-		stopwordsCount: stopwords.size,
-		phraseCount: phraseSet.size,
-		quotedCount: quoted.length,
-		rawTokensCount: tokens.length,
-		keywords,
-		intent,
-		durationMs: Date.now() - startedAt
-	});
+  maybeLogExtraction({
+    level: resolveKeywordLogLevel(),
+    source: logSource,
+    requestId,
+    question: raw,
+    tokenizer,
+    phraseMergeMode: mergeMode,
+    stopwordsCount: stopwords.size,
+    phraseCount: phraseSet.size,
+    quotedCount: quoted.length,
+    rawTokensCount: tokens.length,
+    keywords,
+    intent,
+    durationMs: Date.now() - startedAt
+  });
 
-	return {
-		keywords,
-		intent,
-		rawTokens: debug ? tokens : undefined,
-		debug: debugObj
-	};
+  return {
+    keywords,
+    intent,
+    rawTokens: debug ? tokens : undefined,
+    debug: debugObj
+  };
 }
 ```
 
 代码节选：backend/src/routes/chat.routes.js（第100-134行）
 
 ```js
-const graphResponse = await handleGraphQueries(question);
-// 尝试获取关系型数据库数据
-const relationalData = await handleRelationalQueries(question);
+    const graphResponse = await handleGraphQueries(question);
+    // 尝试获取关系型数据库数据
+    const relationalData = await handleRelationalQueries(question);
 
-let context = '';
-let graphData = null;
-let sources = [];
+    let context = '';
+    let graphData = null;
+    let sources = [];
 
-if (graphResponse) {
-	graphData = graphResponse.data;
-	sources.push('knowledge_graph');
+    if (graphResponse) {
+      graphData = graphResponse.data;
+      sources.push('knowledge_graph');
+      
+      // 构建上下文供大模型使用
+      const nodes = graphResponse.data.nodes;
+      const edges = graphResponse.data.edges;
+      
+      if (nodes.length > 0) {
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n.label);
+        
+        const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
+        const relations = edges.map(e => {
+          const source = nodeMap[e.source] || '未知';
+          const target = nodeMap[e.target] || '未知';
+          return `${source} ${e.label} ${target}`;
+        }).join('；');
+        
+        context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
+      }
+    }
 
-	const nodes = graphResponse.data.nodes;
-	const edges = graphResponse.data.edges;
-
-	if (nodes.length > 0) {
-		const nodeMap = {};
-		nodes.forEach(n => nodeMap[n.id] = n.label);
-
-		const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
-		const relations = edges.map(e => {
-			const source = nodeMap[e.source] || '未知';
-			const target = nodeMap[e.target] || '未知';
-			return `${source} ${e.label} ${target}`;
-		}).join('；');
-
-		context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
-	}
-}
-
-if (relationalData) {
-	sources.push('relational_db');
-	context += `【文物档案信息】：\n${relationalData}\n\n`;
-}
+    if (relationalData) {
+      sources.push('relational_db');
+      context += `【文物档案信息】：\n${relationalData}\n\n`;
+    }
 ```
 
 代码节选：backend/src/services/mcp.service.js（第90-117行）
 
 ```js
-			const messages = [];
+      const messages = [];
 
-			// 添加系统提示词和上下文
-			messages.push({
-				role: 'system',
-				content: this.buildSystemPrompt(context)
-			});
+      // 添加系统提示词和上下文
+      messages.push({
+        role: 'system',
+        content: this.buildSystemPrompt(context)
+      });
 
-			// 添加历史记录
-			messages.push(...history);
+      // 添加历史记录
+      messages.push(...history);
 
-			// 添加当前问题
-			messages.push({ role: 'user', content: question });
+      // 添加当前问题
+      messages.push({ role: 'user', content: question });
 
-			// 构建请求体
-			const requestBody = {
-				model: this.model,
-				messages: messages,
-				temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
-				max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
-			};
+      // 构建请求体
+      const requestBody = {
+        model: this.model,
+        messages: messages,
+        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+      };
 
-			// 发送请求到MCP API
-			const response = await axios.post(this.apiEndpoint, requestBody, {
-				headers: this.headers,
-				timeout: 30000 // 30秒超时
-			});
+      // 发送请求到MCP API
+      const response = await axios.post(this.apiEndpoint, requestBody, {
+        headers: this.headers,
+        timeout: 30000 // 30秒超时
+      });
 ```
 
 前端提供 Chat 页面交互，并用 Redis 保存 7 天内聊天记录。针对“中文分词与关键词抽取”的效果问题，我维护自定义词典与停用词表，提升检索命中率。
@@ -605,72 +618,84 @@ const upload = multer({
 });
 
 const isAdmin = (req) => req.user && req.user.role === 'admin';
+
+// 读取权限：所有已登录用户可见
+const canReadAttachment = (req, attachmentRow) => Boolean(req.user && attachmentRow);
+
+// 删除权限：仅管理员
+const canDeleteAttachment = (req) => Boolean(req.user && isAdmin(req));
+
+const writeLog = writeAuditLog;
+
+const attachmentService = new AttachmentService();
+const integrityService = new IntegrityService();
+const storageDriver = getStorageDriver();
 ```
 
 代码节选：backend/src/routes/attachment.routes.js（第143-205行）
 
 ```js
 router.post('/upload', upload.single('file'), async (req, res) => {
-	try {
-		if (!isAdmin(req)) {
-			return res.status(403).json({ message: '权限不足：仅管理员可上传附件' });
-		}
+  try {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ message: '权限不足：仅管理员可上传附件' });
+    }
 
-		if (!req.file) {
-			return res.status(400).json({ message: '未找到上传文件' });
-		}
+    if (!req.file) {
+      return res.status(400).json({ message: '未找到上传文件' });
+    }
 
-		const ownerType = req.body.ownerType ? String(req.body.ownerType).trim() : null;
-		const ownerId = req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
-			? Number(req.body.ownerId)
-			: null;
+    const ownerType = req.body.ownerType ? String(req.body.ownerType).trim() : null;
+    const ownerId = req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
+      ? Number(req.body.ownerId)
+      : null;
 
-		if (ownerType && ownerType.length > 50) {
-			return res.status(400).json({ message: 'ownerType过长' });
-		}
-		if (ownerId !== null && !Number.isFinite(ownerId)) {
-			return res.status(400).json({ message: 'ownerId无效' });
-		}
+    if (ownerType && ownerType.length > 50) {
+      return res.status(400).json({ message: 'ownerType过长' });
+    }
+    if (ownerId !== null && !Number.isFinite(ownerId)) {
+      return res.status(400).json({ message: 'ownerId无效' });
+    }
 
-		// 统一走附件处理逻辑（hash/缩略图/去重）
-		const result = await attachmentService.ingestLocalFile({
-			uploadedBy: req.user.id,
-			ownerType,
-			ownerId,
-			filePath: req.file.path,
-			originalName: normalizeOriginalName(req.file.originalname),
-			mimeType: req.file.mimetype || 'application/octet-stream'
-		});
+    // 统一走附件处理逻辑（hash/缩略图/去重）
+    const result = await attachmentService.ingestLocalFile({
+      uploadedBy: req.user.id,
+      ownerType,
+      ownerId,
+      filePath: req.file.path,
+      originalName: normalizeOriginalName(req.file.originalname),
+      mimeType: req.file.mimetype || 'application/octet-stream'
+    });
 
-		const attachmentId = result.id;
+    const attachmentId = result.id;
 
-		await writeLog({
-			userId: req.user.id,
-			action: 'upload_attachment',
-			targetId: attachmentId,
-			details: JSON.stringify({
-				ownerType,
-				ownerId,
-				originalName: normalizeOriginalName(req.file.originalname),
-				mimeType: req.file.mimetype || 'application/octet-stream',
-				sizeBytes: req.file.size
-			})
-		});
+    await writeLog({
+      userId: req.user.id,
+      action: 'upload_attachment',
+      targetId: attachmentId,
+      details: JSON.stringify({
+        ownerType,
+        ownerId,
+        originalName: normalizeOriginalName(req.file.originalname),
+        mimeType: req.file.mimetype || 'application/octet-stream',
+        sizeBytes: req.file.size
+      })
+    });
 
-		return res.status(201).json({
-			id: attachmentId,
-			ownerType,
-			ownerId,
-			originalName: normalizeOriginalName(req.file.originalname),
-			mimeType: req.file.mimetype,
-			sizeBytes: req.file.size,
-			createdAt: new Date().toISOString(),
-			downloadUrl: `/api/attachments/${attachmentId}/download`
-		});
-	} catch (error) {
-		console.error('上传附件错误:', error);
-		return res.status(500).json({ message: '服务器内部错误' });
-	}
+    return res.status(201).json({
+      id: attachmentId,
+      ownerType,
+      ownerId,
+      originalName: normalizeOriginalName(req.file.originalname),
+      mimeType: req.file.mimetype,
+      sizeBytes: req.file.size,
+      createdAt: new Date().toISOString(),
+      downloadUrl: `/api/attachments/${attachmentId}/download`
+    });
+  } catch (error) {
+    console.error('上传附件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
 });
 ```
 

@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   thumbnail_storage_name VARCHAR(255) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_attachments_owner (owner_type, owner_id),
+  INDEX idx_attachments_original_name (original_name),
   INDEX idx_attachments_hash (`hash`),
   INDEX idx_attachments_status (status),
   INDEX idx_attachments_uploaded_by (uploaded_by),
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS attachment_refs (
   relation_type VARCHAR(50) NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_attachment_refs_link (attachment_id, owner_type, owner_id, relation_type),
   INDEX idx_attachment_refs_owner (owner_type, owner_id),
   INDEX idx_attachment_refs_attachment (attachment_id),
   CONSTRAINT fk_attachment_refs_attachment
