@@ -53,12 +53,14 @@ Thumbs.db
 
 # large resource files
 .reference/
-build_kg/crawler/images_shenzhen/
-build_kg/crawler/images_*/
+**/images_*/
 
 # Generated exports / local artifacts
 *.xlsx
 build_kg/**/*.xlsx
+
+# Datasets
+data/
 
 # Large crawler outputs (keep locally, avoid committing)
 build_kg/crawler/artifact.json
@@ -77,4 +79,4 @@ ENV/
 env/
 
 # SDD workflow files
-specs/
+specs/*

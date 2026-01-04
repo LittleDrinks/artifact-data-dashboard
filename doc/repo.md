@@ -25,7 +25,7 @@
 
 核心实现是编写认证与角色中间件：从请求头读取 `Authorization: Bearer <token>`，验证 token，解析用户信息并挂到 `req.user` 上；同时按用户角色控制接口访问权限。
 
-代码节选：backend/src/middleware/auth.middleware.js（第1-54行）
+代码节选：backend/src/middleware/auth.middleware.js（第1-35行）
 
 ```js
 const jwt = require('jsonwebtoken');
@@ -62,27 +62,9 @@ const authMiddleware = (req, res, next) => {
     return res.status(500).json({ message: '服务器内部错误' });
   }
 };
-
-// 角色验证中间件
-const roleMiddleware = (roles = []) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: '未授权：用户信息不存在' });
-    }
-
-    if (roles.length && !roles.includes(req.user.role)) {
-      return res.status(403).json({ message: '禁止访问：权限不足' });
-    }
-
-    next();
-  };
-};
-
-module.exports = {
-  authMiddleware,
-  roleMiddleware
-};
 ```
+
+省略：backend/src/middleware/auth.middleware.js（第36-54行）
 
 后端将 token 有效期设置为 24 小时，并配套实现个人信息查询与角色区分；前端通过 axios 拦截器统一携带 token、并在遇到 401 时做跳转处理。JWT 密钥与 API 配置放入 `.env`，并补全 `.env.example`，降低部署出错概率。
 
@@ -92,7 +74,7 @@ module.exports = {
 
 后端使用 MySQL `LIKE` 做模糊匹配，并通过 `limit/offset` 控制每页数量。接口同时返回分页元数据（`total`、`page`、`limit`、`totalPages`、`keyword`）。
 
-代码节选：backend/src/routes/artifact.routes.js（第247-328行）
+代码节选：backend/src/routes/artifact.routes.js（第247-258行）
 
 ```js
 router.get('/search', async (req, res) => {
@@ -107,47 +89,13 @@ router.get('/search', async (req, res) => {
     const offset = (page - 1) * limit;
 
     const searchPattern = `%${keyword}%`;
+```
 
-    const listSql = `
-      SELECT *
-      FROM artifacts
-      WHERE name LIKE ?
-         OR description LIKE ?
-         OR location LIKE ?
-         OR category LIKE ?
-         OR era LIKE ?
-      ORDER BY id DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `;
+省略：backend/src/routes/artifact.routes.js（第259-299行）
 
-    const listParams = [
-      searchPattern,
-      searchPattern,
-      searchPattern,
-      searchPattern,
-      searchPattern
-    ];
+代码节选：backend/src/routes/artifact.routes.js（第300-328行）
 
-    const [artifacts] = await mysqlPool.execute(listSql, listParams);
-
-    const countSql = `
-      SELECT COUNT(*) as total
-      FROM artifacts
-      WHERE name LIKE ?
-         OR description LIKE ?
-         OR location LIKE ?
-         OR category LIKE ?
-         OR era LIKE ?
-    `;
-
-    const [countRows] = await mysqlPool.execute(countSql, [
-      searchPattern,
-      searchPattern,
-      searchPattern,
-      searchPattern,
-      searchPattern
-    ]);
-
+```js
     const total = countRows?.[0]?.total ?? 0;
     const totalPages = Math.ceil(total / limit);
 
@@ -185,75 +133,65 @@ router.get('/search', async (req, res) => {
 
 系统支持通过 Excel 批量导入/导出。导入时先读取 xlsx，再进行 schema 校验；校验通过后按固定 sheet 解析行数据并写入数据库。
 
-代码节选：backend/src/services/excel-kg.service.js（第446-510行）
+代码节选：backend/src/services/excel-kg.service.js（第446-470行）
 
 ```js
 const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' }) => {
-	const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
 
-	const validation = validateWorkbookSchema(workbook);
-	if (!validation.ok) {
-		const error = new Error('Excel schema 不匹配：请使用系统导出或按固定 schema 生成的文件');
-		error.statusCode = 400;
-		error.issues = validation.issues;
-		throw error;
-	}
+  const validation = validateWorkbookSchema(workbook);
+  if (!validation.ok) {
+    const error = new Error('Excel schema 不匹配：请使用系统导出或按固定 schema 生成的文件');
+    error.statusCode = 400;
+    error.issues = validation.issues;
+    throw error;
+  }
 
-	const sheetNameMap = toSheetNameMap(workbook);
-	const getRowsByExpectedSheet = (expectedSheetName) => {
-		const resolvedName = sheetNameMap[expectedSheetName.toLowerCase()];
-		const worksheet = workbook.Sheets[resolvedName];
-		return XLSX.utils.sheet_to_json(worksheet, { defval: null });
-	};
+  const sheetNameMap = toSheetNameMap(workbook);
+  const getRowsByExpectedSheet = (expectedSheetName) => {
+    const resolvedName = sheetNameMap[expectedSheetName.toLowerCase()];
+    const worksheet = workbook.Sheets[resolvedName];
+    return XLSX.utils.sheet_to_json(worksheet, { defval: null });
+  };
 
-	const rows = getRowsByExpectedSheet('Artifacts');
-	if (!rows.length) {
-		const error = new Error('Artifacts sheet 为空或无法解析');
-		error.statusCode = 400;
-		throw error;
-	}
-
-	const categoryMap = buildRelationMap(
-		getRowsByExpectedSheet('REL_HAS_CATEGORY'),
-		['artifact_id'],
-		['category_name']
-	);
-	const eraMap = buildRelationMap(
-		getRowsByExpectedSheet('REL_BELONGS_TO_ERA'),
-		['artifact_id'],
-		['era_name']
-	);
-	const locationMap = buildRelationMap(
-		getRowsByExpectedSheet('REL_STORED_AT'),
-		['artifact_id'],
-		['location_name']
-	);
-
-	const normalizedStrategy = String(strategy || '').trim().toLowerCase();
-	if (!['append', 'overwrite'].includes(normalizedStrategy)) {
-		const error = new Error('strategy 无效，应为 append 或 overwrite');
-		error.statusCode = 400;
-		throw error;
-	}
-
-	const connection = await mysqlPool.getConnection();
-	let transactionStarted = false;
-	let inserted = 0;
-	let updated = 0;
-	let skipped = 0;
-
-	try {
-		await ensureArtifactsTable(connection);
-		await connection.beginTransaction();
-		transactionStarted = true;
-
-		if (normalizedStrategy === 'overwrite') {
-			await connection.query('DELETE FROM artifacts');
-			await connection.query('ALTER TABLE artifacts AUTO_INCREMENT = 1');
-		}
-
-		const processedKeys = new Set();
+  const rows = getRowsByExpectedSheet('Artifacts');
+  if (!rows.length) {
+    const error = new Error('Artifacts sheet 为空或无法解析');
+    error.statusCode = 400;
+    throw error;
+  }
 ```
+
+省略：backend/src/services/excel-kg.service.js（第471-486行）
+
+代码节选：backend/src/services/excel-kg.service.js（第487-508行）
+
+```js
+  const normalizedStrategy = String(strategy || '').trim().toLowerCase();
+  if (!['append', 'overwrite'].includes(normalizedStrategy)) {
+    const error = new Error('strategy 无效，应为 append 或 overwrite');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const connection = await mysqlPool.getConnection();
+  let transactionStarted = false;
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  try {
+    await ensureArtifactsTable(connection);
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    if (normalizedStrategy === 'overwrite') {
+      await connection.query('DELETE FROM artifacts');
+      await connection.query('ALTER TABLE artifacts AUTO_INCREMENT = 1');
+    }
+```
+
+省略：backend/src/services/excel-kg.service.js（第509-653行）
 
 ### 4. 知识图谱（Neo4j）：结构化关系表达与可视化查询
 
@@ -261,7 +199,7 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 
 后端通过 Neo4j Driver 执行 Cypher 查询。问答模块在检索阶段会将问题拆成多个关键词，逐个检索并合并去重后的图谱节点与关系。
 
-代码节选：backend/src/routes/chat.routes.js（第537-605行）
+代码节选：backend/src/routes/chat.routes.js（第537-559行）
 
 ```js
     } else {
@@ -287,53 +225,9 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
       // 逐关键词查询并合并结果（去重）
       const nodes = new Set();
       const edges = new Set();
-
-      for (const keyword of keywords) {
-        params = { keyword };
-        const result = await session.run(cypherQuery, params);
-        result.records.forEach(record => {
-          const keys = record.keys;
-          keys.forEach(key => {
-            const value = record.get(key);
-            if (value && value.labels) {
-              const props = value.properties || {};
-              nodes.add(JSON.stringify({
-                id: value.identity.toString(),
-                label: props.name || props.label || props.title || value.identity.toString(),
-                type: value.labels[0].toLowerCase()
-              }));
-            } else if (value && value.type) {
-              edges.add(JSON.stringify({
-                id: value.identity.toString(),
-                source: value.start.toString(),
-                target: value.end.toString(),
-                label: value.type
-              }));
-            }
-          });
-        });
-      }
-
-      if (nodes.size === 0 && edges.size === 0) {
-        return null;
-      }
-
-      return {
-        text: responseText,
-        data: {
-          nodes: Array.from(nodes).map(node => JSON.parse(node)).slice(0, 60),
-          edges: Array.from(edges).map(edge => JSON.parse(edge)).slice(0, 120)
-        }
-      };
-    }
-    
-    if (!cypherQuery) {
-      return null;
-    }
-    
-    // 执行Cypher查询
-    const result = await session.run(cypherQuery, params);
 ```
+
+省略：backend/src/routes/chat.routes.js（第560-605行）
 
 ### 5. 智能问答：自然语言 → 分词/意图 → 结构化查询 → 生成回答
 
@@ -346,16 +240,9 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 3) 基于关键词检索知识图谱（Neo4j）与关系型库（MySQL），得到结构化证据
 4) 将结构化信息整理为“上下文”，再调用大模型生成回答并返回前端
 
-代码节选：backend/src/services/keyword.service.js（第118-145行）
+代码节选：backend/src/services/keyword.service.js（第125-145行）
 
 ```js
-function normalizeText(text) {
-  return String(text || '')
-    .replace(/[\s,.?!，。？！:：;；()（）"“”'’、《》【】\[\]{}<>]+/g, ' ')
-    .replace(/[、/]/g, ' ')
-    .trim();
-}
-
 function detectIntent(question) {
   const q = String(question || '');
   if (!q) return undefined;
@@ -378,7 +265,9 @@ function detectIntent(question) {
 }
 ```
 
-代码节选：backend/src/services/keyword.service.js（第184-286行）
+省略：backend/src/services/keyword.service.js（第118-124行）
+
+代码节选：backend/src/services/keyword.service.js（第184-219行）
 
 ```js
 function extractKeywords(text, options = {}) {
@@ -416,7 +305,11 @@ function extractKeywords(text, options = {}) {
     tokenizer = 'fallback';
     tokens = fallbackTokenize(raw);
   }
+```
 
+代码节选：backend/src/services/keyword.service.js（第220-250行）
+
+```js
   // 额外合并：仅在 max-match 时做 token 级合并
   const mergeMode = phraseMergeMode === 'max-match' ? 'max-match' : 'conservative';
   if (mergeMode === 'max-match') {
@@ -447,35 +340,13 @@ function extractKeywords(text, options = {}) {
   }
 
   const intent = keepIntent ? detectIntent(raw) : undefined;
+```
 
-  // 疑问词不计入 keywords：保持简单实现（intent 为 who/what/...）
-  const debugObj = debug
-    ? {
-        tokenizer,
-        phraseMergeMode: mergeMode,
-        stopwordsCount: stopwords.size,
-        phraseCount: phraseSet.size,
-        quoted,
-        rawTokens: tokens
-      }
-    : undefined;
+省略：backend/src/services/keyword.service.js（第251-278行）
 
-  maybeLogExtraction({
-    level: resolveKeywordLogLevel(),
-    source: logSource,
-    requestId,
-    question: raw,
-    tokenizer,
-    phraseMergeMode: mergeMode,
-    stopwordsCount: stopwords.size,
-    phraseCount: phraseSet.size,
-    quotedCount: quoted.length,
-    rawTokensCount: tokens.length,
-    keywords,
-    intent,
-    durationMs: Date.now() - startedAt
-  });
+代码节选：backend/src/services/keyword.service.js（第279-286行）
 
+```js
   return {
     keywords,
     intent,
@@ -485,7 +356,7 @@ function extractKeywords(text, options = {}) {
 }
 ```
 
-代码节选：backend/src/routes/chat.routes.js（第100-134行）
+代码节选：backend/src/routes/chat.routes.js（第100-106行）
 
 ```js
     const graphResponse = await handleGraphQueries(question);
@@ -495,19 +366,13 @@ function extractKeywords(text, options = {}) {
     let context = '';
     let graphData = null;
     let sources = [];
+```
 
-    if (graphResponse) {
-      graphData = graphResponse.data;
-      sources.push('knowledge_graph');
-      
-      // 构建上下文供大模型使用
-      const nodes = graphResponse.data.nodes;
-      const edges = graphResponse.data.edges;
-      
-      if (nodes.length > 0) {
-        const nodeMap = {};
-        nodes.forEach(n => nodeMap[n.id] = n.label);
-        
+省略：backend/src/routes/chat.routes.js（第107-119行）
+
+代码节选：backend/src/routes/chat.routes.js（第120-127行）
+
+```js
         const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
         const relations = edges.map(e => {
           const source = nodeMap[e.source] || '未知';
@@ -516,16 +381,30 @@ function extractKeywords(text, options = {}) {
         }).join('；');
         
         context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
-      }
-    }
+```
 
+省略：backend/src/routes/chat.routes.js（第128-130行）
+
+代码节选：backend/src/routes/chat.routes.js（第131-134行）
+
+```js
     if (relationalData) {
       sources.push('relational_db');
       context += `【文物档案信息】：\n${relationalData}\n\n`;
     }
 ```
 
-代码节选：backend/src/services/mcp.service.js（第90-117行）
+代码节选：backend/src/routes/chat.routes.js（第136-138行）
+
+```js
+    if (sources.length > 0) {
+      context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+    }
+```
+
+省略：backend/src/routes/chat.routes.js（第139-150行）
+
+代码节选：backend/src/services/mcp.service.js（第90-102行）
 
 ```js
       const messages = [];
@@ -541,7 +420,11 @@ function extractKeywords(text, options = {}) {
 
       // 添加当前问题
       messages.push({ role: 'user', content: question });
+```
 
+代码节选：backend/src/services/mcp.service.js（第104-116行）
+
+```js
       // 构建请求体
       const requestBody = {
         model: this.model,
@@ -557,6 +440,8 @@ function extractKeywords(text, options = {}) {
       });
 ```
 
+省略：backend/src/services/mcp.service.js（第117-125行）
+
 前端提供 Chat 页面交互，并用 Redis 保存 7 天内聊天记录。针对“中文分词与关键词抽取”的效果问题，我维护自定义词典与停用词表，提升检索命中率。
 
 **对话展示截图（占位）**
@@ -567,32 +452,20 @@ function extractKeywords(text, options = {}) {
 
 实训1阶段文件上传下载缺少规范，难以追踪与管理。为支撑 Excel 导入/导出、系统附件沉淀与运维排查，我实现统一的附件管理能力：分页查询、上传、下载、删除，并将敏感操作（上传、删除、系统导入）限制为管理员。
 
-代码节选：backend/src/routes/attachment.routes.js（第1-60行）
+省略：backend/src/routes/attachment.routes.js（第1-18行）
+
+代码节选：backend/src/routes/attachment.routes.js（第19-23行）
 
 ```js
-const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const fsp = require('fs/promises');
-const crypto = require('crypto');
-const AdmZip = require('adm-zip');
-const XLSX = require('xlsx');
-
-const { mysqlPool } = require('../config/database');
-const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
-const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/attachment.service');
-const { IntegrityService, parseBool } = require('../services/integrity.service');
-const { getStorageDriver } = require('../services/storage');
-const { writeAuditLog } = require('../services/audit.service');
-
-const router = express.Router();
-
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 20);
 const MAX_UPLOAD_SIZE_BYTES = Math.max(1, MAX_UPLOAD_SIZE_MB) * 1024 * 1024;
+```
 
+代码节选：backend/src/routes/attachment.routes.js（第24-39行）
+
+```js
 const ensureUploadDir = async () => {
   await fsp.mkdir(UPLOAD_DIR, { recursive: true });
 };
@@ -609,7 +482,11 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}_${random}${ext}`);
   }
 });
+```
 
+代码节选：backend/src/routes/attachment.routes.js（第41-48行）
+
+```js
 const upload = multer({
   storage,
   limits: {
@@ -618,21 +495,11 @@ const upload = multer({
 });
 
 const isAdmin = (req) => req.user && req.user.role === 'admin';
-
-// 读取权限：所有已登录用户可见
-const canReadAttachment = (req, attachmentRow) => Boolean(req.user && attachmentRow);
-
-// 删除权限：仅管理员
-const canDeleteAttachment = (req) => Boolean(req.user && isAdmin(req));
-
-const writeLog = writeAuditLog;
-
-const attachmentService = new AttachmentService();
-const integrityService = new IntegrityService();
-const storageDriver = getStorageDriver();
 ```
 
-代码节选：backend/src/routes/attachment.routes.js（第143-205行）
+省略：backend/src/routes/attachment.routes.js（第49-60行）
+
+代码节选：backend/src/routes/attachment.routes.js（第157-166行）
 
 ```js
 router.post('/upload', upload.single('file'), async (req, res) => {
@@ -644,19 +511,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ message: '未找到上传文件' });
     }
+```
 
-    const ownerType = req.body.ownerType ? String(req.body.ownerType).trim() : null;
-    const ownerId = req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
-      ? Number(req.body.ownerId)
-      : null;
+省略：backend/src/routes/attachment.routes.js（第167-178行）
 
-    if (ownerType && ownerType.length > 50) {
-      return res.status(400).json({ message: 'ownerType过长' });
-    }
-    if (ownerId !== null && !Number.isFinite(ownerId)) {
-      return res.status(400).json({ message: 'ownerId无效' });
-    }
+代码节选：backend/src/routes/attachment.routes.js（第179-189行）
 
+```js
     // 统一走附件处理逻辑（hash/缩略图/去重）
     const result = await attachmentService.ingestLocalFile({
       uploadedBy: req.user.id,
@@ -668,20 +529,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     });
 
     const attachmentId = result.id;
+```
 
-    await writeLog({
-      userId: req.user.id,
-      action: 'upload_attachment',
-      targetId: attachmentId,
-      details: JSON.stringify({
-        ownerType,
-        ownerId,
-        originalName: normalizeOriginalName(req.file.originalname),
-        mimeType: req.file.mimetype || 'application/octet-stream',
-        sizeBytes: req.file.size
-      })
-    });
+省略：backend/src/routes/attachment.routes.js（第190-203行）
 
+代码节选：backend/src/routes/attachment.routes.js（第204-213行）
+
+```js
     return res.status(201).json({
       id: attachmentId,
       ownerType,
@@ -692,12 +546,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       createdAt: new Date().toISOString(),
       downloadUrl: `/api/attachments/${attachmentId}/download`
     });
-  } catch (error) {
-    console.error('上传附件错误:', error);
-    return res.status(500).json({ message: '服务器内部错误' });
-  }
-});
 ```
+
+省略：backend/src/routes/attachment.routes.js（第214-223行）
 
 ## 结语
 

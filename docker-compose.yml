@@ -43,7 +43,7 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-development}
       - NODE_ENV=${NODE_ENV:-development}
-      - ATTACHMENT_IMPORT_DIR_WHITELIST=/data/images_shenzhen
+      - ATTACHMENT_IMPORT_DIR_WHITELIST=/data/import/crawler
       - ATTACHMENT_UPLOAD_CONCURRENCY=${ATTACHMENT_UPLOAD_CONCURRENCY:-2}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -62,7 +62,7 @@ services:
       - ./backend/scripts:/app/scripts
       - ./backend/config:/app/config
       - uploads-data:/app/uploads
-      - ./build_kg/crawler/images_shenzhen:/data/images_shenzhen:ro
+      - ./data:/data/import
 
   # MySQL数据库
   mysql:
