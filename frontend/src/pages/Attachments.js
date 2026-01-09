@@ -8,7 +8,6 @@ import {
   exportKnowledgeGraphExcel,
   getAttachmentDownloadUrl,
   importKnowledgeGraphExcelFromAttachment,
-  bulkUploadZip,
   importArtifactAttachmentLinksExcel,
   importAttachmentsFromDir,
   listAttachments,
@@ -33,9 +32,6 @@ const Attachments = () => {
   const [loading, setLoading] = useState(true);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
-  const [bulkZipUploading, setBulkZipUploading] = useState(false);
-  const [bulkZipFileList, setBulkZipFileList] = useState([]);
-  const [bulkZipResult, setBulkZipResult] = useState(null);
   const [linkExcelImporting, setLinkExcelImporting] = useState(false);
   const [linkExcelFileList, setLinkExcelFileList] = useState([]);
   const [linkExcelResult, setLinkExcelResult] = useState(null);
@@ -491,21 +487,6 @@ const Attachments = () => {
     }
   };
 
-  const bulkZipUploadProps = {
-    accept: '.zip',
-    maxCount: 1,
-    fileList: bulkZipFileList,
-    beforeUpload: (file) => {
-      setBulkZipFileList([file]);
-      setBulkZipResult(null);
-      return false;
-    },
-    onRemove: () => {
-      setBulkZipFileList([]);
-      setBulkZipResult(null);
-    }
-  };
-
   const linkExcelUploadProps = {
     accept: '.xlsx',
     maxCount: 1,
@@ -521,38 +502,6 @@ const Attachments = () => {
     }
   };
 
-  const handleBulkZipUpload = async () => {
-    if (!isAdmin) {
-      message.error('权限不足：仅管理员可批量上传');
-      return;
-    }
-
-    if (!bulkZipFileList.length) {
-      message.warning('请先选择 ZIP 文件');
-      return;
-    }
-
-    try {
-      setBulkZipUploading(true);
-      const file = bulkZipFileList[0]?.originFileObj || bulkZipFileList[0];
-      const resp = await bulkUploadZip({ file });
-      const items = Array.isArray(resp.data?.data) ? resp.data.data : [];
-      const okCount = items.filter((it) => it && it.attachmentId).length;
-      const errCount = items.filter((it) => it && it.error).length;
-      setBulkZipResult({ okCount, errCount, items });
-      message.success(`ZIP 上传完成：成功 ${okCount}，失败 ${errCount}`);
-      refresh({ nextPage: 1 });
-    } catch (err) {
-      console.error('ZIP 批量上传失败:', err);
-      if (err.response?.status === 403) {
-        message.error('权限不足：仅管理员可批量上传');
-      } else {
-        message.error(err.response?.data?.message || err.message || 'ZIP 上传失败');
-      }
-    } finally {
-      setBulkZipUploading(false);
-    }
-  };
 
   const handleLinkExcelImport = async () => {
     if (!isAdmin) {
@@ -625,20 +574,8 @@ const Attachments = () => {
         title="附件管理"
         extra={
           <Space>
-            <Input
-              placeholder="ownerType（可选，例如 artifact）"
-              value={ownerType}
-              onChange={(e) => setOwnerType(e.target.value)}
-              style={{ width: 220 }}
-              allowClear
-            />
-            <Input
-              placeholder="ownerId（可选）"
-              value={ownerId}
-              onChange={(e) => setOwnerId(e.target.value)}
-              style={{ width: 160 }}
-              allowClear
-            />
+            <Input placeholder="ownerType（可选）" value={ownerType} onChange={(e) => setOwnerType(e.target.value)} style={{ width: 180 }} allowClear />
+            <Input placeholder="ownerId（可选）" value={ownerId} onChange={(e) => setOwnerId(e.target.value)} style={{ width: 140 }} allowClear />
             <Button onClick={refresh}>刷新</Button>
           </Space>
         }
@@ -657,132 +594,8 @@ const Attachments = () => {
           />
         ) : null}
 
-        <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {isAdmin ? (
-              <div style={{ marginBottom: 16 }}>
-                <Space>
-                  <Button onClick={handleExportExcel} loading={exportingExcel}>
-                    导出知识图谱Excel（生成附件）
-                  </Button>
-                  <Upload {...importExcelUploadProps}>
-                    <Button loading={importingExcel}>上传并导入知识图谱Excel</Button>
-                  </Upload>
-                </Space>
-              </div>
-            ) : null}
-
-            {isAdmin ? (
-              <Card size="small" title="附件挂载（无需导入文件夹）" style={{ marginBottom: 16 }}>
-                <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
-                  <div>1) 上传 ZIP：ZIP 内建议以 artifact_id 作为第一层目录（例如 123/xxx.jpg）。</div>
-                  <div>2) 上传 data.xlsx：会读取 ArtifactAttachments sheet，把图片关联到文物。</div>
-                </div>
-
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Upload {...bulkZipUploadProps}>
-                      <Button icon={<UploadOutlined />} disabled={bulkZipUploading}>
-                        选择 ZIP
-                      </Button>
-                    </Upload>
-                    <Button type="primary" onClick={handleBulkZipUpload} loading={bulkZipUploading}>
-                      上传 ZIP
-                    </Button>
-                  </Space>
-
-                  {bulkZipResult ? (
-                    <Alert
-                      type={bulkZipResult.errCount > 0 ? 'warning' : 'success'}
-                      showIcon
-                      message={`ZIP 结果：成功 ${bulkZipResult.okCount}，失败 ${bulkZipResult.errCount}`}
-                      description={
-                        bulkZipResult.errCount > 0 ? (
-                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
-                            {JSON.stringify(
-                              bulkZipResult.items.filter((it) => it && it.error).slice(0, 20),
-                              null,
-                              2
-                            )}
-                          </pre>
-                        ) : null
-                      }
-                    />
-                  ) : null}
-
-                  <Space wrap>
-                    <Upload {...linkExcelUploadProps}>
-                      <Button icon={<UploadOutlined />} disabled={linkExcelImporting}>
-                        选择 data.xlsx
-                      </Button>
-                    </Upload>
-                    <Button type="primary" onClick={handleLinkExcelImport} loading={linkExcelImporting}>
-                      执行关联导入
-                    </Button>
-                  </Space>
-
-                  {linkExcelResult ? (
-                    <Alert
-                      type={(linkExcelResult.errors || []).length > 0 ? 'warning' : 'success'}
-                      showIcon
-                      message={`关联结果：linked=${linkExcelResult.linked ?? 0} errors=${(linkExcelResult.errors || []).length}`}
-                      description={
-                        (linkExcelResult.errors || []).length > 0 ? (
-                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
-                            {JSON.stringify((linkExcelResult.errors || []).slice(0, 20), null, 2)}
-                          </pre>
-                        ) : null
-                      }
-                    />
-                  ) : null}
-                </Space>
-              </Card>
-            ) : null}
-
-            {isAdmin ? (
-              <Card size="small" title="目录导入（适合超大数据，需 Docker 挂载）" style={{ marginBottom: 16 }}>
-                <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
-                  <div>把本地目录通过 Docker 挂载到后端容器，再填“容器内路径”导入。</div>
-                  <div>白名单前缀：/data/import/crawler</div>
-                </div>
-
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <Input
-                    value={dirImportDir}
-                    onChange={(e) => setDirImportDir(e.target.value)}
-                    placeholder="容器内目录路径，例如 /data/import/crawler/shenzhen/images_shenzhen"
-                  />
-                  <Input
-                    value={dirImportMaxFiles}
-                    onChange={(e) => setDirImportMaxFiles(e.target.value)}
-                    placeholder="maxFiles（可选，留空使用默认）"
-                  />
-                  <Button type="primary" onClick={handleDirImport} loading={dirImporting}>
-                    开始导入目录
-                  </Button>
-
-                  {dirImportResult ? (
-                    <Alert
-                      type={(dirImportResult.data || []).some((it) => it && it.error) ? 'warning' : 'success'}
-                      showIcon
-                      message={`目录导入：totalFiles=${dirImportResult.totalFiles ?? 0} processed=${dirImportResult.processed ?? 0}`}
-                      description={
-                        (dirImportResult.data || []).some((it) => it && it.error) ? (
-                          <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto' }}>
-                            {JSON.stringify(
-                              (dirImportResult.data || []).filter((it) => it && it.error).slice(0, 20),
-                              null,
-                              2
-                            )}
-                          </pre>
-                        ) : null
-                      }
-                    />
-                  ) : null}
-                </Space>
-              </Card>
-            ) : null}
-
             {loading ? (
               <div style={{ textAlign: 'center', margin: '40px 0' }}>
                 <Spin size="large" />
@@ -809,37 +622,130 @@ const Attachments = () => {
             )}
           </div>
 
-          <div style={{ width: 320, flex: '0 0 320px' }}>
-            <Card size="small" title="上传" bodyStyle={{ padding: 12 }}>
-              <div style={{ marginBottom: 12 }}>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  style={{ display: 'none' }}
-                  onChange={handleFileInputChange}
-                />
-                <Button
-                  type="primary"
-                  icon={<UploadOutlined />}
-                  disabled={!isAdmin}
-                  loading={queueStats.uploadingCount > 0 || queueStats.queuedCount > 0}
-                  block
-                  onClick={handlePickFiles}
-                >
-                  选择文件上传
-                </Button>
-              </div>
+          <div style={{ width: 360, flex: '0 0 360px' }}>
+            <Space direction="vertical" style={{ width: '100%' }} size={16}>
+              <Card size="small" title="上传" bodyStyle={{ padding: 12 }}>
+                <div style={{ marginBottom: 12 }}>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={handleFileInputChange}
+                  />
+                  <Button
+                    type="primary"
+                    icon={<UploadOutlined />}
+                    disabled={!isAdmin}
+                    loading={queueStats.uploadingCount > 0 || queueStats.queuedCount > 0}
+                    block
+                    onClick={handlePickFiles}
+                  >
+                    选择文件上传
+                  </Button>
+                </div>
 
-              <div style={{ marginBottom: 8 }}>
                 <Progress percent={queueStats.percent} size="small" />
                 <div style={{ marginTop: 6, color: 'rgba(0,0,0,0.45)' }}>
                   {queueStats.totalCount > 0
                     ? `已完成 ${queueStats.finishedCount}/${queueStats.totalCount}（队列中：${queueStats.queuedCount}，上传中：${queueStats.uploadingCount}）`
                     : '未选择文件'}
                 </div>
-              </div>
-            </Card>
+              </Card>
+
+              {isAdmin ? (
+                <Card size="small" title="目录导入（推荐，适合超大图片）" bodyStyle={{ padding: 12 }}>
+                  <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
+                    <div>需要先用 Docker 把本机目录挂载到容器。</div>
+                    <div>白名单前缀：/data/import/crawler</div>
+                  </div>
+
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Input
+                      value={dirImportDir}
+                      onChange={(e) => setDirImportDir(e.target.value)}
+                      placeholder="容器内路径，例如 /data/import/crawler/shenzhen/images_shenzhen"
+                    />
+                    <Input
+                      value={dirImportMaxFiles}
+                      onChange={(e) => setDirImportMaxFiles(e.target.value)}
+                      placeholder="maxFiles（可选）"
+                    />
+                    <Button type="primary" onClick={handleDirImport} loading={dirImporting} block>
+                      开始导入目录
+                    </Button>
+
+                    {dirImportResult ? (
+                      <Alert
+                        type={(dirImportResult.data || []).some((it) => it && it.error) ? 'warning' : 'success'}
+                        showIcon
+                        message={`导入结果：totalFiles=${dirImportResult.totalFiles ?? 0} processed=${dirImportResult.processed ?? 0}`}
+                        description={
+                          (dirImportResult.data || []).some((it) => it && it.error) ? (
+                            <pre style={{ margin: 0, maxHeight: 160, overflow: 'auto' }}>
+                              {JSON.stringify(
+                                (dirImportResult.data || []).filter((it) => it && it.error).slice(0, 20),
+                                null,
+                                2
+                              )}
+                            </pre>
+                          ) : null
+                        }
+                      />
+                    ) : null}
+                  </Space>
+                </Card>
+              ) : null}
+
+              {isAdmin ? (
+                <Card size="small" title="关联导入（把图片挂到文物）" bodyStyle={{ padding: 12 }}>
+                  <div style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 12, lineHeight: 1.6 }}>
+                    <div>上传 data.xlsx（含 ArtifactAttachments sheet），把附件关联到 artifact。</div>
+                  </div>
+
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Upload {...linkExcelUploadProps}>
+                      <Button icon={<UploadOutlined />} disabled={linkExcelImporting} block>
+                        选择 data.xlsx
+                      </Button>
+                    </Upload>
+                    <Button type="primary" onClick={handleLinkExcelImport} loading={linkExcelImporting} block>
+                      执行关联导入
+                    </Button>
+
+                    {linkExcelResult ? (
+                      <Alert
+                        type={(linkExcelResult.errors || []).length > 0 ? 'warning' : 'success'}
+                        showIcon
+                        message={`关联结果：linked=${linkExcelResult.linked ?? 0} errors=${(linkExcelResult.errors || []).length}`}
+                        description={
+                          (linkExcelResult.errors || []).length > 0 ? (
+                            <pre style={{ margin: 0, maxHeight: 160, overflow: 'auto' }}>
+                              {JSON.stringify((linkExcelResult.errors || []).slice(0, 20), null, 2)}
+                            </pre>
+                          ) : null
+                        }
+                      />
+                    ) : null}
+                  </Space>
+                </Card>
+              ) : null}
+
+              {isAdmin ? (
+                <Card size="small" title="知识图谱 Excel" bodyStyle={{ padding: 12 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Button onClick={handleExportExcel} loading={exportingExcel} block>
+                      导出知识图谱Excel（生成附件）
+                    </Button>
+                    <Upload {...importExcelUploadProps}>
+                      <Button loading={importingExcel} block>
+                        上传并导入知识图谱Excel
+                      </Button>
+                    </Upload>
+                  </Space>
+                </Card>
+              ) : null}
+            </Space>
           </div>
         </div>
       </Card>

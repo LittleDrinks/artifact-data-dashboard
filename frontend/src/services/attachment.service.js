@@ -69,24 +69,6 @@ export const importKnowledgeGraphExcelFromAttachment = async ({ id, strategy } =
   return axios.post(`${BASE}/${attachmentId}/excel/import`, null, { params });
 };
 
-export const bulkUploadZip = async ({ file, ownerType, ownerId, onUploadProgress, signal } = {}) => {
-  const form = new FormData();
-  form.append('file', file);
-  if (ownerType !== undefined && ownerType !== null && String(ownerType).trim() !== '') {
-    form.append('ownerType', ownerType);
-  }
-  if (ownerId !== undefined && ownerId !== null && String(ownerId).trim() !== '') {
-    form.append('ownerId', ownerId);
-  }
-  return axios.post(`${BASE}/bulk`, form, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    },
-    onUploadProgress,
-    signal
-  });
-};
-
 export const importArtifactAttachmentLinksExcel = async ({ file, onUploadProgress, signal } = {}) => {
   const form = new FormData();
   form.append('file', file);
