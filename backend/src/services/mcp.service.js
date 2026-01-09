@@ -1,11 +1,23 @@
 /**
  * MCP大模型API服务
- * 负责与MCP API进行交互，实现智能问答功能
+ * 支持预检索（pre_retrieve）与工具调用（tool_calling）双模式
  */
 const axios = require('axios');
+const { getAiMode } = require('../config/env');
+const { toolManager } = require('./tool-manager');
+
+class ChatFlow {
+  async beforeToolCall({ question, tools }) {
+    console.log('[ChatFlow] beforeToolCall', { question: question?.slice(0, 60), tools: tools?.map((t) => t.name) });
+  }
+
+  async afterToolCall({ question, results }) {
+    console.log('[ChatFlow] afterToolCall', { question: question?.slice(0, 60), results: results?.map((r) => ({ name: r.name, status: r.status })) });
+  }
+}
 
 class MCPService {
-  constructor() {
+  constructor(deps = {}) {
     this.apiEndpoint = process.env.AI_API_ENDPOINT;
     this.apiKey = process.env.AI_API_KEY;
     this.model = process.env.AI_MODEL || 'deepseek-r1'; // 默认使用 deepseek-r1
@@ -13,6 +25,10 @@ class MCPService {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.apiKey}`
     };
+
+    this.toolManager = deps.toolManager || toolManager;
+    this.chatFlow = deps.chatFlow || new ChatFlow();
+    this.getAiModeFn = deps.getAiMode || getAiMode;
 
     const isProd = process.env.NODE_ENV === 'production';
 
@@ -67,41 +83,29 @@ class MCPService {
     return baseRules;
   }
 
-  /**
-   * 发送问题到MCP大模型并获取回答
-   * @param {string} question 用户问题
-   * @param {Array} history 对话历史 [{role: 'user|assistant', content: '内容'}]
-   * @param {string} context 知识库上下文
-   * @returns {Promise<Object>} 大模型回答
-   */
   async ask(question, history = [], context = '') {
+    const aiMode = this.getAiModeFn({}).trim();
+    if (aiMode === 'tool_calling') {
+      return this.handleToolCalling({ question, history, context });
+    }
+
     try {
       // 检查API配置
-      if (!this.apiEndpoint) {
-        console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
-        return this.simulateResponse(question, history);
-      }
-
-      if (!this.apiKey) {
-        console.warn('[MCP] 未配置 API Key，将使用模拟模式');
+      if (!this.apiEndpoint || !this.apiKey) {
+        console.warn('[MCP] 未配置 API，使用模拟模式');
         return this.simulateResponse(question, history);
       }
 
       const messages = [];
 
-      // 添加系统提示词和上下文
       messages.push({
         role: 'system',
         content: this.buildSystemPrompt(context)
       });
 
-      // 添加历史记录
       messages.push(...history);
-
-      // 添加当前问题
       messages.push({ role: 'user', content: question });
 
-      // 构建请求体
       const requestBody = {
         model: this.model,
         messages: messages,
@@ -109,7 +113,6 @@ class MCPService {
         max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
       };
 
-      // 发送请求到MCP API
       const response = await axios.post(this.apiEndpoint, requestBody, {
         headers: this.headers,
         timeout: 30000 // 30秒超时
@@ -118,11 +121,11 @@ class MCPService {
       return {
         content: this.sanitizeModelText(response.data.choices[0].message.content),
         intent: response.data.choices[0].intent || 'general_chat',
-        metadata: response.data.metadata || {}
+        metadata: response.data.metadata || {},
+        mode: aiMode
       };
     } catch (error) {
       console.error('MCP API 调用失败:', error.message);
-      // 如果API调用失败，使用模拟响应
       return this.simulateResponse(question, history);
     }
   }
@@ -137,6 +140,19 @@ class MCPService {
    * @param {Function} onError 错误回调
    */
   async askStream(question, history = [], context = '', onData, onEnd, onError) {
+    const aiMode = this.getAiModeFn({}).trim();
+    if (aiMode === 'tool_calling') {
+      try {
+        const result = await this.handleToolCalling({ question, history, context });
+        onData(result.content);
+        onEnd();
+        return;
+      } catch (error) {
+        onError(error);
+        return;
+      }
+    }
+
     try {
       const isProd = process.env.NODE_ENV === 'production';
 
@@ -339,6 +355,50 @@ class MCPService {
 
     return 'unknown';
   }
+
+  async handleToolCalling({ question, history = [], context = '' }) {
+    const tools = this.toolManager.listTools();
+    if (!tools || tools.length === 0) {
+      return {
+        content: '检索工具暂时不可用，请稍后重试',
+        intent: 'tool_calling',
+        toolsCalled: []
+      };
+    }
+
+    await this.chatFlow.beforeToolCall({ question, tools });
+
+    const results = [];
+    for (const tool of tools) {
+      try {
+        const result = await tool.handler({ question, context, history });
+        results.push({ name: tool.name, status: 'success', result });
+      } catch (error) {
+        results.push({ name: tool.name, status: 'error', error: error.message });
+      }
+    }
+
+    await this.chatFlow.afterToolCall({ question, results });
+
+    const content = results
+      .map((r) => {
+        if (r.status === 'success') {
+          return `${r.name}: ${JSON.stringify(r.result)}`;
+        }
+        return `${r.name}: 调用失败(${r.error})`;
+      })
+      .join('\n');
+
+    return {
+      content: content || '未获取到工具结果',
+      intent: 'tool_calling',
+      toolsCalled: results
+    };
+  }
 }
 
-module.exports = new MCPService();
+const mcpService = new MCPService();
+mcpService.ChatFlow = ChatFlow;
+mcpService.MCPService = MCPService;
+
+module.exports = mcpService;
