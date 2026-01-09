@@ -61,6 +61,7 @@ function loadAndValidateEnv(options = {}) {
 
   const profile = (process.env.APP_ENV || 'development').trim();
   const entrypoint = 'docker-compose.yml';
+  const aiMode = (process.env.AI_MODE || 'pre_retrieve').trim();
 
   const requiredKeys = [
     'MYSQL_ROOT_PASSWORD',
@@ -83,6 +84,8 @@ function loadAndValidateEnv(options = {}) {
   const invalid = [];
   const profileError = validateEnum('APP_ENV', profile, ['development', 'production']);
   if (profileError) invalid.push({ key: 'APP_ENV', reason: profileError });
+  const aiModeError = validateEnum('AI_MODE', aiMode, ['pre_retrieve', 'tool_calling']);
+  if (aiModeError) invalid.push({ key: 'AI_MODE', reason: aiModeError });
 
   if (profile === 'production') {
     const weakDefaults = [
@@ -158,6 +161,7 @@ function loadAndValidateEnv(options = {}) {
   const diagnostics = {
     timestamp: new Date().toISOString(),
     profile,
+    aiMode,
     entrypoint,
     detectedSources,
     overrides,
@@ -167,9 +171,15 @@ function loadAndValidateEnv(options = {}) {
   };
 
   const ok = missingRequired.length === 0 && invalid.length === 0;
-  return { ok, profile, diagnostics, envFile };
+  return { ok, profile, aiMode, diagnostics, envFile };
+}
+
+function getAiMode(options = {}) {
+  const { aiMode } = loadAndValidateEnv(options);
+  return aiMode;
 }
 
 module.exports = {
-  loadAndValidateEnv
+  loadAndValidateEnv,
+  getAiMode
 };
