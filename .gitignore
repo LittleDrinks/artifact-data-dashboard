@@ -80,6 +80,7 @@ env/
 
 # SDD workflow files
 specs/*
+scripts/*
 
 # test
 docker-compose.data-local.yml
