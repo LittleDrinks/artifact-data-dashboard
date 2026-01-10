@@ -377,35 +377,165 @@ class MCPService {
       };
     }
 
-    await this.chatFlow.beforeToolCall({ question, tools });
+    try {
+      // 1. Tool Selection Phase
+      const toolsDesc = tools.map(t => ({
+        name: t.name,
+        description: t.schema?.description || '',
+        parameters: t.schema?.properties || {}
+      }));
+ 
+      const selectionPrompt = `
+You are an intelligent assistant with access to the following tools:
+${JSON.stringify(toolsDesc, null, 2)}
 
-    const results = [];
-    for (const tool of tools) {
+User Question: "${question}"
+
+Analyze the user's question and decide:
+1. If the user is just saying hello, expressing gratitude, or asking a general question not requiring specific data, do NOT use tools.
+2. If the user is asking for specific artifact data, graph relationships, or executing database queries, select the most appropriate tool.
+
+Output logic:
+- If NO tool is needed, respond with JSON: {"action": "chat", "response": "Your natural language response here (in Chinese)"}
+- If a tool IS needed, respond with JSON: {"action": "tool", "tool": "tool_name", "params": { ...parameters... }}
+
+Ensure your response is valid JSON. Do not return any other text.
+`;
+
+      const selectionResponse = await this._callInternalModel({
+        messages: [
+          { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
+          ...history.slice(-2), // limit history for selection context
+          { role: 'user', content: selectionPrompt }
+        ],
+        temperature: 0.1
+      });
+
+      let decision;
       try {
-        const result = await tool.handler({ question, context, history });
-        results.push({ name: tool.name, status: 'success', result });
-      } catch (error) {
-        results.push({ name: tool.name, status: 'error', error: error.message });
+        // Cleaning markdown code blocks if present
+        const cleanJson = selectionResponse.content.replace(/```json/g, '').replace(/```/g, '').trim();
+        decision = JSON.parse(cleanJson);
+      } catch (e) {
+        console.warn('[ToolSelection] JSON Parse Error:', e, selectionResponse.content);
+        // Fallback: treat as chat if parse fails, or simple keyword search
+        return {
+          content: selectionResponse.content || '抱歉，我无法理解您的意图。',
+          intent: 'chat',
+          toolsCalled: [],
+          mode: 'tool_calling'
+        };
       }
-    }
 
-    await this.chatFlow.afterToolCall({ question, results });
+      // 2. Execution Phase
+      if (decision.action === 'chat') {
+        return {
+          content: decision.response || '你好！',
+          intent: 'chat',
+          toolsCalled: [],
+          mode: 'tool_calling'
+        };
+      }
 
-    const content = results
-      .map((r) => {
-        if (r.status === 'success') {
-          return `${r.name}: ${JSON.stringify(r.result)}`;
+      if (decision.action === 'tool' && decision.tool) {
+        const targetTool = tools.find(t => t.name === decision.tool);
+        if (!targetTool) {
+           return {
+            content: `无法找到工具: ${decision.tool}`,
+            intent: 'tool_calling',
+            toolsCalled: [], 
+            mode: 'tool_calling'
+          };
         }
-        return `${r.name}: 调用失败(${r.error})`;
-      })
-      .join('\n');
 
-    return {
-      content: content || '未获取到工具结果',
-      intent: 'tool_calling',
-      toolsCalled: results,
-      mode: 'tool_calling'
-    };
+        await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
+        
+        let toolResult;
+        try {
+          toolResult = await targetTool.handler(decision.params || {});
+        } catch (err) {
+          toolResult = `Error: ${err.message}`;
+        }
+        
+        const toolsCalled = [{ 
+          name: targetTool.name, 
+          status: toolResult.startsWith && toolResult.startsWith('Error') ? 'error' : 'success', 
+          result: toolResult,
+          error: toolResult.startsWith && toolResult.startsWith('Error') ? toolResult : null
+        }];
+
+        await this.chatFlow.afterToolCall({ question, results: toolsCalled });
+
+        // 3. Synthesis Phase
+        const synthesisPrompt = `
+User Question: "${question}"
+Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
+
+Please use the tool output to answer the user's question in natural Chinese. 
+If the tool output is empty or indicates not found, verify if you can answer with general knowledge, otherwise state that you couldn't find the information.
+`;
+        
+        const finalResponse = await this._callInternalModel({
+          messages: [
+            { role: 'system', content: this.buildSystemPrompt(context) },
+            ...history,
+            { role: 'user', content: synthesisPrompt }
+          ]
+        });
+
+        return {
+          content: finalResponse.content,
+          intent: 'tool_calling',
+          toolsCalled: toolsCalled,
+          mode: 'tool_calling'
+        };
+      }
+
+      return {
+        content: '未做出有效决策',
+        intent: 'unknown',
+        toolsCalled: [],
+        mode: 'tool_calling'
+      };
+
+    } catch (error) {
+      console.error('[HandleToolCalling] Error:', error);
+      return {
+        content: '抱歉，处理您的请求时遇到错误。',
+        intent: 'error',
+        toolsCalled: [],
+        mode: 'tool_calling',
+        errorMessage: error.message
+      };
+    }
+  }
+
+  /**
+   * Internal helper to call model non-streamingly, separate from main ask flow
+   */
+  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000 }) {
+    if (!this.apiEndpoint || !this.apiKey) {
+      throw new Error('API not configured');
+    }
+    
+    try {
+      const response = await axios.post(this.apiEndpoint, {
+        model: this.model,
+        messages,
+        temperature,
+        max_tokens
+      }, {
+        headers: this.headers,
+        timeout: 45000
+      });
+      
+      return {
+        content: this.sanitizeModelText(response.data?.choices?.[0]?.message?.content || '')
+      };
+    } catch (e) {
+      console.error('[_callInternalModel] Failed:', e.message);
+      throw e;
+    }
   }
 }
 

@@ -73,6 +73,10 @@ const tools = [
     handler: async ({ query, params = {} }) => {
       const session = neo4jDriver.session();
       try {
+        if (!query || typeof query !== 'string') {
+          return JSON.stringify({ error: 'Query parameter is required and must be a string' });
+        }
+        
         // 只读模式检查（简单检查，实际上不完美，但作为 safeguard）
         const upperQuery = query.toUpperCase();
         if (upperQuery.includes('CREATE') || upperQuery.includes('DELETE') || 
@@ -107,6 +111,10 @@ const tools = [
     handler: async ({ query, params = {} }) => {
       const session = neo4jDriver.session();
       try {
+        if (!query || typeof query !== 'string') {
+          return JSON.stringify({ error: 'Query parameter is required and must be a string' });
+        }
+
         const result = await session.run(query, params);
         // 如果有 stats，通常 result.summary 会包含
         return JSON.stringify({
