@@ -153,27 +153,22 @@ Ensure your response is valid JSON. Do not return any other text.
   async _executeTool({ targetTool, params, question }) {
     await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
 
-    let toolResult;
-    try {
-      toolResult = await targetTool.handler(params || {});
+    const executed = await this.toolManager.executeTool(targetTool.name, params || {});
+    const toolsCalled = [executed];
 
-      const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-      console.log(`[智能问答] 工具执行成功 | 结果摘要: ${resultStr.slice(0, 150)}...`);
-    } catch (err) {
-      console.error('[智能问答] 工具执行错误:', err.message);
-      toolResult = `Error: ${err.message}`;
+    const resultStr = executed.status === 'success'
+      ? (typeof executed.result === 'string' ? executed.result : JSON.stringify(executed.result))
+      : executed.error;
+
+    if (executed.status === 'success') {
+      console.log(`[智能问答] 工具执行成功 | 结果摘要: ${String(resultStr).slice(0, 150)}...`);
+    } else {
+      console.error('[智能问答] 工具执行错误:', executed.error);
     }
-
-    const toolsCalled = [{
-      name: targetTool.name,
-      status: toolResult.startsWith && toolResult.startsWith('Error') ? 'error' : 'success',
-      result: toolResult,
-      error: toolResult.startsWith && toolResult.startsWith('Error') ? toolResult : null
-    }];
 
     await this.chatFlow.afterToolCall({ question, results: toolsCalled });
 
-    return { toolsCalled, toolResult };
+    return { toolsCalled, toolResult: executed.status === 'success' ? executed.result : `Error: ${executed.error}` };
   }
 
   async _synthesizeResponse({ question, history, context, targetTool, toolResult }) {
@@ -505,12 +500,14 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     if (this.shouldMockToolCalling && this.shouldMockToolCalling()) {
       const targetTool = tools[0];
       await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
-      const toolResult = await targetTool.handler({ question });
-      const toolsCalled = [{ name: targetTool.name, status: 'success', result: toolResult, error: null }];
+      const executed = await this.toolManager.executeTool(targetTool.name, { question });
+      const toolsCalled = [executed];
       await this.chatFlow.afterToolCall({ question, results: toolsCalled });
 
       return {
-        content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+        content: executed.status === 'success'
+          ? (typeof executed.result === 'string' ? executed.result : JSON.stringify(executed.result))
+          : String(executed.error || '检索工具暂时不可用，请稍后重试'),
         intent: 'tool_calling',
         toolsCalled,
         mode: 'tool_calling'
@@ -537,7 +534,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       if (decision.action === 'tool' && decision.tool) {
         console.log(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
-        const targetTool = tools.find((t) => t.name === decision.tool);
+        const targetTool = this.toolManager.getTool(decision.tool);
         if (!targetTool) {
           console.warn('[智能问答] 工具未找到:', decision.tool);
           return {

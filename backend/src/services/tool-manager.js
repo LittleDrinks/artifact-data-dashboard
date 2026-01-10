@@ -24,6 +24,30 @@ class ToolManager {
   listTools() {
     return Array.from(this.tools.values());
   }
+
+  async executeTool(name, params = {}) {
+    const tool = this.getTool(name);
+    if (!tool) {
+      throw new Error(`Tool not found: ${name}`);
+    }
+
+    try {
+      const result = await tool.handler(params || {});
+      return {
+        name: tool.name,
+        status: 'success',
+        result,
+        error: null
+      };
+    } catch (err) {
+      return {
+        name: tool.name,
+        status: 'error',
+        result: null,
+        error: err?.message ? String(err.message) : String(err)
+      };
+    }
+  }
 }
 
 module.exports = {
