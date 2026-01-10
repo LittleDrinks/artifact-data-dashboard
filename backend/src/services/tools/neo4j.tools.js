@@ -1,4 +1,19 @@
+const axios = require('axios');
 const { neo4jDriver } = require('../../config/database');
+
+const NEO4J_MCP_ENDPOINT = (process.env.NEO4J_MCP_ENDPOINT || 'http://neo4j-cypher:8080').replace(/\/$/, '');
+
+async function callNeo4jCypherViaMcp(path, payload) {
+  const url = `${NEO4J_MCP_ENDPOINT}${path}`;
+  try {
+    const response = await axios.post(url, payload, { timeout: 15000 });
+    return response.data;
+  } catch (error) {
+    // Fallback to local driver if MCP sidecar is unreachable
+    console.warn('[Neo4j MCP] 调用失败，回退到本地驱动:', error.message);
+    return null;
+  }
+}
 
 const tools = [
   {
@@ -71,12 +86,18 @@ const tools = [
       }
     },
     handler: async ({ query, params = {} }) => {
+      if (!query || typeof query !== 'string') {
+        return JSON.stringify({ error: 'Query parameter is required and must be a string' });
+      }
+
+      // 优先使用 MCP sidecar（docker 镜像 mcp/neo4j-cypher）执行，失败则回退本地驱动
+      const mcpResult = await callNeo4jCypherViaMcp('/cypher/read', { query, params });
+      if (mcpResult !== null && mcpResult !== undefined) {
+        return typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult);
+      }
+
       const session = neo4jDriver.session();
       try {
-        if (!query || typeof query !== 'string') {
-          return JSON.stringify({ error: 'Query parameter is required and must be a string' });
-        }
-        
         // 只读模式检查（简单检查，实际上不完美，但作为 safeguard）
         const upperQuery = query.toUpperCase();
         if (upperQuery.includes('CREATE') || upperQuery.includes('DELETE') || 
@@ -109,12 +130,18 @@ const tools = [
       }
     },
     handler: async ({ query, params = {} }) => {
+      if (!query || typeof query !== 'string') {
+        return JSON.stringify({ error: 'Query parameter is required and must be a string' });
+      }
+
+      // 优先使用 MCP sidecar（docker 镜像 mcp/neo4j-cypher）执行，失败则回退本地驱动
+      const mcpResult = await callNeo4jCypherViaMcp('/cypher/write', { query, params });
+      if (mcpResult !== null && mcpResult !== undefined) {
+        return typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult);
+      }
+
       const session = neo4jDriver.session();
       try {
-        if (!query || typeof query !== 'string') {
-          return JSON.stringify({ error: 'Query parameter is required and must be a string' });
-        }
-
         const result = await session.run(query, params);
         // 如果有 stats，通常 result.summary 会包含
         return JSON.stringify({
