@@ -81,7 +81,7 @@ env/
 
 # SDD workflow files
 specs/*
-/scripts/generate-changelog.py
+/scripts/
 
 # test
 docker-compose.data-local.yml
