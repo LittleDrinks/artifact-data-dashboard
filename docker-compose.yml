@@ -37,7 +37,8 @@ services:
     container_name: artifact-dashboard-backend
     ports:
       - "3000:3000"
-    command: npm run dev
+      - "9229:9229"  # Node.js调试端口
+    command: node --inspect=0.0.0.0:9229 src/index.js
     env_file:
       - ./.env
     environment:

@@ -28,7 +28,9 @@ const tools = [
           LIMIT ?
         `;
         const searchPattern = `%${keyword}%`;
-        const [rows] = await mysqlPool.execute(query, [searchPattern, searchPattern, searchPattern, searchPattern, limit]);
+        const limitNum = parseInt(limit, 10) || 5;
+        // Use query instead of execute to avoid prepared statement issues with LIMIT arguments
+        const [rows] = await mysqlPool.query(query, [searchPattern, searchPattern, searchPattern, searchPattern, limitNum]);
         
         return JSON.stringify(rows);
       } catch (error) {
@@ -53,7 +55,8 @@ const tools = [
       if (!id) return JSON.stringify({ error: 'ID is required' });
       
       try {
-        const [rows] = await mysqlPool.execute(
+        // Use query instead of execute for consistency
+        const [rows] = await mysqlPool.query(
           'SELECT * FROM artifacts WHERE id = ?',
           [id]
         );

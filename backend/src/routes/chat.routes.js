@@ -97,46 +97,55 @@ router.post('/ask', async (req, res) => {
       }
     }
     
-    // 尝试获取知识图谱数据
-    const graphResponse = await handleGraphQueries(question);
-    // 尝试获取关系型数据库数据
-    const relationalData = await handleRelationalQueries(question);
-
     let context = '';
     let graphData = null;
     let sources = [];
+    let relationalData = null;
 
-    if (graphResponse) {
-      graphData = graphResponse.data;
-      sources.push('knowledge_graph');
-      
-      // 构建上下文供大模型使用
-      const nodes = graphResponse.data.nodes;
-      const edges = graphResponse.data.edges;
-      
-      if (nodes.length > 0) {
-        const nodeMap = {};
-        nodes.forEach(n => nodeMap[n.id] = n.label);
+    // 仅在非工具调用模式下使用旧版检索
+    // 在 tool_calling 模式下，交给 MCP Agent 自行决定检索
+    if (aiMode !== 'tool_calling') {
+      // 尝试获取知识图谱数据
+      const graphResponse = await handleGraphQueries(question);
+      // 尝试获取关系型数据库数据
+      relationalData = await handleRelationalQueries(question);
+
+      if (graphResponse) {
+        graphData = graphResponse.data;
+        sources.push('knowledge_graph');
         
-        const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
-        const relations = edges.map(e => {
-          const source = nodeMap[e.source] || '未知';
-          const target = nodeMap[e.target] || '未知';
-          return `${source} ${e.label} ${target}`;
-        }).join('；');
+        // 构建上下文供大模型使用
+        const nodes = graphResponse.data.nodes;
+        const edges = graphResponse.data.edges;
         
-        context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
+        if (nodes.length > 0) {
+          const nodeMap = {};
+          nodes.forEach(n => nodeMap[n.id] = n.label);
+          
+          const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
+          const relations = edges.map(e => {
+            const source = nodeMap[e.source] || '未知';
+            const target = nodeMap[e.target] || '未知';
+            return `${source} ${e.label} ${target}`;
+          }).join('；');
+          
+          context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
+        }
       }
-    }
 
-    if (relationalData) {
-      sources.push('relational_db');
-      context += `【文物档案信息】：\n${relationalData}\n\n`;
-    }
+      if (relationalData) {
+        sources.push('relational_db');
+        context += `【文物档案信息】：\n${relationalData}\n\n`;
+      }
 
-    if (sources.length > 0) {
-      context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+      if (sources.length > 0) {
+        context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+      }
+    } else {
+      console.log('[Chat] Model is in tool_calling mode, skipping legacy pre-retrieval.');
     }
+    
+    // 打印检索到的上下文信息，方便调试
     
     // 打印检索到的上下文信息，方便调试
     console.log('--- MCP Context Debug ---');

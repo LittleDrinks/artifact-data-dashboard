@@ -368,6 +368,7 @@ class MCPService {
   async handleToolCalling({ question, history = [], context = '' }) {
     const tools = this.toolManager.listTools();
     if (!tools || tools.length === 0) {
+      console.log('[智能问答] 检索工具不可用');
       return {
         content: '检索工具暂时不可用，请稍后重试',
         intent: 'tool_calling',
@@ -378,6 +379,8 @@ class MCPService {
     }
 
     try {
+      console.log('[智能问答] 开始处理问题:', question);
+
       // 1. Tool Selection Phase
       const toolsDesc = tools.map(t => ({
         name: t.name,
@@ -391,9 +394,23 @@ ${JSON.stringify(toolsDesc, null, 2)}
 
 User Question: "${question}"
 
-Analyze the user's question and decide:
-1. If the user is just saying hello, expressing gratitude, or asking a general question not requiring specific data, do NOT use tools.
-2. If the user is asking for specific artifact data, graph relationships, or executing database queries, select the most appropriate tool.
+Goal: Analyze the user's question and decide whether to use a tool or respond directly.
+
+Criteria for using tools:
+- The user asks for specific information about an artifact (e.g., size, era, location, description, material, dimensions).
+- The user asks about relationships between artifacts or entities.
+- The user asks to search for artifacts by keyword.
+- Even if the question seems simple (e.g. "How big is it?"), if it refers to a specific entity, USE A TOOL (e.g. search_artifacts).
+
+Criteria for Direct Chat (NO tool):
+- Greetings (e.g. "Hello", "Hi").
+- Broad general knowledge questions completely unrelated to the artifact database.
+- Thanks or closing remarks.
+
+Examples:
+- "Hello" -> {"action": "chat", "response": "你好！"}
+- "How big is the Cloud Dragon Inkstone?" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Cloud Dragon Inkstone"}}
+- "Tell me about the Bronze Ding" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Bronze Ding"}}
 
 Output logic:
 - If NO tool is needed, respond with JSON: {"action": "chat", "response": "Your natural language response here (in Chinese)"}
@@ -402,6 +419,7 @@ Output logic:
 Ensure your response is valid JSON. Do not return any other text.
 `;
 
+      console.log('[智能问答] 阶段1: 意图分析与工具选择...');
       const selectionResponse = await this._callInternalModel({
         messages: [
           { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
@@ -417,7 +435,7 @@ Ensure your response is valid JSON. Do not return any other text.
         const cleanJson = selectionResponse.content.replace(/```json/g, '').replace(/```/g, '').trim();
         decision = JSON.parse(cleanJson);
       } catch (e) {
-        console.warn('[ToolSelection] JSON Parse Error:', e, selectionResponse.content);
+        console.warn('[智能问答] JSON解析错误:', e, selectionResponse.content);
         // Fallback: treat as chat if parse fails, or simple keyword search
         return {
           content: selectionResponse.content || '抱歉，我无法理解您的意图。',
@@ -429,6 +447,7 @@ Ensure your response is valid JSON. Do not return any other text.
 
       // 2. Execution Phase
       if (decision.action === 'chat') {
+        console.log('[智能问答] 决策: 直接聊天 (无需工具)');
         return {
           content: decision.response || '你好！',
           intent: 'chat',
@@ -438,8 +457,10 @@ Ensure your response is valid JSON. Do not return any other text.
       }
 
       if (decision.action === 'tool' && decision.tool) {
+        console.log(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
         const targetTool = tools.find(t => t.name === decision.tool);
         if (!targetTool) {
+          console.warn('[智能问答] 工具未找到:', decision.tool);
            return {
             content: `无法找到工具: ${decision.tool}`,
             intent: 'tool_calling',
@@ -448,12 +469,18 @@ Ensure your response is valid JSON. Do not return any other text.
           };
         }
 
+        console.log('[智能问答] 阶段2: 工具执行');
         await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
         
         let toolResult;
         try {
           toolResult = await targetTool.handler(decision.params || {});
+          
+          // 简略打印结果，避免大段数据刷屏
+          const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+          console.log(`[智能问答] 工具执行成功 | 结果摘要: ${resultStr.slice(0, 150)}...`);
         } catch (err) {
+          console.error('[智能问答] 工具执行错误:', err.message);
           toolResult = `Error: ${err.message}`;
         }
         
@@ -467,6 +494,7 @@ Ensure your response is valid JSON. Do not return any other text.
         await this.chatFlow.afterToolCall({ question, results: toolsCalled });
 
         // 3. Synthesis Phase
+        console.log('[智能问答] 阶段3: 最终回答合成...');
         const synthesisPrompt = `
 User Question: "${question}"
 Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
@@ -483,6 +511,8 @@ If the tool output is empty or indicates not found, verify if you can answer wit
           ]
         });
 
+        console.log('[智能问答] 流程结束');
+
         return {
           content: finalResponse.content,
           intent: 'tool_calling',
@@ -491,6 +521,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         };
       }
 
+      console.log('[智能问答] 未做出有效决策');
       return {
         content: '未做出有效决策',
         intent: 'unknown',
@@ -499,7 +530,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       };
 
     } catch (error) {
-      console.error('[HandleToolCalling] Error:', error);
+      console.error('[智能问答] 处理错误:', error);
       return {
         content: '抱歉，处理您的请求时遇到错误。',
         intent: 'error',
@@ -519,21 +550,37 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     }
     
     try {
-      const response = await axios.post(this.apiEndpoint, {
+      const requestBody = {
         model: this.model,
         messages,
         temperature,
         max_tokens
-      }, {
+      };
+
+      // 仅在非流式调用时打印简略日志（避免刷屏完整Prompt）
+      const lastMsg = messages[messages.length - 1];
+      console.log(`[MCP调用] 发送请求 (tokens_limit=${max_tokens}) | 最后一条消息: ${lastMsg?.content?.slice(0, 100).replace(/\n/g, ' ')}...`);
+
+      const response = await axios.post(this.apiEndpoint, requestBody, {
         headers: this.headers,
         timeout: 45000
       });
       
+      const rawContent = response.data?.choices?.[0]?.message?.content || '';
+      const responseContent = this.sanitizeModelText(rawContent);
+
+      if (!responseContent) {
+        console.warn(`[MCP调用] 响应内容为空! HTTP Status: ${response.status}`);
+        console.warn(`[MCP调用] 完整响应数据: ${JSON.stringify(response.data)}`);
+      } else {
+        console.log(`[MCP调用] 收到响应 | 长度: ${responseContent.length} | 内容摘要: ${responseContent.slice(0, 100).replace(/\n/g, ' ')}...`);
+      }
+
       return {
-        content: this.sanitizeModelText(response.data?.choices?.[0]?.message?.content || '')
+        content: responseContent
       };
     } catch (e) {
-      console.error('[_callInternalModel] Failed:', e.message);
+      console.error('[MCP调用] 调用失败:', e.message);
       throw e;
     }
   }
