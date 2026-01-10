@@ -13,6 +13,10 @@ class ToolManager {
     this.tools.set(name, { name, schema, handler });
   }
 
+  clear() {
+    this.tools.clear();
+  }
+
   getTool(name) {
     return this.tools.get(name);
   }

@@ -120,6 +120,64 @@ describe('MCPService tool calling', () => {
   });
 });
 
+describe('ToolManager registry', () => {
+  test('register, get, list, clear work', () => {
+    const { ToolManager } = jest.requireActual('../src/services/tool-manager');
+    const tm = new ToolManager();
+    const handler = jest.fn();
+    tm.registerTool('demo', { type: 'object' }, handler);
+    expect(tm.listTools()).toHaveLength(1);
+    expect(tm.getTool('demo').handler).toBe(handler);
+    tm.clear();
+    expect(tm.listTools()).toHaveLength(0);
+  });
+
+  test('rejects invalid name or handler', () => {
+    const { ToolManager } = jest.requireActual('../src/services/tool-manager');
+    const tm = new ToolManager();
+    expect(() => tm.registerTool('', {}, () => {})).toThrow();
+    expect(() => tm.registerTool('ok', {}, 'not-fn')).toThrow();
+  });
+});
+
+describe('McpProvider + ToolManager integration', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    process.env.AI_MODE = 'tool_calling';
+  });
+
+  afterEach(() => {
+    const actual = jest.requireActual('../src/services/tool-manager');
+    actual.toolManager.clear();
+  });
+
+  test('registers tool via provider and triggers tool_calling flow', async () => {
+    const { toolManager } = jest.requireActual('../src/services/tool-manager');
+    const { McpProvider } = jest.requireActual('../src/services/ai/providers/mcp.provider');
+
+    const provider = new McpProvider({ toolManager });
+    let called = false;
+    toolManager.clear();
+    provider.registerTool('integration-tool', { type: 'object' }, async () => {
+      called = true;
+      return { ok: true };
+    });
+
+    const results = [];
+    await provider.askStream({
+      question: 'integration test',
+      mode: 'tool_calling',
+      onToolResult: (res) => results.push(res),
+      onData: () => {},
+      onEnd: () => {},
+      onError: () => {}
+    });
+
+    expect(called).toBe(true);
+    expect(results[0].toolsCalled[0].name).toBe('integration-tool');
+  });
+});
+
 describe('chat.routes tool_calling integration', () => {
   beforeEach(() => {
     mockProviderBehavior.toolsCalled = [{ name: 'mock-tool', status: 'success', result: { ok: true } }];
