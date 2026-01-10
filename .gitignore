@@ -61,6 +61,7 @@ build_kg/**/*.xlsx
 
 # Datasets
 data/
+/ollama/
 
 # Large crawler outputs (keep locally, avoid committing)
 build_kg/crawler/artifact.json
@@ -80,7 +81,7 @@ env/
 
 # SDD workflow files
 specs/*
-scripts/*
+/scripts/generate-changelog.py
 
 # test
 docker-compose.data-local.yml

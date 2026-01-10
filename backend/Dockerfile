@@ -1,5 +1,6 @@
 # 后端Dockerfile
-FROM crpi-kl2yo8a1hefddu65.cn-hangzhou.personal.cr.aliyuncs.com/csj_images/node:16-alpine
+# FROM crpi-kl2yo8a1hefddu65.cn-hangzhou.personal.cr.aliyuncs.com/csj_images/node:16-alpine
+FROM node:16-alpine
 
 # 安装构建 bcrypt 所需的依赖
 RUN apk add --no-cache python3 make g++ gcc
