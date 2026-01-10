@@ -5,6 +5,7 @@
 const axios = require('axios');
 const { getAiMode } = require('../config/env');
 const { toolManager } = require('./tool-manager');
+const { safeJsonParse } = require('../utils/json-parser');
 
 class ChatFlow {
   async beforeToolCall({ question, tools }) {
@@ -42,6 +43,111 @@ class MCPService {
     } else {
       console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
     }
+  }
+
+  _buildSelectionPrompt(question, tools, history = []) {
+    const toolsDesc = tools.map((t) => ({
+      name: t.name,
+      description: t.schema?.description || '',
+      parameters: t.schema?.properties || {}
+    }));
+
+    return `
+You are an intelligent assistant with access to the following tools:
+${JSON.stringify(toolsDesc, null, 2)}
+
+User Question: "${question}"
+
+Goal: Analyze the user's question and decide whether to use a tool or respond directly.
+
+Criteria for using tools:
+- The user asks for specific information about an artifact (e.g., size, era, location, description, material, dimensions).
+- The user asks about relationships between artifacts or entities.
+- The user asks to search for artifacts by keyword.
+- Even if the question seems simple (e.g. "How big is it?"), if it refers to a specific entity, USE A TOOL (e.g. search_artifacts).
+
+Criteria for Direct Chat (NO tool):
+- Greetings (e.g. "Hello", "Hi").
+- Broad general knowledge questions completely unrelated to the artifact database.
+- Thanks or closing remarks.
+
+Examples:
+- "Hello" -> {"action": "chat", "response": "你好！"}
+- "How big is the Cloud Dragon Inkstone?" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Cloud Dragon Inkstone"}}
+- "Tell me about the Bronze Ding" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Bronze Ding"}}
+
+Output logic:
+- If NO tool is needed, respond with JSON: {"action": "chat", "response": "Your natural language response here (in Chinese)"}
+- If a tool IS needed, respond with JSON: {"action": "tool", "tool": "tool_name", "params": { ...parameters... }}
+
+Ensure your response is valid JSON. Do not return any other text.
+`;
+  }
+
+  async _selectTool({ question, tools, history }) {
+    const selectionPrompt = this._buildSelectionPrompt(question, tools, history);
+
+    const selectionResponse = await this._callInternalModel({
+      messages: [
+        { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
+        ...history.slice(-2),
+        { role: 'user', content: selectionPrompt }
+      ],
+      temperature: 0.1
+    });
+
+    const parsed = safeJsonParse(selectionResponse.content, { fallback: null });
+    if (!parsed.ok || !parsed.value) {
+      console.warn('[智能问答] JSON解析错误:', parsed.error?.message, selectionResponse.content);
+      return { action: 'chat', response: selectionResponse.content || '抱歉，我无法理解您的意图。' };
+    }
+    return parsed.value;
+  }
+
+  async _executeTool({ targetTool, params, question }) {
+    await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
+
+    let toolResult;
+    try {
+      toolResult = await targetTool.handler(params || {});
+
+      const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+      console.log(`[智能问答] 工具执行成功 | 结果摘要: ${resultStr.slice(0, 150)}...`);
+    } catch (err) {
+      console.error('[智能问答] 工具执行错误:', err.message);
+      toolResult = `Error: ${err.message}`;
+    }
+
+    const toolsCalled = [{
+      name: targetTool.name,
+      status: toolResult.startsWith && toolResult.startsWith('Error') ? 'error' : 'success',
+      result: toolResult,
+      error: toolResult.startsWith && toolResult.startsWith('Error') ? toolResult : null
+    }];
+
+    await this.chatFlow.afterToolCall({ question, results: toolsCalled });
+
+    return { toolsCalled, toolResult };
+  }
+
+  async _synthesizeResponse({ question, history, context, targetTool, toolResult }) {
+    const synthesisPrompt = `
+User Question: "${question}"
+Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
+
+Please use the tool output to answer the user's question in natural Chinese. 
+If the tool output is empty or indicates not found, verify if you can answer with general knowledge, otherwise state that you couldn't find the information.
+`;
+
+    const finalResponse = await this._callInternalModel({
+      messages: [
+        { role: 'system', content: this.buildSystemPrompt(context) },
+        ...history,
+        { role: 'user', content: synthesisPrompt }
+      ]
+    });
+
+    return finalResponse.content;
   }
 
   // 测试/模拟开关：在测试环境跳过真实大模型与选择流程，直接调用已注册工具
@@ -407,68 +513,8 @@ class MCPService {
       console.log('[智能问答] 开始处理问题:', question);
 
       // 1. Tool Selection Phase
-      const toolsDesc = tools.map(t => ({
-        name: t.name,
-        description: t.schema?.description || '',
-        parameters: t.schema?.properties || {}
-      }));
- 
-      const selectionPrompt = `
-You are an intelligent assistant with access to the following tools:
-${JSON.stringify(toolsDesc, null, 2)}
-
-User Question: "${question}"
-
-Goal: Analyze the user's question and decide whether to use a tool or respond directly.
-
-Criteria for using tools:
-- The user asks for specific information about an artifact (e.g., size, era, location, description, material, dimensions).
-- The user asks about relationships between artifacts or entities.
-- The user asks to search for artifacts by keyword.
-- Even if the question seems simple (e.g. "How big is it?"), if it refers to a specific entity, USE A TOOL (e.g. search_artifacts).
-
-Criteria for Direct Chat (NO tool):
-- Greetings (e.g. "Hello", "Hi").
-- Broad general knowledge questions completely unrelated to the artifact database.
-- Thanks or closing remarks.
-
-Examples:
-- "Hello" -> {"action": "chat", "response": "你好！"}
-- "How big is the Cloud Dragon Inkstone?" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Cloud Dragon Inkstone"}}
-- "Tell me about the Bronze Ding" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Bronze Ding"}}
-
-Output logic:
-- If NO tool is needed, respond with JSON: {"action": "chat", "response": "Your natural language response here (in Chinese)"}
-- If a tool IS needed, respond with JSON: {"action": "tool", "tool": "tool_name", "params": { ...parameters... }}
-
-Ensure your response is valid JSON. Do not return any other text.
-`;
-
       console.log('[智能问答] 阶段1: 意图分析与工具选择...');
-      const selectionResponse = await this._callInternalModel({
-        messages: [
-          { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
-          ...history.slice(-2), // limit history for selection context
-          { role: 'user', content: selectionPrompt }
-        ],
-        temperature: 0.1
-      });
-
-      let decision;
-      try {
-        // Cleaning markdown code blocks if present
-        const cleanJson = selectionResponse.content.replace(/```json/g, '').replace(/```/g, '').trim();
-        decision = JSON.parse(cleanJson);
-      } catch (e) {
-        console.warn('[智能问答] JSON解析错误:', e, selectionResponse.content);
-        // Fallback: treat as chat if parse fails, or simple keyword search
-        return {
-          content: selectionResponse.content || '抱歉，我无法理解您的意图。',
-          intent: 'chat',
-          toolsCalled: [],
-          mode: 'tool_calling'
-        };
-      }
+      const decision = await this._selectTool({ question, tools, history });
 
       // 2. Execution Phase
       if (decision.action === 'chat') {
@@ -483,65 +529,30 @@ Ensure your response is valid JSON. Do not return any other text.
 
       if (decision.action === 'tool' && decision.tool) {
         console.log(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
-        const targetTool = tools.find(t => t.name === decision.tool);
+        const targetTool = tools.find((t) => t.name === decision.tool);
         if (!targetTool) {
           console.warn('[智能问答] 工具未找到:', decision.tool);
-           return {
+          return {
             content: `无法找到工具: ${decision.tool}`,
             intent: 'tool_calling',
-            toolsCalled: [], 
+            toolsCalled: [],
             mode: 'tool_calling'
           };
         }
 
         console.log('[智能问答] 阶段2: 工具执行');
-        await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
-        
-        let toolResult;
-        try {
-          toolResult = await targetTool.handler(decision.params || {});
-          
-          // 简略打印结果，避免大段数据刷屏
-          const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-          console.log(`[智能问答] 工具执行成功 | 结果摘要: ${resultStr.slice(0, 150)}...`);
-        } catch (err) {
-          console.error('[智能问答] 工具执行错误:', err.message);
-          toolResult = `Error: ${err.message}`;
-        }
-        
-        const toolsCalled = [{ 
-          name: targetTool.name, 
-          status: toolResult.startsWith && toolResult.startsWith('Error') ? 'error' : 'success', 
-          result: toolResult,
-          error: toolResult.startsWith && toolResult.startsWith('Error') ? toolResult : null
-        }];
-
-        await this.chatFlow.afterToolCall({ question, results: toolsCalled });
+        const { toolsCalled, toolResult } = await this._executeTool({ targetTool, params: decision.params, question });
 
         // 3. Synthesis Phase
         console.log('[智能问答] 阶段3: 最终回答合成...');
-        const synthesisPrompt = `
-User Question: "${question}"
-Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
-
-Please use the tool output to answer the user's question in natural Chinese. 
-If the tool output is empty or indicates not found, verify if you can answer with general knowledge, otherwise state that you couldn't find the information.
-`;
-        
-        const finalResponse = await this._callInternalModel({
-          messages: [
-            { role: 'system', content: this.buildSystemPrompt(context) },
-            ...history,
-            { role: 'user', content: synthesisPrompt }
-          ]
-        });
+        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult });
 
         console.log('[智能问答] 流程结束');
 
         return {
-          content: finalResponse.content,
+          content: finalContent,
           intent: 'tool_calling',
-          toolsCalled: toolsCalled,
+          toolsCalled,
           mode: 'tool_calling'
         };
       }
