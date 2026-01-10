@@ -45,6 +45,52 @@ class MCPService {
     }
   }
 
+  async _executePreRetrieve({ question, history = [], context = '', aiMode = 'pre_retrieve' }) {
+    try {
+      // 检查API配置
+      if (!this.apiEndpoint || !this.apiKey) {
+        console.warn('[MCP] 未配置 API，使用模拟模式');
+        return { ...this.simulateResponse(question, history), mode: aiMode };
+      }
+
+      const messages = [];
+
+      messages.push({
+        role: 'system',
+        content: this.buildSystemPrompt(context)
+      });
+
+      messages.push(...history);
+      messages.push({ role: 'user', content: question });
+
+      const requestBody = {
+        model: this.model,
+        messages: messages,
+        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+      };
+
+      const response = await axios.post(this.apiEndpoint, requestBody, {
+        headers: this.headers,
+        timeout: 30000 // 30秒超时
+      });
+
+      return {
+        content: this.sanitizeModelText(response.data.choices[0].message.content),
+        intent: response.data.choices[0].intent || 'general_chat',
+        metadata: response.data.metadata || {},
+        mode: aiMode
+      };
+    } catch (error) {
+      console.error('MCP API 调用失败:', error.message);
+      return { ...this.simulateResponse(question, history), mode: aiMode };
+    }
+  }
+
+  async _executeToolCalling({ question, history = [], context = '' }) {
+    return this.handleToolCalling({ question, history, context });
+  }
+
   _buildSelectionPrompt(question, tools, history = []) {
     const toolsDesc = tools.map((t) => ({
       name: t.name,
@@ -201,48 +247,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
   async ask(question, history = [], context = '') {
     const aiMode = this.getAiModeFn({}).trim();
     if (aiMode === 'tool_calling') {
-      return this.handleToolCalling({ question, history, context });
+      return this._executeToolCalling({ question, history, context });
     }
 
-    try {
-      // 检查API配置
-      if (!this.apiEndpoint || !this.apiKey) {
-        console.warn('[MCP] 未配置 API，使用模拟模式');
-        return this.simulateResponse(question, history);
-      }
-
-      const messages = [];
-
-      messages.push({
-        role: 'system',
-        content: this.buildSystemPrompt(context)
-      });
-
-      messages.push(...history);
-      messages.push({ role: 'user', content: question });
-
-      const requestBody = {
-        model: this.model,
-        messages: messages,
-        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
-        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
-      };
-
-      const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
-        timeout: 30000 // 30秒超时
-      });
-
-      return {
-        content: this.sanitizeModelText(response.data.choices[0].message.content),
-        intent: response.data.choices[0].intent || 'general_chat',
-        metadata: response.data.metadata || {},
-        mode: aiMode
-      };
-    } catch (error) {
-      console.error('MCP API 调用失败:', error.message);
-      return this.simulateResponse(question, history);
-    }
+    return this._executePreRetrieve({ question, history, context, aiMode });
   }
 
   /**
@@ -258,7 +266,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     const aiMode = (mode || this.getAiModeFn({})).trim();
     if (aiMode === 'tool_calling') {
       try {
-        const result = await this.handleToolCalling({ question, history, context });
+        const result = await this._executeToolCalling({ question, history, context });
         if (onToolResult) {
           onToolResult(result);
         }
