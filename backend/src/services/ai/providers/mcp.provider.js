@@ -9,8 +9,8 @@ class McpProvider {
     return Boolean(providerConfig?.enabled);
   }
 
-  async askStream({ question, history = [], context = '', onData, onEnd, onError }) {
-    return mcpService.askStream(question, history, context, onData, onEnd, onError);
+  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult }) {
+    return mcpService.askStream({ question, history, context, mode, onData, onEnd, onError, onToolResult });
   }
 }
 

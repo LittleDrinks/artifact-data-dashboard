@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { getChatHistory, clearChatHistory } from '../services/chat.service';
 
 const { TextArea } = Input;
+const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
 
 const Chat = () => {
   const [loading, setLoading] = useState(false);
@@ -76,7 +77,8 @@ const Chat = () => {
         role: 'assistant',
         content: '',
         timestamp: new Date().toISOString(),
-        source: 'mcp_model'
+        source: 'mcp_model',
+        mode: DEFAULT_MODE
       }
     ]));
     setStreamingMessageId(assistantMessageId);
@@ -89,7 +91,7 @@ const Chat = () => {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ question, conversationId })
+        body: JSON.stringify({ question, conversationId, mode: DEFAULT_MODE })
       });
 
       if (!response.ok || !response.body) {
@@ -122,9 +124,10 @@ const Chat = () => {
                 }
                 if (data.source) currentSource = data.source;
                 if (data.data) currentData = data.data;
+                const nextMode = data.mode || DEFAULT_MODE;
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
-                    ? { ...msg, source: currentSource, data: currentData }
+                    ? { ...msg, source: currentSource, data: currentData, mode: nextMode }
                     : msg
                 ));
               } else if (currentEvent === 'message') {
@@ -136,6 +139,12 @@ const Chat = () => {
                       : msg
                   ));
                 }
+              } else if (currentEvent === 'tools') {
+                setMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, toolsCalled: data.tools_called || [], mode: data.mode || msg.mode, toolsError: data.error }
+                    : msg
+                ));
               } else if (currentEvent === 'error') {
                 setMessages(prev => prev.map(msg =>
                   msg.id === assistantMessageId
@@ -316,11 +325,30 @@ const Chat = () => {
                       {message.source === 'knowledge_graph' && '来源: 知识图谱'}
                       {message.source === 'mcp_model' && '来源: 大模型'}
                       {message.source === 'simulation' && '来源: 本地知识库'}
+                      {message.source === 'tool_calling' && '来源: 工具调用'}
                     </span>
                     {message.data && message.data.nodes && (
                       <a className="message-link" onClick={() => openGraphFromMessage(message)}>
                         查看图谱 ({message.data.nodes.length}节点)
                       </a>
+                    )}
+                    {message.toolsCalled && message.toolsCalled.length > 0 && (
+                      <div className="message-tools">
+                        <div style={{ fontWeight: 500 }}>工具调用结果（模式: {message.mode || DEFAULT_MODE}）</div>
+                        <ul style={{ paddingLeft: 16, margin: '4px 0 0' }}>
+                          {message.toolsCalled.map((tool) => (
+                            <li key={tool.name}>
+                              {tool.name} - {tool.status === 'success' ? '成功' : '失败'}
+                              {tool.status === 'error' && tool.error ? ` (${tool.error})` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {message.toolsError && (
+                      <div className="message-tools" style={{ color: '#d4380d' }}>
+                        {message.toolsError}
+                      </div>
                     )}
                   </div>
                 )}

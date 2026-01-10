@@ -6,12 +6,14 @@ const API_URL = '/api/chat/';
  * 发送问题到智能问答系统
  * @param {string} question 用户问题
  * @param {string} conversationId 会话ID (可选)
+ * @param {string} mode AI 处理模式 (pre_retrieve|tool_calling)
  * @returns {Promise} 系统回答
  */
-export const askQuestion = async (question, conversationId = null) => {
+export const askQuestion = async (question, conversationId = null, mode = 'pre_retrieve') => {
   return axios.post(API_URL + 'ask', {
     question,
-    conversationId
+    conversationId,
+    mode
   });
 };
 

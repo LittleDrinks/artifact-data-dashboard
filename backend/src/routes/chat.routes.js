@@ -64,7 +64,8 @@ router.use(async (req, res, next) => {
  */
 router.post('/ask', async (req, res) => {
   try {
-    const { question, conversationId = null } = req.body;
+    const { question, conversationId = null, mode: requestMode } = req.body;
+    const aiMode = (requestMode || process.env.AI_MODE || 'pre_retrieve').trim();
     
     if (!question) {
       return res.status(400).json({ message: '问题不能为空' });
@@ -153,10 +154,15 @@ router.post('/ask', async (req, res) => {
 
     // 发送元数据
     res.write(`event: metadata\n`);
+    const sourceLabel = aiMode === 'tool_calling'
+      ? 'tool_calling'
+      : (sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model');
+
     res.write(`data: ${JSON.stringify({
       conversationId: sessionId,
-      source: sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model',
-      data: graphData
+      source: sourceLabel,
+      data: graphData,
+      mode: aiMode
     })}\n\n`);
     
     let fullAnswer = '';
@@ -233,10 +239,29 @@ router.post('/ask', async (req, res) => {
       question: applied.question,
       history,
       context: applied.context,
+      mode: aiMode,
       onData: (content) => {
         res.write(`event: message\n`);
         res.write(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
+      },
+      onToolResult: (result) => {
+        const payload = {
+          mode: result?.mode || aiMode,
+          tools_called: result?.toolsCalled || []
+        };
+
+        if (result?.errorMessage) {
+          payload.error = result.errorMessage;
+        }
+
+        res.write(`event: tools\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+        if (result?.errorMessage) {
+          res.write(`event: error\n`);
+          res.write(`data: ${JSON.stringify({ message: result.errorMessage })}\n\n`);
+        }
       },
       onEnd: async () => {
         if (shouldAudit(aiConfig)) {
@@ -252,7 +277,6 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        // 保存对话
         await saveConversation(sessionId, question, fullAnswer, req.user.id);
         res.write(`event: done\n`);
         res.write(`data: [DONE]\n\n`);

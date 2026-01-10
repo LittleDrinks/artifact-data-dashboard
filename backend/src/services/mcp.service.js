@@ -139,16 +139,25 @@ class MCPService {
    * @param {Function} onEnd 结束回调
    * @param {Function} onError 错误回调
    */
-  async askStream(question, history = [], context = '', onData, onEnd, onError) {
-    const aiMode = this.getAiModeFn({}).trim();
+  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult }) {
+    const aiMode = (mode || this.getAiModeFn({})).trim();
     if (aiMode === 'tool_calling') {
       try {
         const result = await this.handleToolCalling({ question, history, context });
-        onData(result.content);
-        onEnd();
+        if (onToolResult) {
+          onToolResult(result);
+        }
+        if (onData) {
+          onData(result.content);
+        }
+        if (onEnd) {
+          onEnd();
+        }
         return;
       } catch (error) {
-        onError(error);
+        if (onError) {
+          onError(error);
+        }
         return;
       }
     }
@@ -362,7 +371,9 @@ class MCPService {
       return {
         content: '检索工具暂时不可用，请稍后重试',
         intent: 'tool_calling',
-        toolsCalled: []
+        toolsCalled: [],
+        mode: 'tool_calling',
+        errorMessage: '检索工具暂时不可用，请稍后重试'
       };
     }
 
@@ -392,7 +403,8 @@ class MCPService {
     return {
       content: content || '未获取到工具结果',
       intent: 'tool_calling',
-      toolsCalled: results
+      toolsCalled: results,
+      mode: 'tool_calling'
     };
   }
 }
