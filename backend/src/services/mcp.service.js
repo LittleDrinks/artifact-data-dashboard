@@ -7,6 +7,17 @@ const { getAiMode } = require('../config/env');
 const { toolManager } = require('./tool-manager');
 const { safeJsonParse } = require('../utils/json-parser');
 
+let fetchPolyfillPromise;
+async function ensureFetchAvailable() {
+  if (typeof global.fetch === 'function') return;
+  if (!fetchPolyfillPromise) {
+    fetchPolyfillPromise = import('node-fetch').then((mod) => {
+      global.fetch = mod.default;
+    });
+  }
+  return fetchPolyfillPromise;
+}
+
 class ChatFlow {
   async beforeToolCall({ question, tools }) {
     console.log('[ChatFlow] beforeToolCall', { question: question?.slice(0, 60), tools: tools?.map((t) => t.name) });
@@ -21,13 +32,20 @@ class MCPService {
   constructor(deps = {}) {
     this.apiEndpoint = process.env.AI_API_ENDPOINT;
     this.apiKey = process.env.AI_API_KEY;
-    this.model = process.env.AI_MODEL || 'deepseek-r1'; // 默认使用 deepseek-r1
+    this.deepseekApiKey = process.env.DEEPSEEK_API_KEY;
+    this.deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+    this.model = process.env.AI_MODEL || (this.deepseekApiKey ? 'deepseek-chat' : 'deepseek-r1'); // 默认使用 deepseek 模型
     this._useOllamaNativeChat = false;
     this.headers = { 'Content-Type': 'application/json' };
 
     this.toolManager = deps.toolManager || toolManager;
     this.chatFlow = deps.chatFlow || new ChatFlow();
     this.getAiModeFn = deps.getAiMode || getAiMode;
+    this.createOpenAIClient = deps.createOpenAIClient || ((config) => {
+      const { OpenAI } = require('openai');
+      return new OpenAI(config);
+    });
+    this.deepSeekClient = deps.deepSeekClient || null;
 
     this.internalTimeoutMs = process.env.AI_INTERNAL_TIMEOUT_MS
       ? Number(process.env.AI_INTERNAL_TIMEOUT_MS)
@@ -45,6 +63,67 @@ class MCPService {
     } else {
       console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
     }
+  }
+
+  _shouldUseDeepSeek() {
+    const endpoint = String(this.apiEndpoint || '').toLowerCase();
+    const base = String(process.env.DEEPSEEK_BASE_URL || '').toLowerCase();
+    const model = String(this.aiModel || '').toLowerCase();
+    return Boolean(this.deepseekApiKey)
+      || endpoint.includes('deepseek.com')
+      || base.includes('deepseek.com')
+      || model.startsWith('deepseek');
+  }
+
+  _assertDeepSeekConfigured() {
+    if (!this.deepseekApiKey) {
+      const msg = 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。';
+      throw new Error(msg);
+    }
+  }
+
+  async _getDeepSeekClient() {
+    if (this.deepSeekClient) return this.deepSeekClient;
+    this._assertDeepSeekConfigured();
+    await ensureFetchAvailable();
+    this.deepSeekClient = this.createOpenAIClient({
+      apiKey: this.deepseekApiKey,
+      baseURL: this.deepseekBaseUrl
+    });
+    return this.deepSeekClient;
+  }
+
+  async _callDeepSeekCompletion({ messages, temperature = 0.2, max_tokens = 1200, signal }) {
+    const client = await this._getDeepSeekClient();
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages,
+      temperature,
+      max_tokens,
+      stream: false,
+      signal
+    });
+
+    const rawContent = response?.choices?.[0]?.message?.content || '';
+    return { content: this.sanitizeModelText(rawContent || '') };
+  }
+
+  async _callDeepSeekStream({ messages, temperature, max_tokens, signal, onData, onEnd }) {
+    const client = await this._getDeepSeekClient();
+    const stream = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages,
+      temperature,
+      max_tokens,
+      stream: true,
+      signal
+    });
+
+    for await (const chunk of stream) {
+      const delta = chunk?.choices?.[0]?.delta?.content;
+      if (delta) onData(this.sanitizeModelText(delta));
+    }
+    onEnd();
   }
 
   _isSimpleGreeting(question) {
@@ -83,9 +162,54 @@ class MCPService {
   }
 
   async _executePreRetrieve({ question, history = [], context = '', aiMode = 'pre_retrieve' }) {
+    // 检查 DeepSeek 模型但缺少 API 密钥的情况
+    if (this.model.startsWith('deepseek') && !this.deepseekApiKey) {
+      return {
+        content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
+        intent: 'error',
+        metadata: { provider: 'deepseek' },
+        mode: aiMode,
+        errorMessage: 'DEEPSEEK_API_KEY missing'
+      };
+    }
+
+    if (this._shouldUseDeepSeek()) {
+      if (!this.deepseekApiKey) {
+        return {
+          content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
+          intent: 'error',
+          metadata: { provider: 'deepseek' },
+          mode: aiMode,
+          errorMessage: 'DEEPSEEK_API_KEY missing'
+        };
+      }
+
+      try {
+        const result = await this._callDeepSeekCompletion({
+          messages: [
+            { role: 'system', content: this.buildSystemPrompt(context) },
+            ...history,
+            { role: 'user', content: question }
+          ],
+          temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+          max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+        });
+        return { ...result, intent: 'general_chat', metadata: { provider: 'deepseek' }, mode: aiMode };
+      } catch (error) {
+        console.error('DeepSeek 调用失败:', error.message);
+        return {
+          content: `DeepSeek 调用失败: ${error.message}`,
+          intent: 'error',
+          metadata: { provider: 'deepseek' },
+          mode: aiMode,
+          errorMessage: error.message
+        };
+      }
+    }
+
     try {
       // 检查API配置
-      if (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint))) {
+      if (!this._shouldUseDeepSeek() && (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)))) {
         console.warn('[MCP] 未配置 API，使用模拟模式');
         return { ...this.simulateResponse(question, history), mode: aiMode };
       }
@@ -380,6 +504,33 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
     try {
       const isProd = process.env.NODE_ENV === 'production';
+
+      if (this._shouldUseDeepSeek()) {
+        if (!this.deepseekApiKey) {
+          const err = new Error('DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。');
+          if (onError) onError(err);
+          return;
+        }
+
+        const messages = [];
+        messages.push({ role: 'system', content: this.buildSystemPrompt(context) });
+        messages.push(...history);
+        messages.push({ role: 'user', content: question });
+
+        try {
+          await this._callDeepSeekStream({
+            messages,
+            temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+            max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200,
+            signal,
+            onData,
+            onEnd
+          });
+        } catch (error) {
+          if (onError) onError(error);
+        }
+        return;
+      }
 
       // 检查API配置
       if (!this.apiEndpoint) {
@@ -695,6 +846,15 @@ If the tool output is empty or indicates not found, verify if you can answer wit
    * Internal helper to call model non-streamingly, separate from main ask flow
    */
   async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
+    if (this._shouldUseDeepSeek()) {
+      try {
+        return await this._callDeepSeekCompletion({ messages, temperature, max_tokens, signal });
+      } catch (error) {
+        console.error('[MCP调用] DeepSeek 调用失败:', error.message);
+        throw error;
+      }
+    }
+
     if (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint))) {
       throw new Error('API not configured');
     }
