@@ -165,6 +165,11 @@ Excel 导入/导出（移自 Debug，Admin Only）：
 
 如果你选择在宿主机直接运行 backend（不在容器里），仍建议从根目录 `.env` 提供相同的一组变量，并把 host/port 调整为宿主机地址与映射端口（例如 MySQL 13306）。
 
+AI（Ollama）推荐配置：
+
+- 在 Docker 方式运行（推荐）：把 `.env` 里的 `AI_API_ENDPOINT` 配成 `http://ollama:11434/v1/chat/completions`（backend 容器内通过服务名直连 ollama 容器）。
+- `AI_API_KEY`：Ollama 默认不校验 key，可填任意占位符或留空（后端会在 ollama 端点场景自动放行）。
+
 ### 排障路径（启动失败/连接失败）
 
 1) 查看后端启动诊断摘要（stdout / 容器日志）

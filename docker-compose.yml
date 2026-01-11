@@ -37,7 +37,8 @@ services:
     container_name: artifact-dashboard-backend
     ports:
       - "3000:3000"
-    command: npm run dev
+      - "9229:9229"  # Node.js调试端口
+    command: node --inspect=0.0.0.0:9229 src/index.js
     env_file:
       - ./.env
     environment:
@@ -63,6 +64,40 @@ services:
       - ./backend/config:/app/config
       - uploads-data:/app/uploads
       - ./data:/data/import
+
+  # 本地大模型（Ollama）
+  ollama:
+    image: ollama/ollama@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
+    container_name: artifact-dashboard-ollama
+    gpus: all
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    volumes:
+      - ./ollama:/root/.ollama
+    entrypoint: ["/bin/sh", "-c", "if [ ! -d /root/.ollama/models/deepseek-r1 ] ; then ollama pull deepseek-r1:8b ; fi ; ollama serve"]
+    networks:
+      - artifact-network
+    restart: unless-stopped
+
+  # Neo4j Cypher MCP（用于工具调用）
+  neo4j-cypher:
+    image: mcp/neo4j-cypher@sha256:9815579d840262433140dd922158b49ad6d622aabbf7a52bc81f43b9279cdd6c
+    container_name: artifact-dashboard-neo4j-cypher
+    depends_on:
+      - neo4j
+    environment:
+      - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
+      - NEO4J_USERNAME=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - NEO4J_TRANSPORT=sse
+      - NEO4J_MCP_SERVER_PORT=8080
+    ports:
+      - "18081:8080"
+    networks:
+      - artifact-network
+    restart: unless-stopped
 
   # MySQL数据库
   mysql:
@@ -124,3 +159,4 @@ volumes:
   neo4j-logs:
   redis-data:
   uploads-data:
+  ollama-data:

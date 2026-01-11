@@ -64,7 +64,8 @@ router.use(async (req, res, next) => {
  */
 router.post('/ask', async (req, res) => {
   try {
-    const { question, conversationId = null } = req.body;
+    const { question, conversationId = null, mode: requestMode } = req.body;
+    const aiMode = (requestMode || process.env.AI_MODE || 'pre_retrieve').trim();
     
     if (!question) {
       return res.status(400).json({ message: '问题不能为空' });
@@ -77,7 +78,97 @@ router.post('/ask', async (req, res) => {
     
     // 生成会话ID或使用现有ID
     const sessionId = conversationId || `chat_${req.user.id}_${Date.now()}`;
-    
+    const assistantMessageId = `assistant_${req.user.id}_${Date.now()}`;
+
+    // 注意：刷新/导航会导致 SSE 连接断开，但不应该中止后端生成。
+    // 否则会出现“后端继续跑但不落库，刷新后前端既看不到思考气泡也拿不到最终答案”。
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+
+    res.on('close', () => {
+      clientDisconnected = true;
+      console.log(`[Chat] 客户端断开连接(将继续生成并落库), sessionId: ${sessionId}`);
+    });
+
+    const safeWrite = (chunk) => {
+      if (clientDisconnected) return;
+      try {
+        res.write(chunk);
+      } catch (err) {
+        clientDisconnected = true;
+        console.log(`[Chat] 写入 SSE 失败，视为客户端断开 (sessionId: ${sessionId})`);
+      }
+    };
+
+    const safeEnd = () => {
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    // 立即把“用户问题 + 机器人占位（思考中）”写入 Redis，确保刷新后能看到气泡并禁用输入
+    const conversationKey = `chat:${sessionId}`;
+    const messagesKey = `${conversationKey}:messages`;
+    const nowIso = new Date().toISOString();
+    const exists = await redisClient.exists(conversationKey);
+    if (!exists) {
+      await redisClient.hSet(conversationKey, {
+        userId: req.user.id.toString(),
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+    } else {
+      await redisClient.hSet(conversationKey, 'updatedAt', nowIso);
+    }
+
+    const userMessage = {
+      id: `user_${req.user.id}_${Date.now()}`,
+      role: 'user',
+      content: question,
+      timestamp: nowIso
+    };
+
+    // 用 <think> 作为“思考中”标记（前端 parseMessageContent 识别未闭合 <think>）
+    const botMessage = {
+      id: assistantMessageId,
+      role: 'bot',
+      content: '',
+      pending: true,
+      source: 'mcp_model',
+      mode: aiMode,
+      data: null,
+      toolsCalled: [],
+      toolsError: null,
+      timestamp: nowIso
+    };
+
+    await redisClient.rPush(messagesKey, JSON.stringify(userMessage));
+    await redisClient.rPush(messagesKey, JSON.stringify(botMessage));
+
+    // botMessage 在 list 中的索引（用于 LSET 更新内容）
+    const botIndex = (await redisClient.lLen(messagesKey)) - 1;
+    const updateBotMessage = async (content, extra = {}) => {
+      try {
+        const next = {
+          ...botMessage,
+          ...extra,
+          content,
+          timestamp: new Date().toISOString()
+        };
+        await redisClient.lSet(messagesKey, botIndex, JSON.stringify(next));
+        await redisClient.hSet(conversationKey, 'updatedAt', new Date().toISOString());
+      } catch (err) {
+        console.error('[Chat] 更新 bot 消息失败:', err);
+      }
+    };
+
+    // 设置过期时间(7天)
+    await redisClient.expire(conversationKey, 60 * 60 * 24 * 7);
+    await redisClient.expire(messagesKey, 60 * 60 * 24 * 7);
+
     // 获取会话历史（如果有）
     let history = [];
     if (conversationId) {
@@ -96,46 +187,55 @@ router.post('/ask', async (req, res) => {
       }
     }
     
-    // 尝试获取知识图谱数据
-    const graphResponse = await handleGraphQueries(question);
-    // 尝试获取关系型数据库数据
-    const relationalData = await handleRelationalQueries(question);
-
     let context = '';
     let graphData = null;
     let sources = [];
+    let relationalData = null;
 
-    if (graphResponse) {
-      graphData = graphResponse.data;
-      sources.push('knowledge_graph');
-      
-      // 构建上下文供大模型使用
-      const nodes = graphResponse.data.nodes;
-      const edges = graphResponse.data.edges;
-      
-      if (nodes.length > 0) {
-        const nodeMap = {};
-        nodes.forEach(n => nodeMap[n.id] = n.label);
+    // 仅在非工具调用模式下使用旧版检索
+    // 在 tool_calling 模式下，交给 MCP Agent 自行决定检索
+    if (aiMode !== 'tool_calling') {
+      // 尝试获取知识图谱数据
+      const graphResponse = await handleGraphQueries(question);
+      // 尝试获取关系型数据库数据
+      relationalData = await handleRelationalQueries(question);
+
+      if (graphResponse) {
+        graphData = graphResponse.data;
+        sources.push('knowledge_graph');
         
-        const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
-        const relations = edges.map(e => {
-          const source = nodeMap[e.source] || '未知';
-          const target = nodeMap[e.target] || '未知';
-          return `${source} ${e.label} ${target}`;
-        }).join('；');
+        // 构建上下文供大模型使用
+        const nodes = graphResponse.data.nodes;
+        const edges = graphResponse.data.edges;
         
-        context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
+        if (nodes.length > 0) {
+          const nodeMap = {};
+          nodes.forEach(n => nodeMap[n.id] = n.label);
+          
+          const entities = nodes.map(n => `${n.label}(${n.type})`).join('、');
+          const relations = edges.map(e => {
+            const source = nodeMap[e.source] || '未知';
+            const target = nodeMap[e.target] || '未知';
+            return `${source} ${e.label} ${target}`;
+          }).join('；');
+          
+          context += `【知识图谱信息】：\n实体：${entities}\n关系：${relations}\n参考说明：${graphResponse.text}\n\n`;
+        }
       }
-    }
 
-    if (relationalData) {
-      sources.push('relational_db');
-      context += `【文物档案信息】：\n${relationalData}\n\n`;
-    }
+      if (relationalData) {
+        sources.push('relational_db');
+        context += `【文物档案信息】：\n${relationalData}\n\n`;
+      }
 
-    if (sources.length > 0) {
-      context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+      if (sources.length > 0) {
+        context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
+      }
+    } else {
+      console.log('[Chat] Model is in tool_calling mode, skipping legacy pre-retrieval.');
     }
+    
+    // 打印检索到的上下文信息，方便调试
     
     // 打印检索到的上下文信息，方便调试
     console.log('--- MCP Context Debug ---');
@@ -152,11 +252,24 @@ router.post('/ask', async (req, res) => {
     console.log('-------------------------');
 
     // 发送元数据
-    res.write(`event: metadata\n`);
-    res.write(`data: ${JSON.stringify({
+    safeWrite(`event: metadata\n`);
+    const sourceLabel = aiMode === 'tool_calling'
+      ? 'tool_calling'
+      : (sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model');
+
+    // 将 metadata 同步到落库的 bot message，保证刷新后气泡信息一致
+    await updateBotMessage(botMessage.content, {
+      source: sourceLabel,
+      data: graphData,
+      mode: aiMode
+    });
+
+    safeWrite(`data: ${JSON.stringify({
       conversationId: sessionId,
-      source: sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model',
-      data: graphData
+      assistantMessageId,
+      source: sourceLabel,
+      data: graphData,
+      mode: aiMode
     })}\n\n`);
     
     let fullAnswer = '';
@@ -184,9 +297,11 @@ router.post('/ask', async (req, res) => {
 
     if (!provider || !provider.isEnabled(providerConfig)) {
       const disabledMessage = 'AI 服务未启用或当前 provider 不可用，请联系管理员启用后重试。';
-      res.write(`event: message\n`);
-      res.write(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
+      safeWrite(`event: message\n`);
+      safeWrite(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
       fullAnswer += disabledMessage;
+
+      await updateBotMessage(disabledMessage, { isError: true, pending: false });
 
       if (shouldAudit(aiConfig)) {
         await writeAuditLog({
@@ -201,10 +316,9 @@ router.post('/ask', async (req, res) => {
         });
       }
 
-      await saveConversation(sessionId, question, fullAnswer, req.user.id);
-      res.write(`event: done\n`);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
+      safeWrite(`event: done\n`);
+      safeWrite(`data: [DONE]\n\n`);
+      safeEnd();
       return;
     }
 
@@ -233,12 +347,50 @@ router.post('/ask', async (req, res) => {
       question: applied.question,
       history,
       context: applied.context,
+      mode: aiMode,
+      signal: abortController.signal,
       onData: (content) => {
-        res.write(`event: message\n`);
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        // 即使客户端断开也要继续累积并落库
+        safeWrite(`event: message\n`);
+        safeWrite(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
+
+        // 刷新后使用 pending 字段恢复“进行中”状态（不改变内容形态，保持气泡一致）
+        updateBotMessage(fullAnswer, { pending: true });
+      },
+      onToolResult: (result) => {
+        const payload = {
+          mode: result?.mode || aiMode,
+          tools_called: result?.toolsCalled || []
+        };
+
+        if (result?.errorMessage) {
+          payload.error = result.errorMessage;
+        }
+
+        safeWrite(`event: tools\n`);
+        safeWrite(`data: ${JSON.stringify(payload)}\n\n`);
+
+        // 工具调用结果也要落库，刷新后保持一致
+        updateBotMessage(fullAnswer, {
+          pending: true,
+          mode: payload.mode,
+          toolsCalled: payload.tools_called,
+          toolsError: payload.error || null
+        });
+
+        if (result?.errorMessage) {
+          safeWrite(`event: error\n`);
+          safeWrite(`data: ${JSON.stringify({ message: result.errorMessage })}\n\n`);
+
+          updateBotMessage(fullAnswer || result.errorMessage, {
+            pending: true,
+            toolsError: result.errorMessage
+          });
+        }
       },
       onEnd: async () => {
+        // 无论客户端是否断开，都要写入最终答案
         if (shouldAudit(aiConfig)) {
           await writeAuditLog({
             userId: req.user.id,
@@ -252,13 +404,18 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        // 保存对话
-        await saveConversation(sessionId, question, fullAnswer, req.user.id);
-        res.write(`event: done\n`);
-        res.write(`data: [DONE]\n\n`);
-        res.end();
+        await updateBotMessage(fullAnswer, { pending: false });
+        safeWrite(`event: done\n`);
+        safeWrite(`data: [DONE]\n\n`);
+        safeEnd();
       },
       onError: async (error) => {
+        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+          console.log(`[Chat] provider 中止 (sessionId: ${sessionId})`);
+          await updateBotMessage(fullAnswer || '回答已中止', { canceled: true, pending: false });
+          return;
+        }
+        
         console.error('流式响应错误:', error.message);
 
         if (shouldAudit(aiConfig)) {
@@ -276,12 +433,13 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        res.write(`event: error\n`);
+        safeWrite(`event: error\n`);
         const errorMsg = error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND'
           ? '无法连接到AI模型服务，请检查后端配置'
           : '生成回答时出错';
-        res.write(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
-        res.end();
+        safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
+        await updateBotMessage(errorMsg, { isError: true, pending: false });
+        safeEnd();
       }
     });
     

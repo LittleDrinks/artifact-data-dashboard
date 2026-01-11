@@ -1,18 +1,55 @@
 /**
  * MCP大模型API服务
- * 负责与MCP API进行交互，实现智能问答功能
+ * 支持预检索（pre_retrieve）与工具调用（tool_calling）双模式
  */
 const axios = require('axios');
+const { getAiMode } = require('../config/env');
+const { toolManager } = require('./tool-manager');
+const { safeJsonParse } = require('../utils/json-parser');
+
+let fetchPolyfillPromise;
+async function ensureFetchAvailable() {
+  if (typeof global.fetch === 'function') return;
+  if (!fetchPolyfillPromise) {
+    fetchPolyfillPromise = import('node-fetch').then((mod) => {
+      global.fetch = mod.default;
+    });
+  }
+  return fetchPolyfillPromise;
+}
+
+class ChatFlow {
+  async beforeToolCall({ question, tools }) {
+    console.log('[ChatFlow] beforeToolCall', { question: question?.slice(0, 60), tools: tools?.map((t) => t.name) });
+  }
+
+  async afterToolCall({ question, results }) {
+    console.log('[ChatFlow] afterToolCall', { question: question?.slice(0, 60), results: results?.map((r) => ({ name: r.name, status: r.status })) });
+  }
+}
 
 class MCPService {
-  constructor() {
+  constructor(deps = {}) {
     this.apiEndpoint = process.env.AI_API_ENDPOINT;
     this.apiKey = process.env.AI_API_KEY;
-    this.model = process.env.AI_MODEL || 'deepseek-r1'; // 默认使用 deepseek-r1
-    this.headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.apiKey}`
-    };
+    this.deepseekApiKey = process.env.DEEPSEEK_API_KEY;
+    this.deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+    this.model = process.env.AI_MODEL || (this.deepseekApiKey ? 'deepseek-chat' : 'deepseek-r1'); // 默认使用 deepseek 模型
+    this._useOllamaNativeChat = false;
+    this.headers = { 'Content-Type': 'application/json' };
+
+    this.toolManager = deps.toolManager || toolManager;
+    this.chatFlow = deps.chatFlow || new ChatFlow();
+    this.getAiModeFn = deps.getAiMode || getAiMode;
+    this.createOpenAIClient = deps.createOpenAIClient || ((config) => {
+      const { OpenAI } = require('openai');
+      return new OpenAI(config);
+    });
+    this.deepSeekClient = deps.deepSeekClient || null;
+
+    this.internalTimeoutMs = process.env.AI_INTERNAL_TIMEOUT_MS
+      ? Number(process.env.AI_INTERNAL_TIMEOUT_MS)
+      : 120000;
 
     const isProd = process.env.NODE_ENV === 'production';
 
@@ -26,6 +63,363 @@ class MCPService {
     } else {
       console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
     }
+  }
+
+  _shouldUseDeepSeek() {
+    const endpoint = String(this.apiEndpoint || '').toLowerCase();
+    const base = String(process.env.DEEPSEEK_BASE_URL || '').toLowerCase();
+    const model = String(this.aiModel || '').toLowerCase();
+    return Boolean(this.deepseekApiKey)
+      || endpoint.includes('deepseek.com')
+      || base.includes('deepseek.com')
+      || model.startsWith('deepseek');
+  }
+
+  _assertDeepSeekConfigured() {
+    if (!this.deepseekApiKey) {
+      const msg = 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。';
+      throw new Error(msg);
+    }
+  }
+
+  async _getDeepSeekClient() {
+    if (this.deepSeekClient) return this.deepSeekClient;
+    this._assertDeepSeekConfigured();
+    await ensureFetchAvailable();
+    this.deepSeekClient = this.createOpenAIClient({
+      apiKey: this.deepseekApiKey,
+      baseURL: this.deepseekBaseUrl
+    });
+    return this.deepSeekClient;
+  }
+
+  async _callDeepSeekCompletion({ messages, temperature = 0.2, max_tokens = 1200, signal }) {
+    const client = await this._getDeepSeekClient();
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages,
+      temperature,
+      max_tokens,
+      stream: false,
+      signal
+    });
+
+    const rawContent = response?.choices?.[0]?.message?.content || '';
+    return { content: this.sanitizeModelText(rawContent || '') };
+  }
+
+  async _callDeepSeekStream({ messages, temperature, max_tokens, signal, onData, onEnd }) {
+    const client = await this._getDeepSeekClient();
+    const stream = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages,
+      temperature,
+      max_tokens,
+      stream: true,
+      signal
+    });
+
+    for await (const chunk of stream) {
+      const delta = chunk?.choices?.[0]?.delta?.content;
+      if (delta) onData(this.sanitizeModelText(delta));
+    }
+    onEnd();
+  }
+
+  _isSimpleGreeting(question) {
+    const q = String(question || '').trim();
+    if (!q) return false;
+    // 非严格：覆盖常见寒暄/致谢/告别，避免触发工具选择阶段的大模型调用
+    const patterns = [
+      /^hi$/i,
+      /^hello$/i,
+      /^你好[呀啊吗嘛]?$|^您好$|^在吗$|^嗨$|^哈喽$/,
+      /^早上好$|^中午好$|^下午好$|^晚上好$|^晚安$/,
+      /^谢谢(你)?$|^感谢(你)?$|^多谢$|^辛苦了$/,
+      /^再见$|^拜拜$|^下次见$/
+    ];
+
+    // 很短的输入更可能是寒暄
+    if (q.length <= 10) {
+      return patterns.some((re) => re.test(q));
+    }
+    return false;
+  }
+
+  _isOllamaEndpoint(url) {
+    if (!url) return false;
+    const u = String(url);
+    // docker 内网服务名 / 常见端口
+    return u.includes('ollama:11434') || u.includes(':11434');
+  }
+
+  _buildHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    return headers;
+  }
+
+  async _executePreRetrieve({ question, history = [], context = '', aiMode = 'pre_retrieve' }) {
+    // 检查 DeepSeek 模型但缺少 API 密钥的情况
+    if (this.model.startsWith('deepseek') && !this.deepseekApiKey) {
+      return {
+        content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
+        intent: 'error',
+        metadata: { provider: 'deepseek' },
+        mode: aiMode,
+        errorMessage: 'DEEPSEEK_API_KEY missing'
+      };
+    }
+
+    if (this._shouldUseDeepSeek()) {
+      if (!this.deepseekApiKey) {
+        return {
+          content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
+          intent: 'error',
+          metadata: { provider: 'deepseek' },
+          mode: aiMode,
+          errorMessage: 'DEEPSEEK_API_KEY missing'
+        };
+      }
+
+      try {
+        const result = await this._callDeepSeekCompletion({
+          messages: [
+            { role: 'system', content: this.buildSystemPrompt(context) },
+            ...history,
+            { role: 'user', content: question }
+          ],
+          temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+          max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+        });
+        return { ...result, intent: 'general_chat', metadata: { provider: 'deepseek' }, mode: aiMode };
+      } catch (error) {
+        console.error('DeepSeek 调用失败:', error.message);
+        return {
+          content: `DeepSeek 调用失败: ${error.message}`,
+          intent: 'error',
+          metadata: { provider: 'deepseek' },
+          mode: aiMode,
+          errorMessage: error.message
+        };
+      }
+    }
+
+    try {
+      // 检查API配置
+      if (!this._shouldUseDeepSeek() && (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)))) {
+        console.warn('[MCP] 未配置 API，使用模拟模式');
+        return { ...this.simulateResponse(question, history), mode: aiMode };
+      }
+
+      const messages = [];
+
+      messages.push({
+        role: 'system',
+        content: this.buildSystemPrompt(context)
+      });
+
+      messages.push(...history);
+      messages.push({ role: 'user', content: question });
+
+      const requestBody = {
+        model: this.model,
+        messages: messages,
+        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
+      };
+
+      const response = await axios.post(this.apiEndpoint, requestBody, {
+        headers: this._buildHeaders(),
+        timeout: 30000 // 30秒超时
+      });
+
+      return {
+        content: this.sanitizeModelText(response.data.choices[0].message.content),
+        intent: response.data.choices[0].intent || 'general_chat',
+        metadata: response.data.metadata || {},
+        mode: aiMode
+      };
+    } catch (error) {
+      console.error('MCP API 调用失败:', error.message);
+      return { ...this.simulateResponse(question, history), mode: aiMode };
+    }
+  }
+
+  _isLikelyOllamaOpenAIEndpoint(url) {
+    if (!url) return false;
+    const u = String(url);
+    return u.includes('11434') && u.includes('/v1/chat/completions');
+  }
+
+  _toOllamaNativeChatEndpoint(url) {
+    if (!url) return url;
+    const u = String(url);
+    if (u.includes('/v1/chat/completions')) {
+      return u.replace(/\/v1\/chat\/completions.*$/i, '/api/chat');
+    }
+    // 兜底：如果用户直接给了 host:11434，则拼出 /api/chat
+    if (u.includes('11434') && !u.endsWith('/api/chat')) {
+      return u.replace(/\/+$/g, '') + '/api/chat';
+    }
+    return u;
+  }
+
+  async _callOllamaNativeChat({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
+    const endpoint = this._toOllamaNativeChatEndpoint(this.apiEndpoint);
+    const requestBody = {
+      model: this.model,
+      messages,
+      stream: false,
+      options: {
+        temperature,
+        num_predict: max_tokens
+      }
+    };
+
+    const response = await axios.post(endpoint, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 45000,
+      signal
+    });
+
+    // Ollama 原生接口有时会把回答放在非标准字段（如 reasoning），做容错回退
+    let rawContent = response.data?.message?.content;
+    if (!rawContent || rawContent === '') {
+      rawContent = response.data?.message?.reasoning || response.data?.message?.text || '';
+    }
+    const responseContent = this.sanitizeModelText(rawContent || '');
+
+    // 如果仍为空，在选择工具阶段需要返回可解析 JSON，避免上游 safeJsonParse 失败
+    const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+    if (!responseContent && isSelectionPhase) {
+      return { content: JSON.stringify({ action: 'chat', response: '抱歉，模型未返回可用内容，请稍后重试。' }) };
+    }
+
+    if (!responseContent) {
+      console.warn('[MCP调用] Ollama 原生响应内容为空，完整数据：', JSON.stringify(response.data));
+    }
+
+    return { content: responseContent };
+  }
+
+  async _executeToolCalling({ question, history = [], context = '', signal }) {
+    return this.handleToolCalling({ question, history, context, signal });
+  }
+
+  _buildSelectionPrompt(question, tools, history = []) {
+    // 紧凑描述：避免把完整 schema/参数塞进 prompt，减小 token 与推理耗时
+    const toolsDesc = tools.map((t) => {
+      const name = t.name;
+      const description = t.schema?.description || '';
+      const params = t.schema?.properties ? Object.keys(t.schema.properties) : [];
+      return `- ${name}${description ? `：${description}` : ''}${params.length ? `（参数：${params.join(', ')}）` : ''}`;
+    }).join('\n');
+
+    return `
+You are an intelligent assistant with access to the following tools:
+${toolsDesc}
+
+User Question: "${question}"
+
+Goal: Analyze the user's question and decide whether to use a tool or respond directly.
+
+Criteria for using tools:
+- The user asks for specific information about an artifact (e.g., size, era, location, description, material, dimensions).
+- The user asks about relationships between artifacts or entities.
+- The user asks to search for artifacts by keyword.
+- Even if the question seems simple (e.g. "How big is it?"), if it refers to a specific entity, USE A TOOL (e.g. search_artifacts).
+
+Criteria for Direct Chat (NO tool):
+- Greetings (e.g. "Hello", "Hi").
+- Broad general knowledge questions completely unrelated to the artifact database.
+- Thanks or closing remarks.
+
+Examples:
+- "Hello" -> {"action": "chat", "response": "你好！"}
+- "How big is the Cloud Dragon Inkstone?" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Cloud Dragon Inkstone"}}
+- "Tell me about the Bronze Ding" -> {"action": "tool", "tool": "search_artifacts", "params": {"keyword": "Bronze Ding"}}
+
+Output logic:
+- If NO tool is needed, respond with JSON: {"action": "chat", "response": "Your natural language response here (in Chinese)"}
+- If a tool IS needed, respond with JSON: {"action": "tool", "tool": "tool_name", "params": { ...parameters... }}
+
+Ensure your response is valid JSON. Do not return any other text.
+`;
+  }
+
+  async _selectTool({ question, tools, history, signal }) {
+    const selectionPrompt = this._buildSelectionPrompt(question, tools, history);
+
+    const selectionResponse = await this._callInternalModel({
+      messages: [
+        { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
+        { role: 'user', content: selectionPrompt }
+      ],
+      temperature: 0.1,
+      signal
+    });
+
+    const parsed = safeJsonParse(selectionResponse.content, { fallback: null });
+    if (!parsed.ok || !parsed.value) {
+      console.warn('[智能问答] JSON解析错误:', parsed.error?.message, selectionResponse.content);
+      return { action: 'chat', response: selectionResponse.content || '抱歉，我无法理解您的意图。' };
+    }
+    return parsed.value;
+  }
+
+  async _executeTool({ targetTool, params, question, signal }) {
+    if (signal?.aborted) throw new Error('AbortError');
+    await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
+
+    const executed = await this.toolManager.executeTool(targetTool.name, params || {});
+    const toolsCalled = [executed];
+
+    const resultStr = executed.status === 'success'
+      ? (typeof executed.result === 'string' ? executed.result : JSON.stringify(executed.result))
+      : executed.error;
+
+    if (executed.status === 'success') {
+      console.log(`[智能问答] 工具执行成功 | 结果摘要: ${String(resultStr).slice(0, 150)}...`);
+    } else {
+      console.error('[智能问答] 工具执行错误:', executed.error);
+    }
+
+    await this.chatFlow.afterToolCall({ question, results: toolsCalled });
+
+    return { toolsCalled, toolResult: executed.status === 'success' ? executed.result : `Error: ${executed.error}` };
+  }
+
+  async _synthesizeResponse({ question, history, context, targetTool, toolResult, signal }) {
+    const synthesisPrompt = `
+User Question: "${question}"
+Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
+
+Please use the tool output to answer the user's question in natural Chinese. 
+If the tool output is empty or indicates not found, verify if you can answer with general knowledge, otherwise state that you couldn't find the information.
+`;
+
+    const finalResponse = await this._callInternalModel({
+      messages: [
+        { role: 'system', content: this.buildSystemPrompt(context) },
+        ...history,
+        { role: 'user', content: synthesisPrompt }
+      ],
+      signal
+    });
+
+    return finalResponse.content;
+  }
+
+  // 测试/模拟开关：在测试环境跳过真实大模型与选择流程，直接调用已注册工具
+  shouldMockToolCalling() {
+    const flag = String(process.env.MOCK_TOOL_CALLING || '').trim().toLowerCase();
+    const isJest = process.env.JEST_WORKER_ID !== undefined;
+    const isTestEnv = process.env.NODE_ENV === 'test';
+    const isMockEndpoint = this.apiEndpoint && this.apiEndpoint.includes('mock');
+    return isTestEnv || isJest || flag === 'true' || isMockEndpoint;
   }
 
   sanitizeModelText(text) {
@@ -67,64 +461,13 @@ class MCPService {
     return baseRules;
   }
 
-  /**
-   * 发送问题到MCP大模型并获取回答
-   * @param {string} question 用户问题
-   * @param {Array} history 对话历史 [{role: 'user|assistant', content: '内容'}]
-   * @param {string} context 知识库上下文
-   * @returns {Promise<Object>} 大模型回答
-   */
   async ask(question, history = [], context = '') {
-    try {
-      // 检查API配置
-      if (!this.apiEndpoint) {
-        console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
-        return this.simulateResponse(question, history);
-      }
-
-      if (!this.apiKey) {
-        console.warn('[MCP] 未配置 API Key，将使用模拟模式');
-        return this.simulateResponse(question, history);
-      }
-
-      const messages = [];
-
-      // 添加系统提示词和上下文
-      messages.push({
-        role: 'system',
-        content: this.buildSystemPrompt(context)
-      });
-
-      // 添加历史记录
-      messages.push(...history);
-
-      // 添加当前问题
-      messages.push({ role: 'user', content: question });
-
-      // 构建请求体
-      const requestBody = {
-        model: this.model,
-        messages: messages,
-        temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
-        max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200
-      };
-
-      // 发送请求到MCP API
-      const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
-        timeout: 30000 // 30秒超时
-      });
-
-      return {
-        content: this.sanitizeModelText(response.data.choices[0].message.content),
-        intent: response.data.choices[0].intent || 'general_chat',
-        metadata: response.data.metadata || {}
-      };
-    } catch (error) {
-      console.error('MCP API 调用失败:', error.message);
-      // 如果API调用失败，使用模拟响应
-      return this.simulateResponse(question, history);
+    const aiMode = this.getAiModeFn({}).trim();
+    if (aiMode === 'tool_calling') {
+      return this._executeToolCalling({ question, history, context });
     }
+
+    return this._executePreRetrieve({ question, history, context, aiMode });
   }
 
   /**
@@ -136,9 +479,58 @@ class MCPService {
    * @param {Function} onEnd 结束回调
    * @param {Function} onError 错误回调
    */
-  async askStream(question, history = [], context = '', onData, onEnd, onError) {
+  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult, signal }) {
+    const aiMode = (mode || this.getAiModeFn({})).trim();
+    if (aiMode === 'tool_calling') {
+      try {
+        const result = await this._executeToolCalling({ question, history, context, signal });
+        if (onToolResult) {
+          onToolResult(result);
+        }
+        if (onData) {
+          onData(result.content);
+        }
+        if (onEnd) {
+          onEnd();
+        }
+        return;
+      } catch (error) {
+        if (onError) {
+          onError(error);
+        }
+        return;
+      }
+    }
+
     try {
       const isProd = process.env.NODE_ENV === 'production';
+
+      if (this._shouldUseDeepSeek()) {
+        if (!this.deepseekApiKey) {
+          const err = new Error('DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。');
+          if (onError) onError(err);
+          return;
+        }
+
+        const messages = [];
+        messages.push({ role: 'system', content: this.buildSystemPrompt(context) });
+        messages.push(...history);
+        messages.push({ role: 'user', content: question });
+
+        try {
+          await this._callDeepSeekStream({
+            messages,
+            temperature: process.env.AI_TEMPERATURE ? Number(process.env.AI_TEMPERATURE) : 0.2,
+            max_tokens: process.env.AI_MAX_TOKENS ? Number(process.env.AI_MAX_TOKENS) : 1200,
+            signal,
+            onData,
+            onEnd
+          });
+        } catch (error) {
+          if (onError) onError(error);
+        }
+        return;
+      }
 
       // 检查API配置
       if (!this.apiEndpoint) {
@@ -149,7 +541,7 @@ class MCPService {
         return;
       }
 
-      if (!this.apiKey) {
+      if (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)) {
         console.warn('[MCP] 未配置 API Key，将使用模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
@@ -188,9 +580,10 @@ class MCPService {
 
       // 发送请求到MCP API
       const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
+        headers: this._buildHeaders(),
         responseType: 'stream',
-        timeout: 60000 // 60秒超时
+        timeout: 60000, // 60秒超时
+        signal: signal // 支持中止
       });
 
       let buffer = '';
@@ -339,6 +732,244 @@ class MCPService {
 
     return 'unknown';
   }
+
+  async handleToolCalling({ question, history = [], context = '', signal }) {
+    const tools = this.toolManager.listTools();
+    if (!tools || tools.length === 0) {
+      console.log('[智能问答] 检索工具不可用');
+      return {
+        content: '检索工具暂时不可用，请稍后重试',
+        intent: 'tool_calling',
+        toolsCalled: [],
+        mode: 'tool_calling',
+        errorMessage: '检索工具暂时不可用，请稍后重试'
+      };
+    }
+
+    // 测试/模拟路径：避免在测试中调用真实大模型或外部端点
+    if (this.shouldMockToolCalling && this.shouldMockToolCalling()) {
+      if (signal?.aborted) throw new Error('AbortError');
+      const targetTool = tools[0];
+      await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
+      const executed = await this.toolManager.executeTool(targetTool.name, { question });
+      const toolsCalled = [executed];
+      await this.chatFlow.afterToolCall({ question, results: toolsCalled });
+
+      return {
+        content: executed.status === 'success'
+          ? (typeof executed.result === 'string' ? executed.result : JSON.stringify(executed.result))
+          : String(executed.error || '检索工具暂时不可用，请稍后重试'),
+        intent: 'tool_calling',
+        toolsCalled,
+        mode: 'tool_calling'
+      };
+    }
+
+    try {
+      console.log('[智能问答] 开始处理问题:', question);
+
+      // 1. Tool Selection Phase
+      console.log('[智能问答] 阶段1: 意图分析与工具选择...');
+      const decision = await this._selectTool({ question, tools, history, signal });
+
+      // 检查中止
+      if (signal?.aborted) throw new Error('AbortError');
+
+      // 2. Execution Phase
+      if (decision.action === 'chat') {
+        console.log('[智能问答] 决策: 直接聊天 (无需工具)');
+        return {
+          content: decision.response || '你好！',
+          intent: 'chat',
+          toolsCalled: [],
+          mode: 'tool_calling'
+        };
+      }
+
+      if (decision.action === 'tool' && decision.tool) {
+        console.log(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
+        const targetTool = this.toolManager.getTool(decision.tool);
+        if (!targetTool) {
+          console.warn('[智能问答] 工具未找到:', decision.tool);
+          return {
+            content: `无法找到工具: ${decision.tool}`,
+            intent: 'tool_calling',
+            toolsCalled: [],
+            mode: 'tool_calling'
+          };
+        }
+
+        console.log('[智能问答] 阶段2: 工具执行');
+        const { toolsCalled, toolResult } = await this._executeTool({ targetTool, params: decision.params, question, signal });
+
+        // 检查中止
+        if (signal?.aborted) throw new Error('AbortError');
+
+        // 3. Synthesis Phase
+        console.log('[智能问答] 阶段3: 最终回答合成...');
+        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult, signal });
+
+        console.log('[智能问答] 流程结束');
+
+        return {
+          content: finalContent,
+          intent: 'tool_calling',
+          toolsCalled,
+          mode: 'tool_calling'
+        };
+      }
+
+      console.log('[智能问答] 未做出有效决策');
+      return {
+        content: '未做出有效决策',
+        intent: 'unknown',
+        toolsCalled: [],
+        mode: 'tool_calling'
+      };
+
+    } catch (error) {
+      console.error('[智能问答] 处理错误:', error);
+      const isTimeout = error?.code === 'ECONNABORTED' || String(error?.message || '').includes('timeout');
+      return {
+        content: isTimeout
+          ? '抱歉，模型响应超时。当前本机推理速度较慢或提示词过长，建议稍后重试，或降低模型/并发。'
+          : '抱歉，处理您的请求时遇到错误。',
+        intent: 'error',
+        toolsCalled: [],
+        mode: 'tool_calling',
+        errorMessage: error.message
+      };
+    }
+  }
+
+  /**
+   * Internal helper to call model non-streamingly, separate from main ask flow
+   */
+  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
+    if (this._shouldUseDeepSeek()) {
+      try {
+        return await this._callDeepSeekCompletion({ messages, temperature, max_tokens, signal });
+      } catch (error) {
+        console.error('[MCP调用] DeepSeek 调用失败:', error.message);
+        throw error;
+      }
+    }
+
+    if (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint))) {
+      throw new Error('API not configured');
+    }
+    
+    try {
+      const requestBody = {
+        model: this.model,
+        messages,
+        temperature,
+        max_tokens
+      };
+
+      // 仅在非流式调用时打印简略日志（避免刷屏完整Prompt）
+      const lastMsg = messages[messages.length - 1];
+      console.log(`[MCP调用] 发送请求 (tokens_limit=${max_tokens}) | 最后一条消息: ${lastMsg?.content?.slice(0, 100).replace(/\n/g, ' ')}...`);
+
+      const shouldTryOllamaNativeFirst = this._useOllamaNativeChat && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
+      const response = shouldTryOllamaNativeFirst
+        ? await this._callOllamaNativeChat({ messages, temperature, max_tokens, signal })
+        : await axios.post(this.apiEndpoint, requestBody, {
+          headers: this._buildHeaders(),
+          timeout: this.internalTimeoutMs,
+          signal
+        });
+
+      // 当走 Ollama 原生 /api/chat 时，_callOllamaNativeChat 已返回 {content}
+      if (shouldTryOllamaNativeFirst) {
+        return response;
+      }
+      
+
+      // 容错：有些模型/端点可能把实际文本放在 reasoning/text 等字段中
+      let rawContent = response.data?.choices?.[0]?.message?.content;
+      if (!rawContent || rawContent === '') {
+        rawContent = response.data?.choices?.[0]?.message?.reasoning
+          || response.data?.choices?.[0]?.message?.text
+          || response.data?.choices?.[0]?.text
+          || '';
+      }
+
+      let responseContent = this.sanitizeModelText(rawContent || '');
+
+      // 如果仍为空，在选择工具阶段需要返回可解析 JSON，避免 safeJsonParse 报错
+      const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+      if (!responseContent && isSelectionPhase) {
+        const fallback = JSON.stringify({ action: 'chat', response: '抱歉，模型未返回可用内容，请稍后重试。' });
+        console.warn('[MCP调用] 选择阶段模型未返回内容，使用 JSON 回退:', fallback);
+        return { content: fallback };
+      }
+
+      if (!responseContent) {
+        console.warn(`[MCP调用] 响应内容为空! HTTP Status: ${response.status}`);
+        console.warn('[MCP调用] 完整响应数据:', JSON.stringify(response.data));
+      } else {
+        console.log(`[MCP调用] 收到响应 | 长度: ${responseContent.length} | 内容摘要: ${responseContent.slice(0, 100).replace(/\n/g, ' ')}...`);
+      }
+
+      return { content: responseContent };
+    } catch (e) {
+      const status = e?.response?.status;
+      const errData = e?.response?.data;
+      const errText = typeof errData === 'string' ? errData : (errData ? JSON.stringify(errData) : '');
+
+      const canFallbackToOllamaNative = status === 404 && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
+      if (canFallbackToOllamaNative) {
+        if (!this._useOllamaNativeChat) {
+          console.warn('[MCP调用] OpenAI兼容端点返回404，尝试降级为 Ollama 原生 /api/chat');
+          this._useOllamaNativeChat = true;
+        }
+        try {
+          return await this._callOllamaNativeChat({ messages, temperature, max_tokens, signal });
+        } catch (fallbackError) {
+          const fbStatus = fallbackError?.response?.status;
+          const fbData = fallbackError?.response?.data;
+          const fbText = typeof fbData === 'string' ? fbData : (fbData ? JSON.stringify(fbData) : '');
+          const fbIsModelNotFound = fbStatus === 404 && /model\s+['"][^'"]+['"]\s+not\s+found/i.test(fbText);
+
+          if (fbIsModelNotFound) {
+            const modelName = this.model;
+            const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+            const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+            if (isSelectionPhase) {
+              return { content: JSON.stringify({ action: 'chat', response: friendly }) };
+            }
+            return { content: friendly };
+          }
+
+          console.error('[MCP调用] Ollama 原生 /api/chat 调用也失败:', fallbackError.message);
+          throw fallbackError;
+        }
+      }
+
+      // Ollama 原生接口常用 404 表示“模型未下载/不存在”
+      const isOllamaModelNotFound = status === 404 && /model\s+['"][^'"]+['"]\s+not\s+found/i.test(errText);
+      if (isOllamaModelNotFound) {
+        const modelName = this.model;
+        const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+
+        // 选择工具阶段需要严格 JSON，直接返回可解析 JSON 让流程走 chat 分支。
+        const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+        if (isSelectionPhase) {
+          return { content: JSON.stringify({ action: 'chat', response: friendly }) };
+        }
+
+        return { content: friendly };
+      }
+
+      console.error('[MCP调用] 调用失败:', e.message);
+      throw e;
+    }
+  }
 }
 
-module.exports = new MCPService();
+const mcpService = new MCPService();
+mcpService.ChatFlow = ChatFlow;
+mcpService.MCPService = MCPService;
+
+module.exports = mcpService;

@@ -27,6 +27,10 @@ const aiPluginsRoutes = require('./routes/ai-plugins.routes');
 const debugRoutes = require('./routes/debug.routes');
 const attachmentRoutes = require('./routes/attachment.routes');
 
+// 注册工具
+const { registerAllTools } = require('./services/tools');
+registerAllTools();
+
 // 导入中间件
 const { errorHandler, notFoundHandler } = require('./middleware/error.middleware');
 const { authMiddleware, roleMiddleware } = require('./middleware/auth.middleware');

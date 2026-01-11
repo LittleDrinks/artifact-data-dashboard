@@ -9,8 +9,11 @@ const SENSITIVE_KEYS = new Set([
   'NEO4J_PASSWORD',
   'REDIS_PASSWORD',
   'JWT_SECRET',
-  'AI_API_KEY'
+  'AI_API_KEY',
+  'DEEPSEEK_API_KEY'
 ]);
+
+const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 
 function isBlank(value) {
   return value === undefined || value === null || String(value).trim() === '';
@@ -61,6 +64,8 @@ function loadAndValidateEnv(options = {}) {
 
   const profile = (process.env.APP_ENV || 'development').trim();
   const entrypoint = 'docker-compose.yml';
+  const aiMode = (process.env.AI_MODE || 'pre_retrieve').trim();
+  const deepseekBaseUrl = (process.env.DEEPSEEK_BASE_URL || DEFAULT_DEEPSEEK_BASE_URL).trim();
 
   const requiredKeys = [
     'MYSQL_ROOT_PASSWORD',
@@ -83,6 +88,8 @@ function loadAndValidateEnv(options = {}) {
   const invalid = [];
   const profileError = validateEnum('APP_ENV', profile, ['development', 'production']);
   if (profileError) invalid.push({ key: 'APP_ENV', reason: profileError });
+  const aiModeError = validateEnum('AI_MODE', aiMode, ['pre_retrieve', 'tool_calling']);
+  if (aiModeError) invalid.push({ key: 'AI_MODE', reason: aiModeError });
 
   if (profile === 'production') {
     const weakDefaults = [
@@ -108,6 +115,20 @@ function loadAndValidateEnv(options = {}) {
     }
   }
 
+  const intendsDeepseek = (() => {
+    const model = (process.env.AI_MODEL || '').toLowerCase();
+    const endpoint = (process.env.AI_API_ENDPOINT || '').toLowerCase();
+    const baseFromEnv = (process.env.DEEPSEEK_BASE_URL || '').toLowerCase();
+    return Boolean(process.env.DEEPSEEK_API_KEY)
+      || model.includes('deepseek')
+      || endpoint.includes('deepseek.com')
+      || baseFromEnv.includes('deepseek.com');
+  })();
+
+  if (intendsDeepseek && isBlank(process.env.DEEPSEEK_API_KEY)) {
+    invalid.push({ key: 'DEEPSEEK_API_KEY', reason: 'DeepSeek 需配置 DEEPSEEK_API_KEY，请在根目录 .env 设置。' });
+  }
+
   const portError = validateInt('PORT', process.env.PORT);
   if (portError) invalid.push({ key: 'PORT', reason: portError });
   const mysqlPortError = validateInt('MYSQL_PORT', process.env.MYSQL_PORT);
@@ -130,6 +151,10 @@ function loadAndValidateEnv(options = {}) {
     REDIS_PASSWORD: 'Set REDIS_PASSWORD to match redis-server --requirepass.',
     JWT_SECRET: 'Set JWT_SECRET to a non-empty long random string.'
   };
+
+  if (!missingSuggestions.DEEPSEEK_API_KEY) {
+    missingSuggestions.DEEPSEEK_API_KEY = '设置 DEEPSEEK_API_KEY 以调用 DeepSeek API（baseURL 默认为 https://api.deepseek.com）。';
+  }
 
   // Provide actionable hints for missing required keys without leaking values
   for (const key of missingRequired) {
@@ -158,6 +183,7 @@ function loadAndValidateEnv(options = {}) {
   const diagnostics = {
     timestamp: new Date().toISOString(),
     profile,
+    aiMode,
     entrypoint,
     detectedSources,
     overrides,
@@ -167,9 +193,15 @@ function loadAndValidateEnv(options = {}) {
   };
 
   const ok = missingRequired.length === 0 && invalid.length === 0;
-  return { ok, profile, diagnostics, envFile };
+  return { ok, profile, aiMode, diagnostics, envFile };
+}
+
+function getAiMode(options = {}) {
+  const { aiMode } = loadAndValidateEnv(options);
+  return aiMode;
 }
 
 module.exports = {
-  loadAndValidateEnv
+  loadAndValidateEnv,
+  getAiMode
 };
