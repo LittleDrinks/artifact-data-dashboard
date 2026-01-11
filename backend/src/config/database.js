@@ -33,7 +33,9 @@ const redisClient = redis.createClient({
   url: `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
   password: redisPassword ? redisPassword : undefined,
   socket: {
-    reconnectStrategy: retries => Math.min(retries * 100, 2000)
+    reconnectStrategy: retries => Math.min(retries * 100, 2000),
+    connectTimeout: 10000, // 增加连接超时到10秒
+    keepAlive: 5000
   }
 });
 
