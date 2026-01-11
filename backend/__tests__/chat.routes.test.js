@@ -12,6 +12,8 @@ jest.mock('../src/config/database', () => ({
   redisClient: {
     exists: jest.fn().mockResolvedValue(false),
     lRange: jest.fn().mockResolvedValue([]),
+    lLen: jest.fn().mockResolvedValue(2),
+    lSet: jest.fn().mockResolvedValue('OK'),
     rPush: jest.fn().mockResolvedValue(1),
     expire: jest.fn().mockResolvedValue(true),
     hSet: jest.fn().mockResolvedValue(true),

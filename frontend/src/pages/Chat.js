@@ -8,6 +8,14 @@ import { ChatSession } from '../utils/chat-session';
 const { TextArea } = Input;
 const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
 
+const isThinkingContent = (content) => {
+  if (!content) return false;
+  const start = content.indexOf('<think>');
+  if (start === -1) return false;
+  const end = content.indexOf('</think>');
+  return end === -1;
+};
+
 const Chat = () => {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -15,7 +23,7 @@ const Chat = () => {
   const [messages, setMessages] = useState(() => ChatSession.loadMessages());
   const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
-  const [streamingMessageId, setStreamingMessageId] = useState(null);
+  const [streamingMessageId, setStreamingMessageId] = useState(() => ChatSession.loadStreamingMessageId());
   const chatMessagesRef = useRef(null);
   const abortControllerRef = useRef(null);
   const navigate = useNavigate();
@@ -36,6 +44,13 @@ const Chat = () => {
     }
   }, [inputValue]);
 
+  // 持久化流式状态到 ChatSession
+  useEffect(() => {
+    if (streamingMessageId !== null) {
+      ChatSession.saveStreamingMessageId(streamingMessageId);
+    }
+  }, [streamingMessageId]);
+
   // 组件卸载时中止请求
   useEffect(() => {
     return () => {
@@ -49,11 +64,37 @@ const Chat = () => {
   useEffect(() => {
     const fetchChatHistory = async () => {
       try {
+        // 优先使用 sessionStorage 中的消息
+        const savedMessages = ChatSession.loadMessages();
+        if (savedMessages.length > 0) {
+          // 先渲染本地数据，避免白屏
+          setMessages(savedMessages);
+
+          // 从本地消息内容推断是否存在“进行中”的助手消息
+          const thinkingMsg = [...savedMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
+          if (thinkingMsg?.id) {
+            setStreamingMessageId(thinkingMsg.id);
+          }
+        }
+
+        // 无论本地是否有数据，都从服务器拉一次最新历史：
+        // - 本地占位 assistant 内容可能为空（刷新后就没有思考气泡/禁用输入）
+        // - 后端会落库 <think> 占位与最终答案，需要以服务器为准
         const response = await getChatHistory();
         
         if (response.data.messages && response.data.messages.length > 0) {
-          setMessages(response.data.messages);
-          setConversationId(response.data.conversationId);
+          const serverMessages = response.data.messages;
+          const serverConversationId = response.data.conversationId;
+
+          // 只要服务端有数据，就用服务端覆盖（它包含 <think> 占位和最终答案）
+          setMessages(serverMessages);
+          ChatSession.saveMessages(serverMessages);
+          setConversationId(serverConversationId);
+
+          const thinkingMsg = [...serverMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
+          if (thinkingMsg?.id) {
+            setStreamingMessageId(thinkingMsg.id);
+          }
         }
         
         setError(null);
@@ -67,6 +108,39 @@ const Chat = () => {
     
     fetchChatHistory();
   }, []);
+
+  // 刷新/恢复后：如果检测到“进行中”的消息，但当前没有活跃的流式连接，则轮询历史直到完成
+  useEffect(() => {
+    if (!streamingMessageId) return;
+    if (!conversationId) return;
+    if (loading) return;
+
+    let stopped = false;
+    const interval = setInterval(async () => {
+      if (stopped) return;
+      try {
+        const res = await getChatHistory(conversationId);
+        const nextMessages = res.data.messages || [];
+        if (nextMessages.length > 0) {
+          setMessages(nextMessages);
+          ChatSession.saveMessages(nextMessages);
+
+          const thinkingMsg = [...nextMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
+          if (!thinkingMsg) {
+            setStreamingMessageId(null);
+            ChatSession.saveStreamingMessageId(null);
+          }
+        }
+      } catch (err) {
+        // 轮询失败不阻塞用户；保留 streaming 状态
+      }
+    }, 1000);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, [streamingMessageId, conversationId, loading]);
   
   // 自动滚动到最新消息
   useEffect(() => {
@@ -88,11 +162,15 @@ const Chat = () => {
     const question = inputValue;
     setInputValue('');
 
-    // 添加用户消息
-    setMessages(prev => ([
-      ...prev,
-      { role: 'user', content: question, timestamp: new Date().toISOString() }
-    ]));
+    // 添加用户消息（同步持久化，避免刷新丢失）
+    setMessages(prev => {
+      const next = [
+        ...prev,
+        { role: 'user', content: question, timestamp: new Date().toISOString() }
+      ];
+      ChatSession.saveMessages(next);
+      return next;
+    });
 
     setLoading(true);
 
@@ -104,18 +182,24 @@ const Chat = () => {
     }
     abortControllerRef.current = new AbortController();
 
-    setMessages(prev => ([
-      ...prev,
-      {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        source: 'mcp_model',
-        mode: DEFAULT_MODE
-      }
-    ]));
+    setMessages(prev => {
+      const next = [
+        ...prev,
+        {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          source: 'mcp_model',
+          mode: DEFAULT_MODE
+        }
+      ];
+      ChatSession.saveMessages(next);
+      return next;
+    });
     setStreamingMessageId(assistantMessageId);
+    // 立即同步保存到 sessionStorage，防止刷新丢失
+    ChatSession.saveStreamingMessageId(assistantMessageId);
 
     try {
       const token = localStorage.getItem('token');
@@ -140,6 +224,7 @@ const Chat = () => {
       let fullContent = '';
       let currentSource = 'mcp_model';
       let currentData = null;
+      let receivedDone = false;
 
       const processEvent = (eventBlock) => {
         const lines = eventBlock.split('\n');
@@ -149,6 +234,7 @@ const Chat = () => {
           } else if (line.startsWith('data:')) {
             const dataStr = line.replace('data:', '').trim();
             if (dataStr === '[DONE]') {
+              receivedDone = true;
               return;
             }
             try {
@@ -212,6 +298,13 @@ const Chat = () => {
         processEvent(buffer.trim());
       }
 
+      // 只有收到服务端 [DONE] 才认为“正常结束”。
+      // 刷新/导航会导致连接提前中断（reader done=true），但此时不应该清除 streamingMessageId，
+      // 否则刷新后无法恢复“进行中/已中止”的气泡与禁用输入状态。
+      if (receivedDone) {
+        setStreamingMessageId(null);
+        ChatSession.saveStreamingMessageId(null);
+      }
       setError(null);
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -221,17 +314,21 @@ const Chat = () => {
             ? { ...msg, canceled: true, content: msg.content + '\n\n[回答已中止]' }
             : msg
         ));
-        return;
+        // AbortError 时不清除 streamingMessageId，让页面刷新后能恢复
+        console.log('[handleSendQuestion] AbortError，保留 streamingMessageId 用于恢复');
+      } else {
+        console.error('发送问题失败:', err);
+        setError('发送问题失败，请稍后重试');
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: '抱歉，我暂时无法回答您的问题，请稍后再试。', isError: true }
+            : msg
+        ));
+        // 真正的错误才清除
+        setStreamingMessageId(null);
+        ChatSession.saveStreamingMessageId(null);
       }
-      console.error('发送问题失败:', err);
-      setError('发送问题失败，请稍后重试');
-      setMessages(prev => prev.map(msg =>
-        msg.id === assistantMessageId
-          ? { ...msg, content: '抱歉，我暂时无法回答您的问题，请稍后再试。', isError: true }
-          : msg
-      ));
     } finally {
-      setStreamingMessageId(null);
       setLoading(false);
       abortControllerRef.current = null;
     }
@@ -457,6 +554,15 @@ const Chat = () => {
         
         <Divider style={{ margin: '0' }} />
         
+        {streamingMessageId && (
+          <Alert
+            message="正在生成回答中，请稍候..."
+            type="info"
+            showIcon
+            style={{ margin: '8px 16px' }}
+          />
+        )}
+        
         <div className="chat-input">
           <TextArea
             placeholder="请输入您的问题，例如：西周时期有哪些著名的青铜器？"
@@ -464,7 +570,7 @@ const Chat = () => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={loading}
+            disabled={loading || !!streamingMessageId}
             className="chat-input-field"
           />
           <Button
@@ -472,6 +578,7 @@ const Chat = () => {
             icon={<SendOutlined />}
             onClick={handleSendQuestion}
             loading={loading}
+            disabled={!!streamingMessageId}
             style={{ marginLeft: 8 }}
           >
             发送

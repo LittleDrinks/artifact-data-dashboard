@@ -78,18 +78,90 @@ router.post('/ask', async (req, res) => {
     
     // 生成会话ID或使用现有ID
     const sessionId = conversationId || `chat_${req.user.id}_${Date.now()}`;
-    
-    // 中止控制器
+    const assistantMessageId = `assistant_${req.user.id}_${Date.now()}`;
+
+    // 注意：刷新/导航会导致 SSE 连接断开，但不应该中止后端生成。
+    // 否则会出现“后端继续跑但不落库，刷新后前端既看不到思考气泡也拿不到最终答案”。
     const abortController = new AbortController();
-    let isAborted = false;
+    let clientDisconnected = false;
 
     res.on('close', () => {
-      if (!isAborted) {
-        console.log(`[Chat] 客户端断开连接, sessionId: ${sessionId}`);
-        isAborted = true;
-        abortController.abort();
-      }
+      clientDisconnected = true;
+      console.log(`[Chat] 客户端断开连接(将继续生成并落库), sessionId: ${sessionId}`);
     });
+
+    const safeWrite = (chunk) => {
+      if (clientDisconnected) return;
+      try {
+        res.write(chunk);
+      } catch (err) {
+        clientDisconnected = true;
+        console.log(`[Chat] 写入 SSE 失败，视为客户端断开 (sessionId: ${sessionId})`);
+      }
+    };
+
+    const safeEnd = () => {
+      if (clientDisconnected) return;
+      try {
+        res.end();
+      } catch (err) {
+        clientDisconnected = true;
+      }
+    };
+
+    // 立即把“用户问题 + 机器人占位（思考中）”写入 Redis，确保刷新后能看到气泡并禁用输入
+    const conversationKey = `chat:${sessionId}`;
+    const messagesKey = `${conversationKey}:messages`;
+    const nowIso = new Date().toISOString();
+    const exists = await redisClient.exists(conversationKey);
+    if (!exists) {
+      await redisClient.hSet(conversationKey, {
+        userId: req.user.id.toString(),
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+    } else {
+      await redisClient.hSet(conversationKey, 'updatedAt', nowIso);
+    }
+
+    const userMessage = {
+      id: `user_${req.user.id}_${Date.now()}`,
+      role: 'user',
+      content: question,
+      timestamp: nowIso
+    };
+
+    // 用 <think> 作为“思考中”标记（前端 parseMessageContent 识别未闭合 <think>）
+    const botMessage = {
+      id: assistantMessageId,
+      role: 'bot',
+      content: '<think>',
+      timestamp: nowIso
+    };
+
+    await redisClient.rPush(messagesKey, JSON.stringify(userMessage));
+    await redisClient.rPush(messagesKey, JSON.stringify(botMessage));
+
+    // botMessage 在 list 中的索引（用于 LSET 更新内容）
+    const botIndex = (await redisClient.lLen(messagesKey)) - 1;
+    const updateBotMessage = async (content, extra = {}) => {
+      try {
+        const next = {
+          ...botMessage,
+          ...extra,
+          content,
+          timestamp: new Date().toISOString()
+        };
+        await redisClient.lSet(messagesKey, botIndex, JSON.stringify(next));
+        await redisClient.hSet(conversationKey, 'updatedAt', new Date().toISOString());
+      } catch (err) {
+        console.error('[Chat] 更新 bot 消息失败:', err);
+      }
+    };
+
+    // 设置过期时间(7天)
+    await redisClient.expire(conversationKey, 60 * 60 * 24 * 7);
+    await redisClient.expire(messagesKey, 60 * 60 * 24 * 7);
 
     // 获取会话历史（如果有）
     let history = [];
@@ -174,13 +246,14 @@ router.post('/ask', async (req, res) => {
     console.log('-------------------------');
 
     // 发送元数据
-    res.write(`event: metadata\n`);
+    safeWrite(`event: metadata\n`);
     const sourceLabel = aiMode === 'tool_calling'
       ? 'tool_calling'
       : (sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model');
 
-    res.write(`data: ${JSON.stringify({
+    safeWrite(`data: ${JSON.stringify({
       conversationId: sessionId,
+      assistantMessageId,
       source: sourceLabel,
       data: graphData,
       mode: aiMode
@@ -211,9 +284,11 @@ router.post('/ask', async (req, res) => {
 
     if (!provider || !provider.isEnabled(providerConfig)) {
       const disabledMessage = 'AI 服务未启用或当前 provider 不可用，请联系管理员启用后重试。';
-      res.write(`event: message\n`);
-      res.write(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
+      safeWrite(`event: message\n`);
+      safeWrite(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
       fullAnswer += disabledMessage;
+
+      await updateBotMessage(disabledMessage, { isError: true });
 
       if (shouldAudit(aiConfig)) {
         await writeAuditLog({
@@ -228,10 +303,9 @@ router.post('/ask', async (req, res) => {
         });
       }
 
-      await saveConversation(sessionId, question, fullAnswer, req.user.id);
-      res.write(`event: done\n`);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
+      safeWrite(`event: done\n`);
+      safeWrite(`data: [DONE]\n\n`);
+      safeEnd();
       return;
     }
 
@@ -263,13 +337,16 @@ router.post('/ask', async (req, res) => {
       mode: aiMode,
       signal: abortController.signal,
       onData: (content) => {
-        if (isAborted) return;
-        res.write(`event: message\n`);
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        // 即使客户端断开也要继续累积并落库
+        safeWrite(`event: message\n`);
+        safeWrite(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
+
+        // 让前端显示“内容 + 思考中”
+        updateBotMessage(`${fullAnswer}<think>`);
       },
       onToolResult: (result) => {
-        if (isAborted) return;
+        if (clientDisconnected) return;
         const payload = {
           mode: result?.mode || aiMode,
           tools_called: result?.toolsCalled || []
@@ -279,16 +356,16 @@ router.post('/ask', async (req, res) => {
           payload.error = result.errorMessage;
         }
 
-        res.write(`event: tools\n`);
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        safeWrite(`event: tools\n`);
+        safeWrite(`data: ${JSON.stringify(payload)}\n\n`);
 
         if (result?.errorMessage) {
-          res.write(`event: error\n`);
-          res.write(`data: ${JSON.stringify({ message: result.errorMessage })}\n\n`);
+          safeWrite(`event: error\n`);
+          safeWrite(`data: ${JSON.stringify({ message: result.errorMessage })}\n\n`);
         }
       },
       onEnd: async () => {
-        if (isAborted) return;
+        // 无论客户端是否断开，都要写入最终答案
         if (shouldAudit(aiConfig)) {
           await writeAuditLog({
             userId: req.user.id,
@@ -302,15 +379,15 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        await saveConversation(sessionId, question, fullAnswer, req.user.id);
-        res.write(`event: done\n`);
-        res.write(`data: [DONE]\n\n`);
-        res.end();
-        isAborted = true; // 流程正常结束
+        await updateBotMessage(fullAnswer);
+        safeWrite(`event: done\n`);
+        safeWrite(`data: [DONE]\n\n`);
+        safeEnd();
       },
       onError: async (error) => {
-        if (isAborted || error.name === 'AbortError' || error.message?.includes('aborted')) {
-          console.log(`[Chat] 请求已中止 (sessionId: ${sessionId})`);
+        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+          console.log(`[Chat] provider 中止 (sessionId: ${sessionId})`);
+          await updateBotMessage('回答已中止', { canceled: true });
           return;
         }
         
@@ -331,12 +408,13 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        res.write(`event: error\n`);
+        safeWrite(`event: error\n`);
         const errorMsg = error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND'
           ? '无法连接到AI模型服务，请检查后端配置'
           : '生成回答时出错';
-        res.write(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
-        res.end();
+        safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
+        await updateBotMessage(errorMsg, { isError: true });
+        safeEnd();
       }
     });
     
