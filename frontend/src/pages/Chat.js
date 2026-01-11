@@ -4,6 +4,7 @@ import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-
 import { useNavigate } from 'react-router-dom';
 import { getChatHistory, clearChatHistory } from '../services/chat.service';
 import { ChatSession } from '../utils/chat-session';
+import MessageRenderer from '../components/Chat/MessageRenderer';
 
 const { TextArea } = Input;
 const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
@@ -437,7 +438,15 @@ const Chat = () => {
                 
                 <div className={`message-content ${message.isError ? 'message-error' : ''}`}>
                   {answer && (
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{answer}</div>
+                    isUser ? (
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{answer}</div>
+                    ) : (
+                      <MessageRenderer
+                        content={answer}
+                        className="assistant-message-content"
+                        onError={(error) => console.error('Markdown render error:', error)}
+                      />
+                    )
                   )}
                   {message.canceled && (
                     <div className="message-canceled">

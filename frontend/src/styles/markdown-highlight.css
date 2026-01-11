@@ -1,0 +1,474 @@
+/**
+ * Markdown Highlight Styles
+ * Feature: 002-enhance-smart-qa / US1 - Markdown格式显示
+ * Purpose: Code syntax highlighting and markdown element styling
+ * Theme: GitHub-inspired with custom enhancements
+ */
+
+/* ===== Message Renderer Container ===== */
+.message-renderer {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #24292e;
+  word-wrap: break-word;
+}
+
+.message-renderer-fallback {
+  border-left: 3px solid #f0ad4e;
+  padding-left: 12px;
+}
+
+.message-renderer-error {
+  border-left: 3px solid #d9534f;
+  padding-left: 12px;
+}
+
+/* ===== Error Banners ===== */
+.error-banner,
+.render-error-banner {
+  background-color: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.error-icon {
+  font-size: 16px;
+}
+
+.error-text {
+  color: #856404;
+}
+
+/* ===== Headers ===== */
+.markdown-h1,
+.markdown-h2,
+.markdown-h3,
+.markdown-h4,
+.markdown-h5,
+.markdown-h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-h1 {
+  font-size: 2em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-h3 {
+  font-size: 1.25em;
+}
+
+.markdown-h4 {
+  font-size: 1em;
+}
+
+.markdown-h5 {
+  font-size: 0.875em;
+}
+
+.markdown-h6 {
+  font-size: 0.85em;
+  color: #6a737d;
+}
+
+/* ===== Paragraphs ===== */
+.markdown-paragraph {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+/* ===== Links ===== */
+.markdown-link {
+  color: #0366d6;
+  text-decoration: none;
+}
+
+.markdown-link:hover {
+  text-decoration: underline;
+}
+
+.markdown-link.external::after {
+  content: ' ↗';
+  font-size: 0.8em;
+  opacity: 0.6;
+}
+
+/* ===== Lists ===== */
+.markdown-list {
+  padding-left: 2em;
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-list-ordered {
+  list-style-type: decimal;
+}
+
+.markdown-list li {
+  margin-top: 0.25em;
+}
+
+.markdown-list li > p {
+  margin-bottom: 0.5em;
+}
+
+/* ===== Code (Inline) ===== */
+.markdown-inline-code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(27, 31, 35, 0.05);
+  border-radius: 3px;
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+}
+
+/* ===== Code Blocks ===== */
+.markdown-code-block {
+  display: block;
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #f6f8fa;
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+}
+
+pre {
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #f6f8fa;
+  border-radius: 6px;
+}
+
+pre code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  line-height: inherit;
+  background-color: transparent;
+  border: 0;
+}
+
+/* ===== Syntax Highlighting (highlight.js theme) ===== */
+/* Base */
+.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 0.5em;
+  background: #f6f8fa;
+  color: #24292e;
+}
+
+/* Comments */
+.hljs-comment,
+.hljs-quote {
+  color: #6a737d;
+  font-style: italic;
+}
+
+/* Keywords */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-subst {
+  color: #d73a49;
+  font-weight: bold;
+}
+
+/* Strings */
+.hljs-string,
+.hljs-doctag {
+  color: #032f62;
+}
+
+/* Numbers */
+.hljs-number,
+.hljs-literal,
+.hljs-regexp {
+  color: #005cc5;
+}
+
+/* Functions */
+.hljs-title,
+.hljs-section,
+.hljs-built_in,
+.hljs-function {
+  color: #6f42c1;
+  font-weight: bold;
+}
+
+/* Variables */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params {
+  color: #e36209;
+}
+
+/* Meta */
+.hljs-meta {
+  color: #005cc5;
+}
+
+/* Attributes */
+.hljs-attr,
+.hljs-attribute {
+  color: #005cc5;
+}
+
+/* Types */
+.hljs-type,
+.hljs-class {
+  color: #6f42c1;
+}
+
+/* Operators */
+.hljs-operator,
+.hljs-symbol {
+  color: #d73a49;
+}
+
+/* Emphasis */
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
+
+/* Deletion/Addition (Git diff) */
+.hljs-deletion {
+  background-color: #ffeef0;
+}
+
+.hljs-addition {
+  background-color: #e6ffed;
+}
+
+/* Language-specific */
+.hljs-selector-id,
+.hljs-selector-class {
+  color: #6f42c1;
+}
+
+.hljs-tag {
+  color: #22863a;
+}
+
+.hljs-name {
+  color: #005cc5;
+}
+
+/* ===== Blockquotes ===== */
+.markdown-blockquote {
+  padding: 0 1em;
+  color: #6a737d;
+  border-left: 0.25em solid #dfe2e5;
+  margin: 0 0 16px 0;
+}
+
+.markdown-blockquote > :first-child {
+  margin-top: 0;
+}
+
+.markdown-blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* ===== Tables ===== */
+.markdown-table-wrapper {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+.markdown-table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 6px 13px;
+  border: 1px solid #dfe2e5;
+}
+
+.markdown-table th {
+  font-weight: 600;
+  background-color: #f6f8fa;
+}
+
+.markdown-table tr {
+  background-color: #ffffff;
+  border-top: 1px solid #c6cbd1;
+}
+
+.markdown-table tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+
+/* ===== Horizontal Rules ===== */
+hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #e1e4e8;
+  border: 0;
+}
+
+/* ===== Math Rendering ===== */
+.math,
+.math-inline,
+.math-display {
+  font-family: 'Latin Modern Math', 'STIX Two Math', 'Times New Roman', serif;
+}
+
+.math-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 1em 0;
+  text-align: center;
+}
+
+/* ===== Plain Text Fallback ===== */
+.message-plain-text,
+.message-raw-content {
+  background-color: #f6f8fa;
+  border: 1px solid #d1d5da;
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ===== Dark Mode Support ===== */
+@media (prefers-color-scheme: dark) {
+  .message-renderer {
+    color: #c9d1d9;
+  }
+
+  .markdown-h6 {
+    color: #8b949e;
+  }
+
+  .markdown-link {
+    color: #58a6ff;
+  }
+
+  .markdown-inline-code {
+    background-color: rgba(110, 118, 129, 0.4);
+  }
+
+  .markdown-code-block,
+  pre,
+  .hljs {
+    background-color: #161b22;
+    color: #c9d1d9;
+  }
+
+  .hljs-comment,
+  .hljs-quote {
+    color: #8b949e;
+  }
+
+  .hljs-keyword {
+    color: #ff7b72;
+  }
+
+  .hljs-string {
+    color: #a5d6ff;
+  }
+
+  .hljs-number {
+    color: #79c0ff;
+  }
+
+  .hljs-title,
+  .hljs-function {
+    color: #d2a8ff;
+  }
+
+  .markdown-blockquote {
+    color: #8b949e;
+    border-left-color: #3b434b;
+  }
+
+  .markdown-table th,
+  .markdown-table td {
+    border-color: #3b434b;
+  }
+
+  .markdown-table th {
+    background-color: #161b22;
+  }
+
+  .markdown-table tr {
+    background-color: #0d1117;
+    border-top-color: #21262d;
+  }
+
+  .markdown-table tr:nth-child(2n) {
+    background-color: #161b22;
+  }
+
+  .message-plain-text,
+  .message-raw-content {
+    background-color: #161b22;
+    border-color: #3b434b;
+    color: #c9d1d9;
+  }
+
+  hr {
+    background-color: #21262d;
+  }
+}
+
+/* ===== Responsive Adjustments ===== */
+@media (max-width: 768px) {
+  .message-renderer {
+    font-size: 13px;
+  }
+
+  .markdown-h1 {
+    font-size: 1.75em;
+  }
+
+  .markdown-h2 {
+    font-size: 1.4em;
+  }
+
+  .markdown-table {
+    font-size: 12px;
+  }
+
+  .markdown-table th,
+  .markdown-table td {
+    padding: 4px 8px;
+  }
+}
