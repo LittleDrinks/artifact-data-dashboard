@@ -12,8 +12,10 @@ jest.mock('../src/config/database', () => ({
   neo4jDriver: { session: () => ({ run: jest.fn().mockResolvedValue({ records: [] }), close: jest.fn() }) },
   redisClient: {
     exists: jest.fn().mockResolvedValue(false),
+    lLen: jest.fn().mockResolvedValue(2),
     lRange: jest.fn().mockResolvedValue([]),
     rPush: jest.fn().mockResolvedValue(1),
+    lSet: jest.fn().mockResolvedValue('OK'),
     expire: jest.fn().mockResolvedValue(true),
     hSet: jest.fn().mockResolvedValue(true),
     hGet: jest.fn().mockResolvedValue(null),

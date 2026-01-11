@@ -135,7 +135,13 @@ router.post('/ask', async (req, res) => {
     const botMessage = {
       id: assistantMessageId,
       role: 'bot',
-      content: '<think>',
+      content: '',
+      pending: true,
+      source: 'mcp_model',
+      mode: aiMode,
+      data: null,
+      toolsCalled: [],
+      toolsError: null,
       timestamp: nowIso
     };
 
@@ -251,6 +257,13 @@ router.post('/ask', async (req, res) => {
       ? 'tool_calling'
       : (sources.length > 0 ? sources.join('_enhanced_') : 'mcp_model');
 
+    // 将 metadata 同步到落库的 bot message，保证刷新后气泡信息一致
+    await updateBotMessage(botMessage.content, {
+      source: sourceLabel,
+      data: graphData,
+      mode: aiMode
+    });
+
     safeWrite(`data: ${JSON.stringify({
       conversationId: sessionId,
       assistantMessageId,
@@ -288,7 +301,7 @@ router.post('/ask', async (req, res) => {
       safeWrite(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
       fullAnswer += disabledMessage;
 
-      await updateBotMessage(disabledMessage, { isError: true });
+      await updateBotMessage(disabledMessage, { isError: true, pending: false });
 
       if (shouldAudit(aiConfig)) {
         await writeAuditLog({
@@ -342,11 +355,10 @@ router.post('/ask', async (req, res) => {
         safeWrite(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
 
-        // 让前端显示“内容 + 思考中”
-        updateBotMessage(`${fullAnswer}<think>`);
+        // 刷新后使用 pending 字段恢复“进行中”状态（不改变内容形态，保持气泡一致）
+        updateBotMessage(fullAnswer, { pending: true });
       },
       onToolResult: (result) => {
-        if (clientDisconnected) return;
         const payload = {
           mode: result?.mode || aiMode,
           tools_called: result?.toolsCalled || []
@@ -359,9 +371,22 @@ router.post('/ask', async (req, res) => {
         safeWrite(`event: tools\n`);
         safeWrite(`data: ${JSON.stringify(payload)}\n\n`);
 
+        // 工具调用结果也要落库，刷新后保持一致
+        updateBotMessage(fullAnswer, {
+          pending: true,
+          mode: payload.mode,
+          toolsCalled: payload.tools_called,
+          toolsError: payload.error || null
+        });
+
         if (result?.errorMessage) {
           safeWrite(`event: error\n`);
           safeWrite(`data: ${JSON.stringify({ message: result.errorMessage })}\n\n`);
+
+          updateBotMessage(fullAnswer || result.errorMessage, {
+            pending: true,
+            toolsError: result.errorMessage
+          });
         }
       },
       onEnd: async () => {
@@ -379,7 +404,7 @@ router.post('/ask', async (req, res) => {
           });
         }
 
-        await updateBotMessage(fullAnswer);
+        await updateBotMessage(fullAnswer, { pending: false });
         safeWrite(`event: done\n`);
         safeWrite(`data: [DONE]\n\n`);
         safeEnd();
@@ -387,7 +412,7 @@ router.post('/ask', async (req, res) => {
       onError: async (error) => {
         if (error.name === 'AbortError' || error.message?.includes('aborted')) {
           console.log(`[Chat] provider 中止 (sessionId: ${sessionId})`);
-          await updateBotMessage('回答已中止', { canceled: true });
+          await updateBotMessage(fullAnswer || '回答已中止', { canceled: true, pending: false });
           return;
         }
         
@@ -413,7 +438,7 @@ router.post('/ask', async (req, res) => {
           ? '无法连接到AI模型服务，请检查后端配置'
           : '生成回答时出错';
         safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
-        await updateBotMessage(errorMsg, { isError: true });
+        await updateBotMessage(errorMsg, { isError: true, pending: false });
         safeEnd();
       }
     });

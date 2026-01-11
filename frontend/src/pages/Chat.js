@@ -8,12 +8,9 @@ import { ChatSession } from '../utils/chat-session';
 const { TextArea } = Input;
 const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
 
-const isThinkingContent = (content) => {
-  if (!content) return false;
-  const start = content.indexOf('<think>');
-  if (start === -1) return false;
-  const end = content.indexOf('</think>');
-  return end === -1;
+const findPendingAssistantMessage = (messages) => {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  return [...messages].reverse().find(m => m?.role !== 'user' && m?.pending === true && !m?.isError) || null;
 };
 
 const Chat = () => {
@@ -70,31 +67,25 @@ const Chat = () => {
           // 先渲染本地数据，避免白屏
           setMessages(savedMessages);
 
-          // 从本地消息内容推断是否存在“进行中”的助手消息
-          const thinkingMsg = [...savedMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
-          if (thinkingMsg?.id) {
-            setStreamingMessageId(thinkingMsg.id);
-          }
+          const pendingMsg = findPendingAssistantMessage(savedMessages);
+          if (pendingMsg?.id) setStreamingMessageId(pendingMsg.id);
         }
 
         // 无论本地是否有数据，都从服务器拉一次最新历史：
-        // - 本地占位 assistant 内容可能为空（刷新后就没有思考气泡/禁用输入）
-        // - 后端会落库 <think> 占位与最终答案，需要以服务器为准
+        // - 本地占位 assistant 内容可能为空；需要以服务器落库为准（包含 pending 状态与最终答案）
         const response = await getChatHistory();
         
         if (response.data.messages && response.data.messages.length > 0) {
           const serverMessages = response.data.messages;
           const serverConversationId = response.data.conversationId;
 
-          // 只要服务端有数据，就用服务端覆盖（它包含 <think> 占位和最终答案）
+          // 只要服务端有数据，就用服务端覆盖（它包含 pending 占位和最终答案）
           setMessages(serverMessages);
           ChatSession.saveMessages(serverMessages);
           setConversationId(serverConversationId);
 
-          const thinkingMsg = [...serverMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
-          if (thinkingMsg?.id) {
-            setStreamingMessageId(thinkingMsg.id);
-          }
+          const pendingMsg = findPendingAssistantMessage(serverMessages);
+          if (pendingMsg?.id) setStreamingMessageId(pendingMsg.id);
         }
         
         setError(null);
@@ -125,8 +116,8 @@ const Chat = () => {
           setMessages(nextMessages);
           ChatSession.saveMessages(nextMessages);
 
-          const thinkingMsg = [...nextMessages].reverse().find(m => m.role !== 'user' && isThinkingContent(m.content));
-          if (!thinkingMsg) {
+          const pendingMsg = findPendingAssistantMessage(nextMessages);
+          if (!pendingMsg) {
             setStreamingMessageId(null);
             ChatSession.saveStreamingMessageId(null);
           }
@@ -174,7 +165,9 @@ const Chat = () => {
 
     setLoading(true);
 
-    const assistantMessageId = `assistant_${Date.now()}`;
+    // 本地先创建占位消息，等后端 metadata 返回 assistantMessageId 后再对齐，保证刷新后还是同一个气泡
+    const tempAssistantMessageId = `assistant_tmp_${Date.now()}`;
+    let activeAssistantMessageId = tempAssistantMessageId;
     
     // 如果已有进行中的请求，先中止
     if (abortControllerRef.current) {
@@ -186,9 +179,10 @@ const Chat = () => {
       const next = [
         ...prev,
         {
-          id: assistantMessageId,
+          id: tempAssistantMessageId,
           role: 'assistant',
           content: '',
+          pending: true,
           timestamp: new Date().toISOString(),
           source: 'mcp_model',
           mode: DEFAULT_MODE
@@ -197,9 +191,9 @@ const Chat = () => {
       ChatSession.saveMessages(next);
       return next;
     });
-    setStreamingMessageId(assistantMessageId);
+    setStreamingMessageId(tempAssistantMessageId);
     // 立即同步保存到 sessionStorage，防止刷新丢失
-    ChatSession.saveStreamingMessageId(assistantMessageId);
+    ChatSession.saveStreamingMessageId(tempAssistantMessageId);
 
     try {
       const token = localStorage.getItem('token');
@@ -243,33 +237,44 @@ const Chat = () => {
                 if (data.conversationId) {
                   setConversationId(data.conversationId);
                 }
+                if (data.assistantMessageId && data.assistantMessageId !== activeAssistantMessageId) {
+                  const nextId = String(data.assistantMessageId);
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === activeAssistantMessageId
+                      ? { ...msg, id: nextId }
+                      : msg
+                  ));
+                  activeAssistantMessageId = nextId;
+                  setStreamingMessageId(nextId);
+                  ChatSession.saveStreamingMessageId(nextId);
+                }
                 if (data.source) currentSource = data.source;
                 if (data.data) currentData = data.data;
                 const nextMode = data.mode || DEFAULT_MODE;
                 setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, source: currentSource, data: currentData, mode: nextMode }
+                  msg.id === activeAssistantMessageId
+                    ? { ...msg, source: currentSource, data: currentData, mode: nextMode, pending: true }
                     : msg
                 ));
               } else if (currentEvent === 'message') {
                 if (data.content) {
                   fullContent += data.content;
                   setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: fullContent }
+                    msg.id === activeAssistantMessageId
+                      ? { ...msg, content: fullContent, pending: true }
                       : msg
                   ));
                 }
               } else if (currentEvent === 'tools') {
                 setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, toolsCalled: data.tools_called || [], mode: data.mode || msg.mode, toolsError: data.error }
+                  msg.id === activeAssistantMessageId
+                    ? { ...msg, toolsCalled: data.tools_called || [], mode: data.mode || msg.mode, toolsError: data.error, pending: true }
                     : msg
                 ));
               } else if (currentEvent === 'error') {
                 setMessages(prev => prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: data.message || '生成回答时出错', isError: true }
+                  msg.id === activeAssistantMessageId
+                    ? { ...msg, content: data.message || '生成回答时出错', isError: true, pending: false }
                     : msg
                 ));
               }
@@ -302,6 +307,11 @@ const Chat = () => {
       // 刷新/导航会导致连接提前中断（reader done=true），但此时不应该清除 streamingMessageId，
       // 否则刷新后无法恢复“进行中/已中止”的气泡与禁用输入状态。
       if (receivedDone) {
+        setMessages(prev => prev.map(msg =>
+          msg.id === activeAssistantMessageId
+            ? { ...msg, pending: false }
+            : msg
+        ));
         setStreamingMessageId(null);
         ChatSession.saveStreamingMessageId(null);
       }
@@ -310,8 +320,8 @@ const Chat = () => {
       if (err.name === 'AbortError') {
         console.log('请求被中止');
         setMessages(prev => prev.map(msg =>
-          msg.id === assistantMessageId
-            ? { ...msg, canceled: true, content: msg.content + '\n\n[回答已中止]' }
+          msg.id === activeAssistantMessageId
+            ? { ...msg, canceled: true, content: msg.content + '\n\n[回答已中止]', pending: true }
             : msg
         ));
         // AbortError 时不清除 streamingMessageId，让页面刷新后能恢复
@@ -320,8 +330,8 @@ const Chat = () => {
         console.error('发送问题失败:', err);
         setError('发送问题失败，请稍后重试');
         setMessages(prev => prev.map(msg =>
-          msg.id === assistantMessageId
-            ? { ...msg, content: '抱歉，我暂时无法回答您的问题，请稍后再试。', isError: true }
+          msg.id === activeAssistantMessageId
+            ? { ...msg, content: '抱歉，我暂时无法回答您的问题，请稍后再试。', isError: true, pending: false }
             : msg
         ));
         // 真正的错误才清除
@@ -392,27 +402,7 @@ const Chat = () => {
     }
   };
 
-  // 解析消息内容，分离思考过程（支持流式未闭合的思考段）
-  const parseMessageContent = (content) => {
-      if (!content) return { answer: '', isThinking: false };
-    const start = content.indexOf('<think>');
-    if (start === -1) {
-        return { answer: content.trim(), isThinking: false };
-    }
-    const end = content.indexOf('</think>');
-    if (end !== -1) {
-        const before = content.slice(0, start);
-        const after = content.slice(end + 8);
-        return {
-          answer: `${before}${after}`.trim(),
-          isThinking: false
-        };
-    }
-    return {
-        answer: content.slice(0, start).trim(),
-        isThinking: true
-    };
-  };
+  const getMessageAnswer = (content) => (content ? String(content) : '').trim();
   
   // 聊天消息列表
   const renderMessages = () => {
@@ -429,8 +419,9 @@ const Chat = () => {
       <div className="message-list">
         {messages.map((message, index) => {
           const isUser = message.role === 'user';
-          const { answer, isThinking } = parseMessageContent(message.content);
-          const isStreaming = !isUser && streamingMessageId === message.id && !message.isError;
+          const answer = getMessageAnswer(message.content);
+          const isPending = !isUser && message.pending === true && !message.isError;
+          const isStreaming = !isUser && (streamingMessageId === message.id || isPending) && !message.isError;
           
           return (
             <div key={message.id || index} className={`message-wrapper ${isUser ? 'message-wrapper-user' : 'message-wrapper-assistant'}`}>
@@ -445,11 +436,6 @@ const Chat = () => {
                 </div>
                 
                 <div className={`message-content ${message.isError ? 'message-error' : ''}`}>
-                  {!isUser && isThinking && (
-                    <div className="think-spinner">
-                      <Spin size="small" />
-                    </div>
-                  )}
                   {answer && (
                     <div style={{ whiteSpace: 'pre-wrap' }}>{answer}</div>
                   )}
