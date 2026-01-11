@@ -22,14 +22,16 @@ class MCPService {
     this.apiEndpoint = process.env.AI_API_ENDPOINT;
     this.apiKey = process.env.AI_API_KEY;
     this.model = process.env.AI_MODEL || 'deepseek-r1'; // 默认使用 deepseek-r1
-    this.headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.apiKey}`
-    };
+    this._useOllamaNativeChat = false;
+    this.headers = { 'Content-Type': 'application/json' };
 
     this.toolManager = deps.toolManager || toolManager;
     this.chatFlow = deps.chatFlow || new ChatFlow();
     this.getAiModeFn = deps.getAiMode || getAiMode;
+
+    this.internalTimeoutMs = process.env.AI_INTERNAL_TIMEOUT_MS
+      ? Number(process.env.AI_INTERNAL_TIMEOUT_MS)
+      : 120000;
 
     const isProd = process.env.NODE_ENV === 'production';
 
@@ -45,10 +47,45 @@ class MCPService {
     }
   }
 
+  _isSimpleGreeting(question) {
+    const q = String(question || '').trim();
+    if (!q) return false;
+    // 非严格：覆盖常见寒暄/致谢/告别，避免触发工具选择阶段的大模型调用
+    const patterns = [
+      /^hi$/i,
+      /^hello$/i,
+      /^你好[呀啊吗嘛]?$|^您好$|^在吗$|^嗨$|^哈喽$/,
+      /^早上好$|^中午好$|^下午好$|^晚上好$|^晚安$/,
+      /^谢谢(你)?$|^感谢(你)?$|^多谢$|^辛苦了$/,
+      /^再见$|^拜拜$|^下次见$/
+    ];
+
+    // 很短的输入更可能是寒暄
+    if (q.length <= 10) {
+      return patterns.some((re) => re.test(q));
+    }
+    return false;
+  }
+
+  _isOllamaEndpoint(url) {
+    if (!url) return false;
+    const u = String(url);
+    // docker 内网服务名 / 常见端口
+    return u.includes('ollama:11434') || u.includes(':11434');
+  }
+
+  _buildHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+    return headers;
+  }
+
   async _executePreRetrieve({ question, history = [], context = '', aiMode = 'pre_retrieve' }) {
     try {
       // 检查API配置
-      if (!this.apiEndpoint || !this.apiKey) {
+      if (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint))) {
         console.warn('[MCP] 未配置 API，使用模拟模式');
         return { ...this.simulateResponse(question, history), mode: aiMode };
       }
@@ -71,7 +108,7 @@ class MCPService {
       };
 
       const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
+        headers: this._buildHeaders(),
         timeout: 30000 // 30秒超时
       });
 
@@ -87,20 +124,79 @@ class MCPService {
     }
   }
 
-  async _executeToolCalling({ question, history = [], context = '' }) {
-    return this.handleToolCalling({ question, history, context });
+  _isLikelyOllamaOpenAIEndpoint(url) {
+    if (!url) return false;
+    const u = String(url);
+    return u.includes('11434') && u.includes('/v1/chat/completions');
+  }
+
+  _toOllamaNativeChatEndpoint(url) {
+    if (!url) return url;
+    const u = String(url);
+    if (u.includes('/v1/chat/completions')) {
+      return u.replace(/\/v1\/chat\/completions.*$/i, '/api/chat');
+    }
+    // 兜底：如果用户直接给了 host:11434，则拼出 /api/chat
+    if (u.includes('11434') && !u.endsWith('/api/chat')) {
+      return u.replace(/\/+$/g, '') + '/api/chat';
+    }
+    return u;
+  }
+
+  async _callOllamaNativeChat({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
+    const endpoint = this._toOllamaNativeChatEndpoint(this.apiEndpoint);
+    const requestBody = {
+      model: this.model,
+      messages,
+      stream: false,
+      options: {
+        temperature,
+        num_predict: max_tokens
+      }
+    };
+
+    const response = await axios.post(endpoint, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 45000,
+      signal
+    });
+
+    // Ollama 原生接口有时会把回答放在非标准字段（如 reasoning），做容错回退
+    let rawContent = response.data?.message?.content;
+    if (!rawContent || rawContent === '') {
+      rawContent = response.data?.message?.reasoning || response.data?.message?.text || '';
+    }
+    const responseContent = this.sanitizeModelText(rawContent || '');
+
+    // 如果仍为空，在选择工具阶段需要返回可解析 JSON，避免上游 safeJsonParse 失败
+    const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+    if (!responseContent && isSelectionPhase) {
+      return { content: JSON.stringify({ action: 'chat', response: '抱歉，模型未返回可用内容，请稍后重试。' }) };
+    }
+
+    if (!responseContent) {
+      console.warn('[MCP调用] Ollama 原生响应内容为空，完整数据：', JSON.stringify(response.data));
+    }
+
+    return { content: responseContent };
+  }
+
+  async _executeToolCalling({ question, history = [], context = '', signal }) {
+    return this.handleToolCalling({ question, history, context, signal });
   }
 
   _buildSelectionPrompt(question, tools, history = []) {
-    const toolsDesc = tools.map((t) => ({
-      name: t.name,
-      description: t.schema?.description || '',
-      parameters: t.schema?.properties || {}
-    }));
+    // 紧凑描述：避免把完整 schema/参数塞进 prompt，减小 token 与推理耗时
+    const toolsDesc = tools.map((t) => {
+      const name = t.name;
+      const description = t.schema?.description || '';
+      const params = t.schema?.properties ? Object.keys(t.schema.properties) : [];
+      return `- ${name}${description ? `：${description}` : ''}${params.length ? `（参数：${params.join(', ')}）` : ''}`;
+    }).join('\n');
 
     return `
 You are an intelligent assistant with access to the following tools:
-${JSON.stringify(toolsDesc, null, 2)}
+${toolsDesc}
 
 User Question: "${question}"
 
@@ -130,16 +226,16 @@ Ensure your response is valid JSON. Do not return any other text.
 `;
   }
 
-  async _selectTool({ question, tools, history }) {
+  async _selectTool({ question, tools, history, signal }) {
     const selectionPrompt = this._buildSelectionPrompt(question, tools, history);
 
     const selectionResponse = await this._callInternalModel({
       messages: [
         { role: 'system', content: 'You are a strict JSON-outputting assistant.' },
-        ...history.slice(-2),
         { role: 'user', content: selectionPrompt }
       ],
-      temperature: 0.1
+      temperature: 0.1,
+      signal
     });
 
     const parsed = safeJsonParse(selectionResponse.content, { fallback: null });
@@ -150,7 +246,8 @@ Ensure your response is valid JSON. Do not return any other text.
     return parsed.value;
   }
 
-  async _executeTool({ targetTool, params, question }) {
+  async _executeTool({ targetTool, params, question, signal }) {
+    if (signal?.aborted) throw new Error('AbortError');
     await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
 
     const executed = await this.toolManager.executeTool(targetTool.name, params || {});
@@ -171,7 +268,7 @@ Ensure your response is valid JSON. Do not return any other text.
     return { toolsCalled, toolResult: executed.status === 'success' ? executed.result : `Error: ${executed.error}` };
   }
 
-  async _synthesizeResponse({ question, history, context, targetTool, toolResult }) {
+  async _synthesizeResponse({ question, history, context, targetTool, toolResult, signal }) {
     const synthesisPrompt = `
 User Question: "${question}"
 Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
@@ -185,7 +282,8 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         { role: 'system', content: this.buildSystemPrompt(context) },
         ...history,
         { role: 'user', content: synthesisPrompt }
-      ]
+      ],
+      signal
     });
 
     return finalResponse.content;
@@ -257,11 +355,11 @@ If the tool output is empty or indicates not found, verify if you can answer wit
    * @param {Function} onEnd 结束回调
    * @param {Function} onError 错误回调
    */
-  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult }) {
+  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult, signal }) {
     const aiMode = (mode || this.getAiModeFn({})).trim();
     if (aiMode === 'tool_calling') {
       try {
-        const result = await this._executeToolCalling({ question, history, context });
+        const result = await this._executeToolCalling({ question, history, context, signal });
         if (onToolResult) {
           onToolResult(result);
         }
@@ -292,7 +390,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         return;
       }
 
-      if (!this.apiKey) {
+      if (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)) {
         console.warn('[MCP] 未配置 API Key，将使用模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
@@ -331,9 +429,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       // 发送请求到MCP API
       const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
+        headers: this._buildHeaders(),
         responseType: 'stream',
-        timeout: 60000 // 60秒超时
+        timeout: 60000, // 60秒超时
+        signal: signal // 支持中止
       });
 
       let buffer = '';
@@ -483,7 +582,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     return 'unknown';
   }
 
-  async handleToolCalling({ question, history = [], context = '' }) {
+  async handleToolCalling({ question, history = [], context = '', signal }) {
     const tools = this.toolManager.listTools();
     if (!tools || tools.length === 0) {
       console.log('[智能问答] 检索工具不可用');
@@ -498,6 +597,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
     // 测试/模拟路径：避免在测试中调用真实大模型或外部端点
     if (this.shouldMockToolCalling && this.shouldMockToolCalling()) {
+      if (signal?.aborted) throw new Error('AbortError');
       const targetTool = tools[0];
       await this.chatFlow.beforeToolCall({ question, tools: [targetTool] });
       const executed = await this.toolManager.executeTool(targetTool.name, { question });
@@ -519,7 +619,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       // 1. Tool Selection Phase
       console.log('[智能问答] 阶段1: 意图分析与工具选择...');
-      const decision = await this._selectTool({ question, tools, history });
+      const decision = await this._selectTool({ question, tools, history, signal });
+
+      // 检查中止
+      if (signal?.aborted) throw new Error('AbortError');
 
       // 2. Execution Phase
       if (decision.action === 'chat') {
@@ -546,11 +649,14 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         }
 
         console.log('[智能问答] 阶段2: 工具执行');
-        const { toolsCalled, toolResult } = await this._executeTool({ targetTool, params: decision.params, question });
+        const { toolsCalled, toolResult } = await this._executeTool({ targetTool, params: decision.params, question, signal });
+
+        // 检查中止
+        if (signal?.aborted) throw new Error('AbortError');
 
         // 3. Synthesis Phase
         console.log('[智能问答] 阶段3: 最终回答合成...');
-        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult });
+        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult, signal });
 
         console.log('[智能问答] 流程结束');
 
@@ -572,8 +678,11 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
     } catch (error) {
       console.error('[智能问答] 处理错误:', error);
+      const isTimeout = error?.code === 'ECONNABORTED' || String(error?.message || '').includes('timeout');
       return {
-        content: '抱歉，处理您的请求时遇到错误。',
+        content: isTimeout
+          ? '抱歉，模型响应超时。当前本机推理速度较慢或提示词过长，建议稍后重试，或降低模型/并发。'
+          : '抱歉，处理您的请求时遇到错误。',
         intent: 'error',
         toolsCalled: [],
         mode: 'tool_calling',
@@ -585,8 +694,8 @@ If the tool output is empty or indicates not found, verify if you can answer wit
   /**
    * Internal helper to call model non-streamingly, separate from main ask flow
    */
-  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000 }) {
-    if (!this.apiEndpoint || !this.apiKey) {
+  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
+    if (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint))) {
       throw new Error('API not configured');
     }
     
@@ -602,25 +711,97 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       const lastMsg = messages[messages.length - 1];
       console.log(`[MCP调用] 发送请求 (tokens_limit=${max_tokens}) | 最后一条消息: ${lastMsg?.content?.slice(0, 100).replace(/\n/g, ' ')}...`);
 
-      const response = await axios.post(this.apiEndpoint, requestBody, {
-        headers: this.headers,
-        timeout: 45000
-      });
+      const shouldTryOllamaNativeFirst = this._useOllamaNativeChat && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
+      const response = shouldTryOllamaNativeFirst
+        ? await this._callOllamaNativeChat({ messages, temperature, max_tokens, signal })
+        : await axios.post(this.apiEndpoint, requestBody, {
+          headers: this._buildHeaders(),
+          timeout: this.internalTimeoutMs,
+          signal
+        });
+
+      // 当走 Ollama 原生 /api/chat 时，_callOllamaNativeChat 已返回 {content}
+      if (shouldTryOllamaNativeFirst) {
+        return response;
+      }
       
-      const rawContent = response.data?.choices?.[0]?.message?.content || '';
-      const responseContent = this.sanitizeModelText(rawContent);
+
+      // 容错：有些模型/端点可能把实际文本放在 reasoning/text 等字段中
+      let rawContent = response.data?.choices?.[0]?.message?.content;
+      if (!rawContent || rawContent === '') {
+        rawContent = response.data?.choices?.[0]?.message?.reasoning
+          || response.data?.choices?.[0]?.message?.text
+          || response.data?.choices?.[0]?.text
+          || '';
+      }
+
+      let responseContent = this.sanitizeModelText(rawContent || '');
+
+      // 如果仍为空，在选择工具阶段需要返回可解析 JSON，避免 safeJsonParse 报错
+      const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+      if (!responseContent && isSelectionPhase) {
+        const fallback = JSON.stringify({ action: 'chat', response: '抱歉，模型未返回可用内容，请稍后重试。' });
+        console.warn('[MCP调用] 选择阶段模型未返回内容，使用 JSON 回退:', fallback);
+        return { content: fallback };
+      }
 
       if (!responseContent) {
         console.warn(`[MCP调用] 响应内容为空! HTTP Status: ${response.status}`);
-        console.warn(`[MCP调用] 完整响应数据: ${JSON.stringify(response.data)}`);
+        console.warn('[MCP调用] 完整响应数据:', JSON.stringify(response.data));
       } else {
         console.log(`[MCP调用] 收到响应 | 长度: ${responseContent.length} | 内容摘要: ${responseContent.slice(0, 100).replace(/\n/g, ' ')}...`);
       }
 
-      return {
-        content: responseContent
-      };
+      return { content: responseContent };
     } catch (e) {
+      const status = e?.response?.status;
+      const errData = e?.response?.data;
+      const errText = typeof errData === 'string' ? errData : (errData ? JSON.stringify(errData) : '');
+
+      const canFallbackToOllamaNative = status === 404 && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
+      if (canFallbackToOllamaNative) {
+        if (!this._useOllamaNativeChat) {
+          console.warn('[MCP调用] OpenAI兼容端点返回404，尝试降级为 Ollama 原生 /api/chat');
+          this._useOllamaNativeChat = true;
+        }
+        try {
+          return await this._callOllamaNativeChat({ messages, temperature, max_tokens, signal });
+        } catch (fallbackError) {
+          const fbStatus = fallbackError?.response?.status;
+          const fbData = fallbackError?.response?.data;
+          const fbText = typeof fbData === 'string' ? fbData : (fbData ? JSON.stringify(fbData) : '');
+          const fbIsModelNotFound = fbStatus === 404 && /model\s+['"][^'"]+['"]\s+not\s+found/i.test(fbText);
+
+          if (fbIsModelNotFound) {
+            const modelName = this.model;
+            const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+            const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+            if (isSelectionPhase) {
+              return { content: JSON.stringify({ action: 'chat', response: friendly }) };
+            }
+            return { content: friendly };
+          }
+
+          console.error('[MCP调用] Ollama 原生 /api/chat 调用也失败:', fallbackError.message);
+          throw fallbackError;
+        }
+      }
+
+      // Ollama 原生接口常用 404 表示“模型未下载/不存在”
+      const isOllamaModelNotFound = status === 404 && /model\s+['"][^'"]+['"]\s+not\s+found/i.test(errText);
+      if (isOllamaModelNotFound) {
+        const modelName = this.model;
+        const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+
+        // 选择工具阶段需要严格 JSON，直接返回可解析 JSON 让流程走 chat 分支。
+        const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
+        if (isSelectionPhase) {
+          return { content: JSON.stringify({ action: 'chat', response: friendly }) };
+        }
+
+        return { content: friendly };
+      }
+
       console.error('[MCP调用] 调用失败:', e.message);
       throw e;
     }

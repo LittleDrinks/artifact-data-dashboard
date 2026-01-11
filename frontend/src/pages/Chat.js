@@ -3,6 +3,7 @@ import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert } from 'antd';
 import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getChatHistory, clearChatHistory } from '../services/chat.service';
+import { ChatSession } from '../utils/chat-session';
 
 const { TextArea } = Input;
 const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
@@ -11,13 +12,39 @@ const Chat = () => {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [inputValue, setInputValue] = useState('');
+  const [messages, setMessages] = useState(() => ChatSession.loadMessages());
+  const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
   const [streamingMessageId, setStreamingMessageId] = useState(null);
   const chatMessagesRef = useRef(null);
+  const abortControllerRef = useRef(null);
   const navigate = useNavigate();
   
+  // 持久化消息到 ChatSession
+  useEffect(() => {
+    if (messages.length > 0) {
+      ChatSession.saveMessages(messages);
+    }
+  }, [messages]);
+
+  // 持久化输入草稿到 ChatSession
+  useEffect(() => {
+    if (inputValue) {
+      ChatSession.saveInputDraft(inputValue);
+    } else {
+      ChatSession.clearDraft();
+    }
+  }, [inputValue]);
+
+  // 组件卸载时中止请求
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   // 加载聊天历史
   useEffect(() => {
     const fetchChatHistory = async () => {
@@ -70,6 +97,13 @@ const Chat = () => {
     setLoading(true);
 
     const assistantMessageId = `assistant_${Date.now()}`;
+    
+    // 如果已有进行中的请求，先中止
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setMessages(prev => ([
       ...prev,
       {
@@ -91,7 +125,8 @@ const Chat = () => {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ question, conversationId, mode: DEFAULT_MODE })
+        body: JSON.stringify({ question, conversationId, mode: DEFAULT_MODE }),
+        signal: abortControllerRef.current.signal
       });
 
       if (!response.ok || !response.body) {
@@ -179,6 +214,15 @@ const Chat = () => {
 
       setError(null);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        console.log('请求被中止');
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, canceled: true, content: msg.content + '\n\n[回答已中止]' }
+            : msg
+        ));
+        return;
+      }
       console.error('发送问题失败:', err);
       setError('发送问题失败，请稍后重试');
       setMessages(prev => prev.map(msg =>
@@ -189,6 +233,7 @@ const Chat = () => {
     } finally {
       setStreamingMessageId(null);
       setLoading(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -198,6 +243,7 @@ const Chat = () => {
       await clearChatHistory();
       setMessages([]);
       setConversationId(null);
+      ChatSession.clear();
       setError(null);
     } catch (err) {
       console.error('清空聊天记录失败:', err);
@@ -309,6 +355,13 @@ const Chat = () => {
                   )}
                   {answer && (
                     <div style={{ whiteSpace: 'pre-wrap' }}>{answer}</div>
+                  )}
+                  {message.canceled && (
+                    <div className="message-canceled">
+                      <Divider plain style={{ margin: '8px 0', borderColor: '#d9d9d9', borderStyle: 'dashed' }}>
+                        <span style={{ fontSize: '12px', color: '#8c8c8c' }}>回答已中止</span>
+                      </Divider>
+                    </div>
                   )}
                   {isStreaming && (
                     <div className="typing-indicator">

@@ -79,6 +79,18 @@ router.post('/ask', async (req, res) => {
     // 生成会话ID或使用现有ID
     const sessionId = conversationId || `chat_${req.user.id}_${Date.now()}`;
     
+    // 中止控制器
+    const abortController = new AbortController();
+    let isAborted = false;
+
+    res.on('close', () => {
+      if (!isAborted) {
+        console.log(`[Chat] 客户端断开连接, sessionId: ${sessionId}`);
+        isAborted = true;
+        abortController.abort();
+      }
+    });
+
     // 获取会话历史（如果有）
     let history = [];
     if (conversationId) {
@@ -249,12 +261,15 @@ router.post('/ask', async (req, res) => {
       history,
       context: applied.context,
       mode: aiMode,
+      signal: abortController.signal,
       onData: (content) => {
+        if (isAborted) return;
         res.write(`event: message\n`);
         res.write(`data: ${JSON.stringify({ content })}\n\n`);
         fullAnswer += content;
       },
       onToolResult: (result) => {
+        if (isAborted) return;
         const payload = {
           mode: result?.mode || aiMode,
           tools_called: result?.toolsCalled || []
@@ -273,6 +288,7 @@ router.post('/ask', async (req, res) => {
         }
       },
       onEnd: async () => {
+        if (isAborted) return;
         if (shouldAudit(aiConfig)) {
           await writeAuditLog({
             userId: req.user.id,
@@ -290,8 +306,14 @@ router.post('/ask', async (req, res) => {
         res.write(`event: done\n`);
         res.write(`data: [DONE]\n\n`);
         res.end();
+        isAborted = true; // 流程正常结束
       },
       onError: async (error) => {
+        if (isAborted || error.name === 'AbortError' || error.message?.includes('aborted')) {
+          console.log(`[Chat] 请求已中止 (sessionId: ${sessionId})`);
+          return;
+        }
+        
         console.error('流式响应错误:', error.message);
 
         if (shouldAudit(aiConfig)) {
