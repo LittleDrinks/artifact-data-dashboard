@@ -84,3 +84,6 @@ scripts/*
 
 # test
 docker-compose.data-local.yml
+
+# data
+ollama/
