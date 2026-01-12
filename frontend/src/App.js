@@ -25,6 +25,7 @@ import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import Debug from './pages/Debug'; // 导入调试页面
 import Attachments from './pages/Attachments';
+import ModeManager from './components/Admin/ModeManager'; // 导入模式管理组件
 
 // 导入服务和上下文
 import { getCurrentUser, logout } from './services/auth.service';
@@ -252,6 +253,10 @@ function App() {
             <Route
               path="/debug"
               element={isAdmin ? <Debug /> : <Navigate to="/" replace />}
+            />
+            <Route
+              path="/admin/mode"
+              element={isAdmin ? <ModeManager /> : <Navigate to="/" replace />}
             />
             <Route path="*" element={<Dashboard />} />
           </Routes>

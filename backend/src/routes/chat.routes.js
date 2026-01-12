@@ -5,6 +5,8 @@ const { getAiPluginsConfig } = require('../services/ai/plugin-config');
 const { McpProvider } = require('../services/ai/providers/mcp.provider');
 const { applyInputCapabilities } = require('../services/ai/capabilities');
 const { extractKeywords: extractKeywordsService } = require('../services/keyword.service');
+const modeManager = require('../services/ai/mode-manager');
+const { generateMockResponse, generateMockStreamResponse } = require('../services/ai/mock-provider');
 
 const router = express.Router();
 
@@ -273,6 +275,53 @@ router.post('/ask', async (req, res) => {
     })}\n\n`);
     
     let fullAnswer = '';
+    
+    // 获取当前 AI 模式配置
+    const currentModeConfig = await modeManager.getCurrentMode();
+    const effectiveMode = currentModeConfig.mode; // ONLINE/LOCAL/MOCK
+    
+    console.log(`[Chat] 当前 AI 模式: ${effectiveMode}, 锁定状态: ${currentModeConfig.locked}`);
+    
+    // 如果是 MOCK 模式，使用模拟 Provider
+    if (effectiveMode === 'MOCK') {
+      console.log(`[Chat] 使用 Mock Provider 处理问题`);
+      safeWrite(`event: metadata\n`);
+      safeWrite(`data: ${JSON.stringify({ 
+        mode: 'MOCK', 
+        message: '当前为模拟模式，返回预设响应' 
+      })}\n\n`);
+      
+      // 使用模拟流式响应
+      await new Promise((resolve, reject) => {
+        generateMockStreamResponse(
+          question,
+          (chunk) => {
+            fullAnswer += chunk;
+            safeWrite(`event: message\n`);
+            safeWrite(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+          },
+          (doneData) => {
+            safeWrite(`event: done\n`);
+            safeWrite(`data: [DONE]\n\n`);
+            updateBotMessage(fullAnswer, { pending: false, source: 'mock_provider' })
+              .then(() => resolve())
+              .catch(reject);
+          },
+          (error) => {
+            console.error('[Chat] Mock Provider 错误:', error);
+            const errorMsg = '模拟响应生成失败';
+            safeWrite(`event: error\n`);
+            safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
+            updateBotMessage(errorMsg, { isError: true, pending: false })
+              .then(() => reject(error))
+              .catch(reject);
+          }
+        );
+      });
+      
+      safeEnd();
+      return;
+    }
     
     const aiConfig = getAiPluginsConfig();
     const providerId = aiConfig.defaultProvider;
