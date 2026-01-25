@@ -3,6 +3,7 @@ const { neo4jDriver, redisClient, mysqlPool, ensureRedisConnected } = require('.
 const mcpService = require('../services/mcp.service');
 const { getAiPluginsConfig } = require('../services/ai/plugin-config');
 const { McpProvider } = require('../services/ai/providers/mcp.provider');
+// const { LocalProvider } = require('../services/ai/providers/local.provider');
 const { applyInputCapabilities } = require('../services/ai/capabilities');
 const { extractKeywords: extractKeywordsService } = require('../services/keyword.service');
 const modeManager = require('../services/ai/mode-manager');
@@ -12,6 +13,7 @@ const router = express.Router();
 
 const providers = {
   mcp: new McpProvider()
+  // local: new LocalProvider()
 };
 
 const writeAuditLog = async ({ userId, action, details }) => {
@@ -322,6 +324,74 @@ router.post('/ask', async (req, res) => {
       safeEnd();
       return;
     }
+    
+    // 如果是 LOCAL 模式，使用本地 Provider
+    // if (effectiveMode === 'LOCAL') {
+    //   console.log(`[Chat] 使用 Local Provider 处理问题`);
+    //   safeWrite(`event: metadata\n`);
+    //   safeWrite(`data: ${JSON.stringify({ 
+    //     mode: 'LOCAL', 
+    //     message: '当前为本地模式，使用Ollama模型' 
+    //   })}\n\n`);
+      
+    //   const localProvider = providers.local;
+    //   const localConfig = { enabled: true }; // Local provider is always enabled if mode is LOCAL
+      
+    //   if (!localProvider || !localProvider.isEnabled(localConfig)) {
+    //     const disabledMessage = '本地AI服务不可用，请检查Ollama容器状态。';
+    //     safeWrite(`event: message\n`);
+    //     safeWrite(`data: ${JSON.stringify({ content: disabledMessage })}\n\n`);
+    //     fullAnswer += disabledMessage;
+    //     await updateBotMessage(disabledMessage, { isError: true, pending: false });
+    //     safeWrite(`event: done\n`);
+    //     safeWrite(`data: [DONE]\n\n`);
+    //     safeEnd();
+    //     return;
+    //   }
+      
+    //   // 调用本地 provider
+    //   await localProvider.askStream({
+    //     question,
+    //     history,
+    //     context,
+    //     mode: aiMode,
+    //     signal: abortController.signal,
+    //     onData: (content) => {
+    //       safeWrite(`event: message\n`);
+    //       safeWrite(`data: ${JSON.stringify({ content })}\n\n`);
+    //       fullAnswer += content;
+    //       updateBotMessage(fullAnswer, { pending: true });
+    //     },
+    //     onToolResult: (result) => {
+    //       // Local provider doesn't support tools currently
+    //       console.log('[Chat] Local provider tool result:', result);
+    //     },
+    //     onEnd: async () => {
+    //       await updateBotMessage(fullAnswer, { pending: false, source: 'local_provider' });
+    //       safeWrite(`event: done\n`);
+    //       safeWrite(`data: [DONE]\n\n`);
+    //       safeEnd();
+    //     },
+    //     onError: async (error) => {
+    //       if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+    //         console.log(`[Chat] Local provider 中止 (sessionId: ${sessionId})`);
+    //         await updateBotMessage(fullAnswer || '回答已中止', { canceled: true, pending: false });
+    //         return;
+    //       }
+      
+    //       console.error('[Chat] Local provider 错误:', error.message);
+    //       const errorMsg = error.code === 'LOCAL_SERVICE_UNAVAILABLE'
+    //         ? '无法连接到本地Ollama服务，请检查容器状态'
+    //         : '本地模型生成回答时出错';
+    //       safeWrite(`event: error\n`);
+    //       safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
+    //       await updateBotMessage(errorMsg, { isError: true, pending: false });
+    //       safeEnd();
+    //     }
+    //   });
+      
+    //   return;
+    // }
     
     const aiConfig = getAiPluginsConfig();
     const providerId = aiConfig.defaultProvider;

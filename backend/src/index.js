@@ -25,12 +25,27 @@ const wordcloudRoutes = require('./routes/wordcloud.routes');
 const chatRoutes = require('./routes/chat.routes');
 const aiPluginsRoutes = require('./routes/ai-plugins.routes');
 const mcpRoutes = require('./routes/mcp.routes');
+const modeRoutes = require('./routes/mode.routes');
 const debugRoutes = require('./routes/debug.routes');
 const attachmentRoutes = require('./routes/attachment.routes');
 
 // 注册工具
 const { registerAllTools } = require('./services/tools');
 registerAllTools();
+
+// 初始化AI服务依赖关系
+const modeManager = require('./services/ai/mode-manager');
+const healthCheckService = require('./services/ai/health-check.service');
+const modeNotifier = require('./services/ai/mode-notifier');
+const { redisClient } = require('./config/database');
+
+// 初始化服务依赖
+modeManager.init({ healthCheckService, modeNotifier });
+healthCheckService.init({ modeManager });
+modeNotifier.init({ redisClient });
+
+// 启动健康检查
+healthCheckService.startHealthChecks();
 
 // 导入中间件
 const { errorHandler, notFoundHandler } = require('./middleware/error.middleware');
@@ -133,6 +148,7 @@ app.use('/api/chat', authMiddleware, chatRoutes);
 app.use('/api/attachments', authMiddleware, attachmentRoutes);
 app.use('/api/ai-plugins', authMiddleware, roleMiddleware(['admin']), aiPluginsRoutes);
 app.use('/api/mcp', mcpRoutes); // Middleware defined in route file to support mixed access if needed
+app.use('/api/mode', modeRoutes);
 app.use('/api/debug', authMiddleware, roleMiddleware(['admin']), debugRoutes);
 
 // API文档路由 - 必须在其他路由之后注册

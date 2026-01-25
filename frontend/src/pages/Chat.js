@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert } from 'antd';
+import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert, Space } from 'antd';
 import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { getChatHistory, clearChatHistory } from '../services/chat.service';
 import mcpService from '../services/mcpService';
+import modeService from '../services/modeService';
 import { ChatSession } from '../utils/chat-session';
+import ModeIndicator from '../components/Chat/ModeIndicator';
 import MessageRenderer from '../components/Chat/MessageRenderer';
 
 const { TextArea } = Input;
@@ -20,6 +24,7 @@ const Chat = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mcpStatus, setMcpStatus] = useState({ isEnabled: true });
+  const [currentMode, setCurrentMode] = useState(null);
   const [messages, setMessages] = useState(() => ChatSession.loadMessages());
   const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
@@ -72,6 +77,30 @@ const Chat = () => {
     };
     loadMcpStatus();
   }, []);
+
+  // 监听模式变化
+  const handleModeChange = (modeData) => {
+    const previousMode = currentMode?.mode;
+    setCurrentMode(modeData);
+
+    // 如果模式发生变化，显示Toast通知
+    if (previousMode && previousMode !== modeData.mode) {
+      const modeLabels = {
+        'ONLINE': '在线模式',
+        'LOCAL': '本地模式',
+        'MOCK': '模拟模式'
+      };
+
+      toast.info(`AI模式已切换到${modeLabels[modeData.mode] || modeData.mode}`, {
+        position: "top-right",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+    }
+  };
 
   // 加载聊天历史
   useEffect(() => {
@@ -530,14 +559,17 @@ const Chat = () => {
       title="智能问答"
       style={{ height: '100%' }}
       extra={
-        <Button
-          danger
-          icon={<DeleteOutlined />}
-          onClick={handleClearHistory}
-          disabled={loading || initialLoading}
-        >
-          清空记录
-        </Button>
+        <Space>
+          <ModeIndicator onModeChange={handleModeChange} />
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={handleClearHistory}
+            disabled={loading || initialLoading}
+          >
+            清空记录
+          </Button>
+        </Space>
       }
     >
       {error && (

@@ -19,20 +19,39 @@ const generateMockResponse = (prompt) => {
  * Simulates typing effect by sending chunks with delay
  * @param {string} prompt - User question
  * @param {Function} onChunk - Callback function receiving string chunks
+ * @param {Function} onDone - Callback function called when streaming is complete
+ * @param {Function} onError - Callback function called when an error occurs
  * @returns {Promise<void>}
  */
-const generateMockStreamResponse = async (prompt, onChunk) => {
-  const response = generateMockResponse(prompt);
-  const content = response.content;
-  
-  // Simulation parameters
-  const chunkSize = 4; // chars per chunk
-  const delay = 30; // ms between chunks
+const generateMockStreamResponse = async (prompt, onChunk, onDone, onError) => {
+  try {
+    const response = generateMockResponse(prompt);
+    const content = response.content;
 
-  for (let i = 0; i < content.length; i += chunkSize) {
-    const chunk = content.slice(i, i + chunkSize);
-    onChunk(chunk);
-    await new Promise(resolve => setTimeout(resolve, delay));
+    // Simulation parameters
+    const chunkSize = 4; // chars per chunk
+    const delay = 30; // ms between chunks
+
+    for (let i = 0; i < content.length; i += chunkSize) {
+      const chunk = content.slice(i, i + chunkSize);
+      onChunk(chunk);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    // Call done callback with response data
+    if (onDone) {
+      onDone({
+        content: response.content,
+        role: response.role,
+        model: response.model,
+        usage: response.usage
+      });
+    }
+  } catch (error) {
+    console.error('[MockProvider] Error generating stream response:', error);
+    if (onError) {
+      onError(error);
+    }
   }
 };
 
