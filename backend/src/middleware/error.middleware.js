@@ -1,4 +1,7 @@
 const express = require('express');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('ErrorMiddleware');
 
 /**
  * 自定义API错误类
@@ -32,26 +35,43 @@ const notFoundHandler = (req, res, next) => {
 
 /**
  * 全局错误处理中间件
+ * Feature: 003-code-quality-fixes / Phase 6 - 错误响应标准化
  */
 const errorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || 500;
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // 记录错误（包含完整堆栈）
   if (statusCode === 404) {
-    console.warn('404 Not Found:', err.message);
+    logger.warn('404 Not Found', { path: req.path, message: err.message });
   } else {
-    console.error('全局错误处理:', err.stack);
+    logger.error('Request error', { 
+      statusCode, 
+      path: req.path, 
+      method: req.method,
+      error: err.message,
+      stack: err.stack 
+    });
   }
   
-  // 默认状态码和错误响应
+  // 生产环境：对500错误使用通用消息，避免泄露敏感信息
+  let errorMessage = err.message || '服务器内部错误';
+  if (isProduction && statusCode >= 500) {
+    errorMessage = '服务器内部错误，请稍后重试';
+  }
+  
+  // 构建标准错误响应
   const response = {
     success: false,
     error: {
-      message: err.message || '服务器内部错误'
+      message: errorMessage,
+      code: err.code || `ERROR_${statusCode}`
     },
     timestamp: new Date().toISOString()
   };
   
-  // 添加详细错误信息（如果有）
-  if (err.details) {
+  // 添加详细错误信息（客户端错误4xx可以包含details）
+  if (err.details && statusCode < 500) {
     response.error.details = err.details;
   }
   
@@ -72,9 +92,10 @@ const errorHandler = (err, req, res, next) => {
     return res.status(403).json(response);
   }
   
-  // 非生产环境下添加错误堆栈信息
-  if (process.env.NODE_ENV !== 'production') {
+  // 非生产环境：添加调试信息
+  if (!isProduction) {
     response.error.stack = err.stack;
+    response.error.rawMessage = err.message; // 原始错误消息
   }
   
   // 发送错误响应

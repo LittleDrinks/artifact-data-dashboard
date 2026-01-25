@@ -13,8 +13,10 @@ const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../
 const { IntegrityService, parseBool } = require('../services/integrity.service');
 const { getStorageDriver } = require('../services/storage');
 const { writeAuditLog } = require('../services/audit.service');
+const { createLogger } = require('../utils/logger');
 
 const router = express.Router();
+const logger = createLogger('AttachmentRoutes');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
 const RESOLVED_UPLOAD_DIR = path.resolve(UPLOAD_DIR);
@@ -212,7 +214,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       downloadUrl: `/api/attachments/${attachmentId}/download`
     });
   } catch (error) {
-    console.error('上传附件错误:', error);
+    logger.error('上传附件错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -333,7 +335,7 @@ router.post('/bulk', upload.single('file'), async (req, res) => {
       data: results
     });
   } catch (error) {
-    console.error('批量上传附件错误:', error);
+    logger.error('批量上传附件错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -416,7 +418,7 @@ router.post('/import-dir', async (req, res) => {
       data: results
     });
   } catch (error) {
-    console.error('目录导入附件错误:', error);
+    logger.error('目录导入附件错误:', error);
     return res.status(500).json({ message: error.message || '服务器内部错误' });
   }
 });
@@ -441,7 +443,7 @@ router.get('/integrity', async (req, res) => {
     const report = await integrityService.getReport({ includeFileExistence: includeFiles, limit });
     return res.status(200).json(report);
   } catch (error) {
-    console.error('完整性检测错误:', error);
+    logger.error('完整性检测错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -542,7 +544,7 @@ router.post('/excel/link-import', upload.single('file'), async (req, res) => {
 
     return res.status(200).json({ message: '导入完成', linked, errors });
   } catch (error) {
-    console.error('导入关联Excel错误:', error);
+    logger.error('导入关联Excel错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -663,7 +665,7 @@ router.get('/', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('获取附件列表错误:', error);
+    logger.error('获取附件列表错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -701,7 +703,7 @@ router.post('/excel/export', async (req, res) => {
 
     return res.status(201).json(attachment);
   } catch (error) {
-    console.error('导出Excel错误:', error);
+    logger.error('导出Excel错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -787,7 +789,7 @@ router.post('/:id/excel/import', async (req, res) => {
       throw err;
     }
   } catch (error) {
-    console.error('导入Excel错误:', error);
+    logger.error('导入Excel错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -841,7 +843,7 @@ router.get('/:id', async (req, res) => {
       downloadUrl: `/api/attachments/${attachment.id}/download`
     });
   } catch (error) {
-    console.error('获取附件元数据错误:', error);
+    logger.error('获取附件元数据错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -895,7 +897,7 @@ router.get('/:id/download', async (req, res) => {
 
     return res.download(filePath, attachment.original_name);
   } catch (error) {
-    console.error('下载附件错误:', error);
+    logger.error('下载附件错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -953,7 +955,7 @@ router.delete('/:id', async (req, res) => {
       try {
         await fsp.unlink(filePath);
       } catch (err) {
-        console.warn('删除文件失败，继续删除数据库记录:', err.message);
+        logger.warn('删除文件失败，继续删除数据库记录:', err.message);
       }
     }
 
@@ -973,7 +975,7 @@ router.delete('/:id', async (req, res) => {
 
     return res.status(200).json({ message: '删除成功' });
   } catch (error) {
-    console.error('删除附件错误:', error);
+    logger.error('删除附件错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });

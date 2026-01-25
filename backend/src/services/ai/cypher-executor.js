@@ -4,6 +4,8 @@
  * Purpose: Execute validated Cypher queries against Neo4j with timeout and result limits
  */
 
+const { createLogger } = require('../../utils/logger');
+const logger = createLogger('CypherExecutor');
 const { neo4jDriver } = require('../../config/database');
 const { VALIDATION_CONFIG } = require('../../../config/cypher-rules');
 
@@ -26,19 +28,52 @@ async function executeQuery(query, params = {}, options = {}) {
 
   const startTime = Date.now();
   const session = neo4jDriver.session();
+  let sessionClosed = false;
+
+  // 确保session被关闭（幂等）
+  const closeSession = async () => {
+    if (!sessionClosed) {
+      sessionClosed = true;
+      try {
+        await session.close();
+      } catch (err) {
+        logger.warn('Failed to close Neo4j session', { error: err.message });
+      }
+    }
+  };
 
   try {
-    console.log(`[Cypher Executor] Executing query for ${executor}...`);
-    console.log(`[Cypher Executor] Query: ${query.substring(0, 100)}${query.length > 100 ? '...' : ''}`);
+    logger.debug(`Executing query for ${executor}...`);
+    logger.debug(`Query: ${query.substring(0, 100)}${query.length > 100 ? '...' : ''}`);
 
-    // Execute query with timeout
+    // 修复：使用Neo4j事务级别超时，让服务端提前终止查询
+    const txConfig = { timeout: timeout };
+    
+    // 客户端超时保护
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`Query execution timeout after ${timeout}ms`)), timeout);
     });
 
-    const executionPromise = session.run(query, params);
+    const executionPromise = session.run(query, params, txConfig);
 
-    const result = await Promise.race([executionPromise, timeoutPromise]);
+    let result;
+    let timedOut = false;
+    
+    try {
+      result = await Promise.race([executionPromise, timeoutPromise]);
+    } catch (error) {
+      if (error.message.includes('timeout')) {
+        timedOut = true;
+        // 超时后等待查询完成以避免资源泄漏
+        logger.warn('Query timeout, waiting for cleanup...', { timeout });
+        try {
+          await executionPromise;
+        } catch (cleanupError) {
+          // 忽略清理时的错误
+        }
+      }
+      throw error;
+    }
 
     // Extract records
     const records = result.records.slice(0, maxResults).map(record => {
@@ -76,8 +111,8 @@ async function executeQuery(query, params = {}, options = {}) {
       } : null
     };
 
-    console.log(
-      `[Cypher Executor] Query executed successfully: ${records.length} records ` +
+    logger.info(
+      `Query executed successfully: ${records.length} records ` +
       `(${executionTime}ms)${wasTruncated ? ' [TRUNCATED]' : ''}`
     );
 
@@ -89,7 +124,7 @@ async function executeQuery(query, params = {}, options = {}) {
     };
   } catch (error) {
     const executionTime = Date.now() - startTime;
-    console.error(`[Cypher Executor] Query execution failed (${executionTime}ms):`, error);
+    logger.error(`Query execution failed (${executionTime}ms):`, error);
 
     return {
       success: false,
@@ -100,7 +135,7 @@ async function executeQuery(query, params = {}, options = {}) {
       summary: null
     };
   } finally {
-    await session.close();
+    await closeSession();
   }
 }
 
@@ -250,7 +285,7 @@ async function testConnection() {
     const result = await executeQuery('RETURN 1 AS test', {}, { timeout: 3000 });
     return result.success && result.records.length === 1 && result.records[0].test === 1;
   } catch (error) {
-    console.error('[Cypher Executor] Connection test failed:', error);
+    logger.error('Connection test failed:', error);
     return false;
   }
 }
@@ -274,7 +309,7 @@ async function getDatabaseInfo() {
       healthy: nodeCountResult.success && relCountResult.success
     };
   } catch (error) {
-    console.error('[Cypher Executor] Failed to get database info:', error);
+    logger.error('Failed to get database info:', error);
     return {
       nodeCount: 'error',
       relationshipCount: 'error',

@@ -1,7 +1,9 @@
 const express = require('express');
 const nodejieba = require('nodejieba');
 const { mysqlPool } = require('../config/database');
+const { createLogger } = require('../utils/logger');
 
+const logger = createLogger('WordCloudRoutes');
 const router = express.Router();
 
 /**
@@ -95,7 +97,7 @@ router.get('/analyze', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('词云分析错误:', error);
+    logger.error('词云分析错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -157,7 +159,7 @@ router.get('/categories', async (req, res) => {
     
     res.status(200).json(result);
   } catch (error) {
-    console.error('获取类别词云错误:', error);
+    logger.error('获取类别词云错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });

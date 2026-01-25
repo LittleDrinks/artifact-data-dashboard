@@ -5,7 +5,9 @@ const neo4j = require('neo4j-driver');
 const { mysqlPool, neo4jDriver } = require('../config/database');
 const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS, EXCEL_SCHEMA } = require('../config/excel-schema');
 const { authMiddleware } = require('../middleware/auth.middleware');
+const { createLogger } = require('../utils/logger');
 
+const logger = createLogger('DebugRoutes');
 const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -372,7 +374,7 @@ const syncArtifactsToNeo4j = async () => {
     }
 
     await tx.commit();
-    console.log(`Neo4j同步完成: ${artifacts.length} 条文物节点, ${categoryRelations.length} 条类别关系, ${eraRelations.length} 条年代关系, ${locationRelations.length} 条地点关系, ${tagRelations.length} 条标签关系。`);
+    logger.info(`Neo4j同步完成: ${artifacts.length} 条文物节点, ${categoryRelations.length} 条类别关系, ${eraRelations.length} 条年代关系, ${locationRelations.length} 条地点关系, ${tagRelations.length} 条标签关系。`);
   } catch (error) {
     await tx.rollback();
     throw error;
@@ -635,7 +637,7 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
         try {
           await connection.rollback();
         } catch (rollbackError) {
-          console.error('回滚导入事务失败:', rollbackError);
+          logger.error('回滚导入事务失败:', rollbackError);
         }
       }
       throw error;
@@ -646,7 +648,7 @@ router.post('/import', upload.single('file'), async (req, res, next) => {
     try {
       await syncArtifactsToNeo4j();
     } catch (error) {
-      console.error('同步Neo4j数据失败:', error);
+      logger.error('同步Neo4j数据失败:', error);
       return res.status(500).json({
         message: '数据已导入MySQL，但同步Neo4j失败',
         error: error.message

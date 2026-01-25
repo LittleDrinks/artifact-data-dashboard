@@ -3,6 +3,9 @@ const neo4j = require('neo4j-driver');
 
 const { mysqlPool, neo4jDriver } = require('../config/database');
 const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS, EXCEL_SCHEMA } = require('../config/excel-schema');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('ExcelKGService');
 
 const MAX_UNSIGNED_BIGINT = BigInt('18446744073709551615');
 
@@ -628,7 +631,7 @@ const importKnowledgeGraphFromXlsxBuffer = async ({ buffer, strategy = 'append' 
 			try {
 				await connection.rollback();
 			} catch (rollbackError) {
-				console.error('回滚导入事务失败:', rollbackError);
+				logger.error('回滚导入事务失败', { error: rollbackError.message });
 			}
 		}
 		throw error;

@@ -1,6 +1,9 @@
 const express = require('express');
 const { neo4jDriver, redisClient, mysqlPool, ensureRedisConnected } = require('../config/database');
+const { createLogger } = require('../utils/logger');
 const mcpService = require('../services/mcp.service');
+
+const logger = createLogger('ChatRoutes');
 const { getAiPluginsConfig } = require('../services/ai/plugin-config');
 const { McpProvider } = require('../services/ai/providers/mcp.provider');
 // const { LocalProvider } = require('../services/ai/providers/local.provider');
@@ -23,7 +26,7 @@ const writeAuditLog = async ({ userId, action, details }) => {
       [userId, action, null, new Date(), details ? JSON.stringify(details) : null]
     );
   } catch (error) {
-    console.warn('[AI-Audit] 写入日志失败:', error.message);
+    logger.warn('[AI-Audit] 写入日志失败', { error: error.message });
   }
 };
 
@@ -34,7 +37,7 @@ router.use(async (req, res, next) => {
     await ensureRedisConnected();
     return next();
   } catch (error) {
-    console.error('Redis不可用:', error);
+    logger.error('Redis不可用:', error);
     return res.status(503).json({ message: 'Redis不可用，请稍后再试' });
   }
 });
@@ -91,7 +94,7 @@ router.post('/ask', async (req, res) => {
 
     res.on('close', () => {
       clientDisconnected = true;
-      console.log(`[Chat] 客户端断开连接(将继续生成并落库), sessionId: ${sessionId}`);
+      logger.info(`[Chat] 客户端断开连接(将继续生成并落库), sessionId: ${sessionId}`);
     });
 
     const safeWrite = (chunk) => {
@@ -100,7 +103,7 @@ router.post('/ask', async (req, res) => {
         res.write(chunk);
       } catch (err) {
         clientDisconnected = true;
-        console.log(`[Chat] 写入 SSE 失败，视为客户端断开 (sessionId: ${sessionId})`);
+        logger.info(`[Chat] 写入 SSE 失败，视为客户端断开 (sessionId: ${sessionId})`);
       }
     };
 
@@ -165,7 +168,7 @@ router.post('/ask', async (req, res) => {
         await redisClient.lSet(messagesKey, botIndex, JSON.stringify(next));
         await redisClient.hSet(conversationKey, 'updatedAt', new Date().toISOString());
       } catch (err) {
-        console.error('[Chat] 更新 bot 消息失败:', err);
+        logger.error('[Chat] 更新 bot 消息失败:', err);
       }
     };
 
@@ -236,24 +239,24 @@ router.post('/ask', async (req, res) => {
         context += `【检索提示】：本次已从 ${sources.join('、')} 检索到相关信息。请务必基于以上检索内容作答，不要回答“未在数据中找到相关信息”。如信息不足，请明确说明不足之处。\n\n`;
       }
     } else {
-      console.log('[Chat] Model is in tool_calling mode, skipping legacy pre-retrieval.');
+      logger.info('[Chat] Model is in tool_calling mode, skipping legacy pre-retrieval.');
     }
     
     // 打印检索到的上下文信息，方便调试
     
     // 打印检索到的上下文信息，方便调试
-    console.log('--- MCP Context Debug ---');
-    console.log('Question:', question);
-    console.log('Sources:', sources);
+    logger.debug('--- MCP Context Debug ---');
+    logger.debug('Question:', question);
+    logger.debug('Sources:', sources);
     if (graphData) {
-      console.log('Graph Data Nodes:', graphData.nodes.length);
-      console.log('Graph Data Edges:', graphData.edges.length);
+      logger.debug('Graph Data Nodes:', graphData.nodes.length);
+      logger.debug('Graph Data Edges:', graphData.edges.length);
     }
     if (relationalData) {
-      console.log('Relational Data Preview:', relationalData.substring(0, 200) + (relationalData.length > 200 ? '...' : ''));
+      logger.debug('Relational Data Preview:', relationalData.substring(0, 200) + (relationalData.length > 200 ? '...' : ''));
     }
-    console.log('Full Context Length:', context.length);
-    console.log('-------------------------');
+    logger.debug('Full Context Length:', context.length);
+    logger.debug('-------------------------');
 
     // 发送元数据
     safeWrite(`event: metadata\n`);
@@ -282,11 +285,11 @@ router.post('/ask', async (req, res) => {
     const currentModeConfig = await modeManager.getCurrentMode();
     const effectiveMode = currentModeConfig.mode; // ONLINE/LOCAL/MOCK
     
-    console.log(`[Chat] 当前 AI 模式: ${effectiveMode}, 锁定状态: ${currentModeConfig.locked}`);
+    logger.info(`[Chat] 当前 AI 模式: ${effectiveMode}, 锁定状态: ${currentModeConfig.locked}`);
     
     // 如果是 MOCK 模式，使用模拟 Provider
     if (effectiveMode === 'MOCK') {
-      console.log(`[Chat] 使用 Mock Provider 处理问题`);
+      logger.info(`[Chat] 使用 Mock Provider 处理问题`);
       safeWrite(`event: metadata\n`);
       safeWrite(`data: ${JSON.stringify({ 
         mode: 'MOCK', 
@@ -310,7 +313,7 @@ router.post('/ask', async (req, res) => {
               .catch(reject);
           },
           (error) => {
-            console.error('[Chat] Mock Provider 错误:', error);
+            logger.error('[Chat] Mock Provider 错误:', error);
             const errorMsg = '模拟响应生成失败';
             safeWrite(`event: error\n`);
             safeWrite(`data: ${JSON.stringify({ message: errorMsg })}\n\n`);
@@ -530,12 +533,12 @@ router.post('/ask', async (req, res) => {
       },
       onError: async (error) => {
         if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-          console.log(`[Chat] provider 中止 (sessionId: ${sessionId})`);
+          logger.info(`[Chat] provider 中止 (sessionId: ${sessionId})`);
           await updateBotMessage(fullAnswer || '回答已中止', { canceled: true, pending: false });
           return;
         }
         
-        console.error('流式响应错误:', error.message);
+        logger.error('流式响应错误', { error: error.message });
 
         if (shouldAudit(aiConfig)) {
           await writeAuditLog({
@@ -563,7 +566,7 @@ router.post('/ask', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('问答系统错误:', error);
+    logger.error('问答系统错误:', error);
     // 如果还没发送过响应头，发送JSON错误
     if (!res.headersSent) {
       res.status(500).json({ message: '服务器内部错误' });
@@ -650,7 +653,7 @@ router.get('/history', async (req, res) => {
             });
           }
         } catch (err) {
-          console.warn(`Skipping key ${key} due to error: ${err.message}`);
+          logger.warn(`Skipping key ${key} due to error: ${err.message}`);
           continue;
         }
       }
@@ -676,7 +679,7 @@ router.get('/history', async (req, res) => {
     
     res.status(200).json(history);
   } catch (error) {
-    console.error('获取对话历史错误:', error);
+    logger.error('获取对话历史错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -739,7 +742,7 @@ router.delete('/history', async (req, res) => {
           toDelete.push(`${key}:messages`);
         }
       } catch (err) {
-        console.warn(`Skipping key ${key} due to error: ${err.message}`);
+        logger.warn(`Skipping key ${key} due to error: ${err.message}`);
         continue;
       }
     }
@@ -751,7 +754,7 @@ router.delete('/history', async (req, res) => {
     const deleted = await redisClient.del(toDelete);
     return res.status(200).json({ message: '聊天记录已清空', deleted });
   } catch (error) {
-    console.error('清空对话历史错误:', error);
+    logger.error('清空对话历史错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -925,7 +928,7 @@ async function handleGraphQueries(question) {
       }
     };
   } catch (error) {
-    console.error('知识图谱查询错误:', error);
+    logger.error('知识图谱查询错误:', error);
     return null;
   } finally {
     await session.close();
@@ -982,7 +985,7 @@ async function handleRelationalQueries(question) {
     ).join('\n\n');
 
   } catch (error) {
-    console.error('MySQL查询错误:', error);
+    logger.error('MySQL查询错误:', error);
     return null;
   }
 }
@@ -1033,7 +1036,7 @@ async function saveConversation(conversationId, question, answer, userId) {
     await redisClient.expire(conversationKey, 60 * 60 * 24 * 7);
     await redisClient.expire(`${conversationKey}:messages`, 60 * 60 * 24 * 7);
   } catch (error) {
-    console.error('保存对话错误:', error);
+    logger.error('保存对话错误:', error);
   }
 }
 

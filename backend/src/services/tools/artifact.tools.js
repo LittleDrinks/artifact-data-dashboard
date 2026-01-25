@@ -1,4 +1,7 @@
 const { mysqlPool } = require('../../config/database');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('ArtifactTools');
 
 const tools = [
   {
@@ -34,7 +37,7 @@ const tools = [
         
         return JSON.stringify(rows);
       } catch (error) {
-        console.error('[Tool:search_artifacts] Error:', error);
+        logger.error('[Tool:search_artifacts] Error:', error);
         return JSON.stringify({ error: error.message });
       }
     }
@@ -67,7 +70,7 @@ const tools = [
         
         return JSON.stringify(rows[0]);
       } catch (error) {
-        console.error('[Tool:get_artifact_details] Error:', error);
+        logger.error('[Tool:get_artifact_details] Error:', error);
         return JSON.stringify({ error: error.message });
       }
     }

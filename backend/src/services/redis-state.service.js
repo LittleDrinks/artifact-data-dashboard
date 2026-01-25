@@ -6,6 +6,9 @@
 
 const { redisClient } = require('../config/database');
 const { AI_MODES, isValidMode } = require('../../config/mode-config');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('RedisStateService');
 
 // Redis keys
 const REDIS_KEYS = {
@@ -32,7 +35,7 @@ async function getCurrentMode() {
     const mode = await redisClient.get(REDIS_KEYS.CURRENT_MODE);
     return mode || AI_MODES.ONLINE; // Default to ONLINE
   } catch (error) {
-    console.error('Failed to get current mode from Redis:', error);
+    logger.error('Failed to get current mode from Redis:', error);
     return AI_MODES.ONLINE; // Fallback to ONLINE on error
   }
 }
@@ -57,10 +60,10 @@ async function setCurrentMode(mode, source = 'system') {
       activatedBy: source
     });
     
-    console.log(`[Redis State] Mode changed to ${mode} by ${source}`);
+    logger.info(`[Redis State] Mode changed to ${mode} by ${source}`);
     return true;
   } catch (error) {
-    console.error('Failed to set current mode in Redis:', error);
+    logger.error('Failed to set current mode in Redis:', error);
     throw error;
   }
 }
@@ -84,7 +87,7 @@ async function acquireModeLock(timeout = LOCK_TIMEOUT) {
     
     return lockAcquired === 'OK';
   } catch (error) {
-    console.error('Failed to acquire mode lock:', error);
+    logger.error('Failed to acquire mode lock:', error);
     return false;
   }
 }
@@ -98,7 +101,7 @@ async function releaseModeLock() {
     await redisClient.del(REDIS_KEYS.MODE_LOCK);
     return true;
   } catch (error) {
-    console.error('Failed to release mode lock:', error);
+    logger.error('Failed to release mode lock:', error);
     return false;
   }
 }
@@ -122,7 +125,7 @@ async function getModeHealth(mode) {
       error: healthData.error || null
     };
   } catch (error) {
-    console.error(`Failed to get health status for ${mode}:`, error);
+    logger.error(`Failed to get health status for ${mode}:`, error);
     return { healthy: false, lastCheck: null, error: error.message };
   }
 }
@@ -150,7 +153,7 @@ async function setModeHealth(mode, healthy, error = null) {
     
     return true;
   } catch (error) {
-    console.error(`Failed to set health status for ${mode}:`, error);
+    logger.error(`Failed to set health status for ${mode}:`, error);
     return false;
   }
 }
@@ -164,7 +167,7 @@ async function getMCPStatus() {
     const status = await redisClient.get(REDIS_KEYS.MCP_STATUS);
     return status === 'true' || status === '1' || status === null; // Default to true
   } catch (error) {
-    console.error('Failed to get MCP status from Redis:', error);
+    logger.error('Failed to get MCP status from Redis:', error);
     return true; // Default to enabled on error
   }
 }
@@ -186,10 +189,10 @@ async function setMCPStatus(enabled, updatedBy = 'system') {
       status: enabled.toString()
     });
     
-    console.log(`[Redis State] MCP ${enabled ? 'enabled' : 'disabled'} by ${updatedBy}`);
+    logger.info(`[Redis State] MCP ${enabled ? 'enabled' : 'disabled'} by ${updatedBy}`);
     return true;
   } catch (error) {
-    console.error('Failed to set MCP status in Redis:', error);
+    logger.error('Failed to set MCP status in Redis:', error);
     throw error;
   }
 }
@@ -215,10 +218,10 @@ async function incrementFailoverCount(fromMode, toMode) {
     
     await redisClient.set(REDIS_KEYS.LAST_FAILOVER, Date.now().toString());
     
-    console.log(`[Redis State] Failover #${count}: ${fromMode} → ${toMode}`);
+    logger.info(`[Redis State] Failover #${count}: ${fromMode} → ${toMode}`);
     return count;
   } catch (error) {
-    console.error('Failed to increment failover count:', error);
+    logger.error('Failed to increment failover count:', error);
     return 0;
   }
 }
@@ -245,7 +248,7 @@ async function getFailoverStats() {
       } : null
     };
   } catch (error) {
-    console.error('Failed to get failover stats:', error);
+    logger.error('Failed to get failover stats:', error);
     return { count: 0, lastFailover: null, latest: null };
   }
 }
@@ -259,10 +262,10 @@ async function resetFailoverCount() {
     await redisClient.del(REDIS_KEYS.FAILOVER_COUNT);
     await redisClient.del(REDIS_KEYS.LAST_FAILOVER);
     await redisClient.del('ai:mode:failover:latest');
-    console.log('[Redis State] Failover counter reset');
+    logger.info('[Redis State] Failover counter reset');
     return true;
   } catch (error) {
-    console.error('Failed to reset failover count:', error);
+    logger.error('Failed to reset failover count:', error);
     return false;
   }
 }
@@ -293,7 +296,7 @@ async function getAllStates() {
       }
     };
   } catch (error) {
-    console.error('Failed to get all states:', error);
+    logger.error('Failed to get all states:', error);
     throw error;
   }
 }

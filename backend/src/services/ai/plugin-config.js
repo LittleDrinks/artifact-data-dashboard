@@ -1,5 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('PluginConfig');
 
 const defaultConfig = {
   version: 1,
@@ -91,7 +94,7 @@ const loadAiPluginsConfig = () => {
   } catch (error) {
     // Safe fallback: do not crash startup
     cached = { ...defaultConfig };
-    console.warn('[AI-Plugins] 配置加载失败，使用默认配置:', error.message);
+    logger.warn('[AI-Plugins] 配置加载失败，使用默认配置', { error: error.message });
   }
 
   return cached;

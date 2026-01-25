@@ -21,7 +21,7 @@ const writeAuditLog = async ({ userId, action, targetId = null, details = null }
       [userId, action, targetId, new Date(), details]
     );
   } catch (error) {
-    console.warn('写入日志失败:', error.message);
+    logger.warn('写入日志失败', { error: error.message });
   }
 };
 
@@ -57,10 +57,10 @@ const logCypherQuery = async ({
       [queryText, executor, executionTime, resultSummary, isValid, errorsJson]
     );
     
-    console.log(`[Audit] Cypher query logged: executor=${executor}, valid=${isValid}`);
+    logger.info(`[Audit] Cypher query logged: executor=${executor}, valid=${isValid}`);
     return result.insertId;
   } catch (error) {
-    console.error('Failed to log Cypher query:', error.message);
+    logger.error('Failed to log Cypher query', { error: error.message });
     throw error;
   }
 };
@@ -98,9 +98,9 @@ const logModeSwitch = async ({
       [`mode_switch`, details]
     );
     
-    console.log(`[Audit] Mode switch logged: ${fromMode} → ${toMode} (${reason}) by ${triggeredBy}`);
+    logger.info(`[Audit] Mode switch logged: ${fromMode} → ${toMode} (${reason}) by ${triggeredBy}`);
   } catch (error) {
-    console.error('Failed to log mode switch:', error.message);
+    logger.error('Failed to log mode switch', { error: error.message });
   }
 };
 
@@ -136,9 +136,9 @@ const logMCPStatusChange = async ({
       [enabled, updatedBy]
     );
     
-    console.log(`[Audit] MCP status changed: ${enabled ? 'enabled' : 'disabled'} by ${updatedBy}`);
+    logger.info(`[Audit] MCP status changed: ${enabled ? 'enabled' : 'disabled'} by ${updatedBy}`);
   } catch (error) {
-    console.error('Failed to log MCP status change:', error.message);
+    logger.error('Failed to log MCP status change', { error: error.message });
   }
 };
 
@@ -174,7 +174,7 @@ const getCypherAuditLogs = async ({
     const [rows] = await mysqlPool.execute(query, params);
     return rows;
   } catch (error) {
-    console.error('Failed to get Cypher audit logs:', error.message);
+    logger.error('Failed to get Cypher audit logs', { error: error.message });
     return [];
   }
 };
@@ -196,7 +196,7 @@ const getModeSwitchHistory = async (limit = 50) => {
       details: JSON.parse(row.details)
     }));
   } catch (error) {
-    console.error('Failed to get mode switch history:', error.message);
+    logger.error('Failed to get mode switch history', { error: error.message });
     return [];
   }
 };
@@ -228,7 +228,7 @@ const getAuditStats = async () => {
       period: '24h'
     };
   } catch (error) {
-    console.error('Failed to get audit stats:', error.message);
+    logger.error('Failed to get audit stats', { error: error.message });
     return null;
   }
 };

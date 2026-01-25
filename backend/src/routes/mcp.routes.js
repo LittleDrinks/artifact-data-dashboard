@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { body } = require('express-validator');
+const { validateRequest } = require('../middleware/validation.middleware');
 const mcpController = require('../services/mcp/mcp-controller');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
 
@@ -54,12 +56,16 @@ router.get('/status', authMiddleware, async (req, res) => {
  *       200:
  *         description: New status
  */
-router.post('/toggle', authMiddleware, roleMiddleware(['admin']), async (req, res) => {
+router.post('/toggle', 
+  authMiddleware, 
+  roleMiddleware(['admin']),
+  [
+    body('isEnabled').isBoolean().withMessage('isEnabled must be a boolean')
+  ],
+  validateRequest,
+  async (req, res) => {
     try {
         const { isEnabled } = req.body;
-        if (typeof isEnabled !== 'boolean') {
-            return res.status(400).json({ error: 'isEnabled must be a boolean' });
-        }
         
         // req.user.username might be undefined depending on JWT payload.
         // auth.middleware says: req.user = decoded;

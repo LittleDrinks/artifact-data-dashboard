@@ -1,8 +1,10 @@
 const express = require('express');
 const { mysqlPool } = require('../config/database');
 const { roleMiddleware } = require('../middleware/auth.middleware');
+const { createLogger } = require('../utils/logger');
 
 const router = express.Router();
+const logger = createLogger('ArtifactRoutes');
 
 const clampInt = (value, { min, max, fallback }) => {
   const num = Number.parseInt(value, 10);
@@ -133,7 +135,7 @@ router.get('/', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('获取文物列表错误:', error);
+    logger.error('获取文物列表错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -201,14 +203,14 @@ router.post('/', roleMiddleware(['admin']), async (req, res) => {
           [req.user.id, 'create_artifact', artifactId, new Date(), JSON.stringify({ name })]
         );
       } catch (logError) {
-        console.error('记录创建文物日志错误:', logError);
+        logger.error('记录创建文物日志错误:', logError);
       }
     }
 
     const [rows] = await mysqlPool.execute('SELECT * FROM artifacts WHERE id = ?', [artifactId]);
     return res.status(201).json(rows?.[0] || { id: artifactId });
   } catch (error) {
-    console.error('创建文物错误:', error);
+    logger.error('创建文物错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -307,7 +309,7 @@ router.get('/search', async (req, res) => {
           [req.user.id, 'search', null, new Date(), JSON.stringify({ keyword })]
         );
       } catch (logError) {
-        console.error('记录搜索日志错误:', logError);
+        logger.error('记录搜索日志错误:', logError);
       }
     }
 
@@ -322,7 +324,7 @@ router.get('/search', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('搜索文物错误:', error);
+    logger.error('搜索文物错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -367,13 +369,13 @@ router.get('/:id', async (req, res) => {
           [req.user.id, 'view_artifact', artifactId, new Date()]
         );
       } catch (logError) {
-        console.error('记录查看日志错误:', logError);
+        logger.error('记录查看日志错误:', logError);
       }
     }
 
     return res.status(200).json(artifacts[0]);
   } catch (error) {
-    console.error('获取文物详情错误:', error);
+    logger.error('获取文物详情错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -470,14 +472,14 @@ router.put('/:id', roleMiddleware(['admin']), async (req, res) => {
           [req.user.id, 'update_artifact', artifactId, new Date(), JSON.stringify(Object.keys(updates).filter(k => updates[k] !== undefined))]
         );
       } catch (logError) {
-        console.error('记录更新文物日志错误:', logError);
+        logger.error('记录更新文物日志错误:', logError);
       }
     }
 
     const [rows] = await mysqlPool.execute('SELECT * FROM artifacts WHERE id = ?', [artifactId]);
     return res.status(200).json(rows?.[0] || { id: artifactId });
   } catch (error) {
-    console.error('更新文物错误:', error);
+    logger.error('更新文物错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -525,13 +527,13 @@ router.delete('/:id', roleMiddleware(['admin']), async (req, res) => {
           [req.user.id, 'delete_artifact', artifactId, new Date(), JSON.stringify({ name: rows[0].name })]
         );
       } catch (logError) {
-        console.error('记录删除文物日志错误:', logError);
+        logger.error('记录删除文物日志错误:', logError);
       }
     }
 
     return res.status(200).json({ message: '删除成功' });
   } catch (error) {
-    console.error('删除文物错误:', error);
+    logger.error('删除文物错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });

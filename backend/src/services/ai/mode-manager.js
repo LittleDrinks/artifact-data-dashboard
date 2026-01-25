@@ -1,6 +1,9 @@
 const { AI_MODES, getModeConfig } = require('../../../config/mode-config');
 const redisStateService = require('../redis-state.service');
 const auditService = require('../audit.service');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('ModeManager');
 
 /**
  * Service to manage AI operation modes (ONLINE, LOCAL, MOCK)
@@ -36,7 +39,7 @@ class ModeManager {
     try {
       config = getModeConfig(modeName);
     } catch (err) {
-      console.warn(`[ModeManager] Invalid mode ${modeName}, falling back to LOCAL`);
+      logger.warn(`[ModeManager] Invalid mode ${modeName}, falling back to LOCAL`);
       const fallbackMode = AI_MODES.LOCAL;
       await redisStateService.setCurrentMode(fallbackMode, 'system-fallback');
       config = getModeConfig(fallbackMode);
@@ -92,7 +95,7 @@ class ModeManager {
       await this.modeNotifier.notifyModeChange(mode, locked, source);
     }
 
-    console.log(`[ModeManager] Mode switched: ${currentMode} → ${mode} (${source})`);
+    logger.info(`[ModeManager] Mode switched: ${currentMode} → ${mode} (${source})`);
     return true;
   }
 
@@ -138,13 +141,13 @@ class ModeManager {
    */
   async performFallback(fromMode) {
     if (await this.isLocked()) {
-      console.log(`[ModeManager] Mode is locked, skipping fallback from ${fromMode}`);
+      logger.info(`[ModeManager] Mode is locked, skipping fallback from ${fromMode}`);
       return false;
     }
 
     const currentIndex = this.fallbackOrder.indexOf(fromMode);
     if (currentIndex === -1 || currentIndex >= this.fallbackOrder.length - 1) {
-      console.log(`[ModeManager] No fallback available from ${fromMode}`);
+      logger.info(`[ModeManager] No fallback available from ${fromMode}`);
       return false;
     }
 
@@ -154,7 +157,7 @@ class ModeManager {
     if (this.healthCheckService) {
       const isHealthy = await this.healthCheckService.checkModeHealth(nextMode);
       if (!isHealthy) {
-        console.log(`[ModeManager] Next mode ${nextMode} is not healthy, continuing fallback`);
+        logger.info(`[ModeManager] Next mode ${nextMode} is not healthy, continuing fallback`);
         return await this.performFallback(nextMode);
       }
     }
@@ -163,7 +166,7 @@ class ModeManager {
     await this.setMode(nextMode, false, 'auto-fallback');
     await redisStateService.incrementFailoverCount(fromMode, nextMode);
 
-    console.log(`[ModeManager] Automatic fallback: ${fromMode} → ${nextMode}`);
+    logger.info(`[ModeManager] Automatic fallback: ${fromMode} → ${nextMode}`);
     return true;
   }
 
@@ -174,7 +177,7 @@ class ModeManager {
    */
   async attemptRecovery(targetMode) {
     if (await this.isLocked()) {
-      console.log(`[ModeManager] Mode is locked, skipping recovery to ${targetMode}`);
+      logger.info(`[ModeManager] Mode is locked, skipping recovery to ${targetMode}`);
       return false;
     }
 
@@ -184,7 +187,7 @@ class ModeManager {
 
     const isHealthy = await this.healthCheckService.checkModeHealth(targetMode);
     if (!isHealthy) {
-      console.log(`[ModeManager] Target mode ${targetMode} is not healthy, skipping recovery`);
+      logger.info(`[ModeManager] Target mode ${targetMode} is not healthy, skipping recovery`);
       return false;
     }
 
@@ -194,7 +197,7 @@ class ModeManager {
 
     if (targetIndex < currentIndex) {
       await this.setMode(targetMode, false, 'auto-recovery');
-      console.log(`[ModeManager] Automatic recovery: ${currentMode} → ${targetMode}`);
+      logger.info(`[ModeManager] Automatic recovery: ${currentMode} → ${targetMode}`);
       return true;
     }
 

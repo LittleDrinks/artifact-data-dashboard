@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { body, query } = require('express-validator');
+const { validateRequest } = require('../middleware/validation.middleware');
 const modeManager = require('../services/ai/mode-manager');
 const healthCheckService = require('../services/ai/health-check.service');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
@@ -110,7 +112,13 @@ router.post('/unlock', authMiddleware, roleMiddleware(['admin']), async (req, re
  *       200:
  *         description: Mode switch history
  */
-router.get('/history', authMiddleware, async (req, res) => {
+router.get('/history', 
+  authMiddleware,
+  [
+    query('limit').optional().isInt({ min: 1, max: 500 }).withMessage('Limit must be between 1 and 500')
+  ],
+  validateRequest,
+  async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
         const history = await modeManager.getModeHistory(limit);

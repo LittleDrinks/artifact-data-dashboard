@@ -2,6 +2,9 @@ const axios = require('axios');
 const { neo4jDriver } = require('../../config/database');
 const { validateQuery } = require('../ai/cypher-validator');
 const { executeQuery } = require('../ai/cypher-executor');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('Neo4jTools');
 
 const NEO4J_MCP_ENDPOINT = (process.env.NEO4J_MCP_ENDPOINT || 'http://neo4j-cypher:8080').replace(/\/$/, '');
 
@@ -12,7 +15,7 @@ async function callNeo4jCypherViaMcp(path, payload) {
     return response.data;
   } catch (error) {
     // Fallback to local driver if MCP sidecar is unreachable
-    console.warn('[Neo4j MCP] 调用失败，回退到本地驱动:', error.message);
+    logger.warn('[Neo4j MCP] 调用失败，回退到本地驱动', { error: error.message });
     return null;
   }
 }
@@ -95,7 +98,7 @@ const tools = [
       // US4: Validate query for safety before execution
       const validation = await validateQuery(query, { executor: 'ai-assistant', permissionLevel: 'user' });
       if (!validation.isValid) {
-        console.warn('[Neo4j Tools] Query validation failed:', validation.errors);
+        logger.warn('[Neo4j Tools] Query validation failed:', validation.errors);
         return JSON.stringify({
           error: 'Query validation failed',
           validationErrors: validation.errors,
@@ -105,7 +108,7 @@ const tools = [
 
       // Log warnings if any
       if (validation.warnings.length > 0) {
-        console.warn('[Neo4j Tools] Query validation warnings:', validation.warnings);
+        logger.warn('[Neo4j Tools] Query validation warnings:', validation.warnings);
       }
 
       // Use new cypher-executor service with timeout and result limits

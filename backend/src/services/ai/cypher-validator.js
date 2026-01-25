@@ -4,6 +4,8 @@
  * Purpose: Validate Cypher queries for safety and correctness before execution
  */
 
+const { createLogger } = require('../../utils/logger');
+const logger = createLogger('CypherValidator');
 const {
   validateCypherQuery,
   extractFunctions,
@@ -100,14 +102,14 @@ async function validateQuery(query, options = {}) {
     // Record validation time
     result.metadata.validationTime = Date.now() - startTime;
 
-    console.log(
-      `[Cypher Validator] Query validation ${result.isValid ? 'passed' : 'failed'} ` +
+    logger.debug(
+      `Query validation ${result.isValid ? 'passed' : 'failed'} ` +
       `(${result.metadata.validationTime}ms, ${result.errors.length} errors, ${result.warnings.length} warnings)`
     );
 
     return result;
   } catch (error) {
-    console.error('[Cypher Validator] Validation error:', error);
+    logger.error('Validation error:', error);
     result.errors.push(
       ERROR_MESSAGES.VALIDATION_ERROR.replace('{details}', error.message)
     );

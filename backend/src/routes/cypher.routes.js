@@ -6,10 +6,15 @@
 
 const express = require('express');
 const router = express.Router();
+const { body, query } = require('express-validator');
+const { createLogger } = require('../utils/logger');
+const { validateRequest } = require('../middleware/validation.middleware');
 const { validateQuery } = require('../services/ai/cypher-validator');
 const { executeQuery, executeQueryAsTable, getDatabaseInfo, testConnection } = require('../services/ai/cypher-executor');
 const auditService = require('../services/audit.service');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
+
+const logger = createLogger('CypherRoutes');
 
 /**
  * @swagger
@@ -49,7 +54,16 @@ const { authMiddleware, roleMiddleware } = require('../middleware/auth.middlewar
  *       500:
  *         description: Execution error
  */
-router.post('/execute', authMiddleware, async (req, res) => {
+router.post('/execute', 
+  authMiddleware,
+  [
+    body('query').isString().notEmpty().withMessage('Query is required')
+      .isLength({ max: 10000 }).withMessage('Query exceeds maximum length (10000 characters)'),
+    body('params').optional().isObject().withMessage('Params must be an object'),
+    body('format').optional().isIn(['json', 'table']).withMessage('Format must be json or table')
+  ],
+  validateRequest,
+  async (req, res) => {
   try {
     const { query, params = {}, format = 'json' } = req.body;
     const executor = req.user?.username || req.user?.id || 'anonymous';
@@ -113,7 +127,7 @@ router.post('/execute', authMiddleware, async (req, res) => {
       warnings: validation.warnings
     });
   } catch (error) {
-    console.error('[Cypher API] Execution error:', error);
+    logger.error('[Cypher API] Execution error:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -161,7 +175,7 @@ router.post('/validate', authMiddleware, async (req, res) => {
       metadata: validation.metadata
     });
   } catch (error) {
-    console.error('[Cypher API] Validation error:', error);
+    logger.error('[Cypher API] Validation error:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -216,7 +230,7 @@ router.get('/audit-logs', authMiddleware, roleMiddleware(['admin']), async (req,
       count: logs.length
     });
   } catch (error) {
-    console.error('[Cypher API] Failed to get audit logs:', error);
+    logger.error('[Cypher API] Failed to get audit logs:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -244,7 +258,7 @@ router.get('/db-info', authMiddleware, async (req, res) => {
       data: info
     });
   } catch (error) {
-    console.error('[Cypher API] Failed to get database info:', error);
+    logger.error('[Cypher API] Failed to get database info:', error);
     res.status(500).json({
       success: false,
       error: error.message

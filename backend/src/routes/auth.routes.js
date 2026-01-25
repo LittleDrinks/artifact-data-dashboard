@@ -3,8 +3,10 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { mysqlPool } = require('../config/database');
 const { authMiddleware } = require('../middleware/auth.middleware');
+const { createLogger } = require('../utils/logger');
 
 const router = express.Router();
+const logger = createLogger('AuthRoutes');
 
 const MAX_FIELD_LENGTH = {
   username: 50,
@@ -93,7 +95,7 @@ router.post('/register', async (req, res) => {
       userId: result.insertId
     });
   } catch (error) {
-    console.error('注册错误:', error);
+    logger.error('注册错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -187,7 +189,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('登录错误:', error);
+    logger.error('登录错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -256,7 +258,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
     res.status(200).json(profile);
   } catch (error) {
-    console.error('获取用户信息错误:', error);
+    logger.error('获取用户信息错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -402,7 +404,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('更新用户信息错误:', error);
+    logger.error('更新用户信息错误:', error);
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: '用户名或邮箱已存在' });
     }

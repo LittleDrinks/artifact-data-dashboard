@@ -4,6 +4,10 @@
  * Purpose: Notify clients about mode changes via WebSocket/SSE
  */
 
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('ModeNotifier');
+
 class ModeNotifier {
   constructor() {
     this.clients = new Set(); // Store connected clients
@@ -62,7 +66,7 @@ class ModeNotifier {
           client.write(`data: ${message}\n\n`);
         }
       } catch (error) {
-        console.error('[ModeNotifier] Failed to notify client:', error);
+        logger.error('[ModeNotifier] Failed to notify client:', error);
         this.clients.delete(client); // Remove broken client
       }
     }
@@ -72,11 +76,11 @@ class ModeNotifier {
       try {
         await this.redisClient.publish('mode_changes', message);
       } catch (error) {
-        console.error('[ModeNotifier] Failed to publish to Redis:', error);
+        logger.error('[ModeNotifier] Failed to publish to Redis:', error);
       }
     }
 
-    console.log(`[ModeNotifier] Notified ${this.clients.size} clients about mode change: ${mode}`);
+    logger.info(`[ModeNotifier] Notified ${this.clients.size} clients about mode change: ${mode}`);
   }
 
   /**
@@ -107,9 +111,9 @@ class ModeNotifier {
         }
       });
 
-      console.log('[ModeNotifier] Subscribed to Redis mode changes');
+      logger.info('[ModeNotifier] Subscribed to Redis mode changes');
     } catch (error) {
-      console.error('[ModeNotifier] Failed to subscribe to Redis:', error);
+      logger.error('[ModeNotifier] Failed to subscribe to Redis:', error);
     }
   }
 

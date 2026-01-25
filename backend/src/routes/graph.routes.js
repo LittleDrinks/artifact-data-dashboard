@@ -1,7 +1,9 @@
 const express = require('express');
 const neo4j = require('neo4j-driver');
 const { neo4jDriver } = require('../config/database');
+const { createLogger } = require('../utils/logger');
 
+const logger = createLogger('GraphRoutes');
 const router = express.Router();
 
 /**
@@ -225,7 +227,7 @@ router.get('/artifacts', async (req, res) => {
       edges: keptEdges
     });
   } catch (error) {
-    console.error('获取知识图谱数据错误:', error);
+    logger.error('获取知识图谱数据错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   } finally {
     await session.close();
@@ -344,7 +346,7 @@ router.get('/entity/:type/:id', async (req, res) => {
       relationships
     });
   } catch (error) {
-    console.error('获取实体详情错误:', error);
+    logger.error('获取实体详情错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   } finally {
     await session.close();
@@ -444,7 +446,7 @@ router.post('/cypher', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('执行Cypher查询错误:', error);
+    logger.error('执行Cypher查询错误:', error);
     res.status(500).json({ message: '服务器内部错误', error: error.message });
   } finally {
     await session.close();

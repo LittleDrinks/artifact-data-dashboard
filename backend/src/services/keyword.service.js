@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nodejieba = require('nodejieba');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('KeywordService');
 
 const DEFAULT_MAX_KEYWORDS = 4;
 
@@ -337,7 +340,7 @@ function maybeLogExtraction(payload) {
   };
 
   if (level === 'info') {
-    console.log('[Keywords]', JSON.stringify(logBase));
+    logger.debug('Keywords extracted', logBase);
     return;
   }
 
@@ -346,7 +349,7 @@ function maybeLogExtraction(payload) {
     ...logBase,
     keywords: payload.keywords
   };
-  console.log('[Keywords]', JSON.stringify(debugLog));
+  logger.debug('Keyword extraction debug', debugLog);
 }
 
 module.exports = {

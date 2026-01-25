@@ -1,5 +1,8 @@
 const axios = require('axios');
 const { getModeConfig, AI_MODES } = require('../../../config/mode-config');
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger('LocalProvider');
 
 /**
  * Local AI Provider using Ollama
@@ -55,8 +58,8 @@ class LocalProvider {
         }
       };
 
-      console.log(`[LocalProvider] Calling Ollama API: ${this.config.endpoint}/api/chat`);
-      console.log(`[LocalProvider] Model: ${this.config.model}`);
+      logger.info(`[LocalProvider] Calling Ollama API: ${this.config.endpoint}/api/chat`);
+      logger.info(`[LocalProvider] Model: ${this.config.model}`);
 
       const response = await axios.post(`${this.config.endpoint}/api/chat`, requestBody, {
         timeout: this.config.timeout,
@@ -104,7 +107,7 @@ class LocalProvider {
                 }
               }
             } catch (parseError) {
-              console.warn('[LocalProvider] Failed to parse streaming response:', parseError.message);
+              logger.warn('[LocalProvider] Failed to parse streaming response:', parseError.message);
             }
           }
         }
@@ -117,14 +120,14 @@ class LocalProvider {
       });
 
       response.data.on('error', (error) => {
-        console.error('[LocalProvider] Stream error:', error.message);
+        logger.error('[LocalProvider] Stream error', { error: error.message });
         if (onError) {
           onError(error);
         }
       });
 
     } catch (error) {
-      console.error('[LocalProvider] Request error:', error.message);
+      logger.error('[LocalProvider] Request error', { error: error.message });
 
       if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
         const localError = new Error('无法连接到本地Ollama服务，请确保Ollama容器正在运行');
@@ -192,7 +195,7 @@ class LocalProvider {
       });
       return response.status === 200;
     } catch (error) {
-      console.warn('[LocalProvider] Health check failed:', error.message);
+      logger.warn('[LocalProvider] Health check failed', { error: error.message });
       return false;
     }
   }

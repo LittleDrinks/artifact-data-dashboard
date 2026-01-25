@@ -1,6 +1,8 @@
 const axios = require('axios');
 const { AI_MODES } = require('../../../config/mode-config');
 const redisStateService = require('../redis-state.service');
+const { createLogger } = require('../../utils/logger');
+const logger = createLogger('HealthCheckService');
 
 /**
  * Health Check Service
@@ -30,11 +32,11 @@ class HealthCheckService {
    */
   startHealthChecks() {
     if (this.intervalId) {
-      console.log('[HealthCheck] Health checks already running');
+      logger.info('Health checks already running');
       return;
     }
 
-    console.log(`[HealthCheck] Starting health checks every ${this.checkInterval}ms`);
+    logger.info(`Starting health checks every ${this.checkInterval}ms`);
     this.intervalId = setInterval(() => {
       this.performHealthChecks();
     }, this.checkInterval);
@@ -50,7 +52,7 @@ class HealthCheckService {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log('[HealthCheck] Health checks stopped');
+      logger.info('Health checks stopped');
     }
   }
 
@@ -85,7 +87,7 @@ class HealthCheckService {
       await this.attemptRecovery(results);
 
     } catch (error) {
-      console.error('[HealthCheck] Error during health checks:', error);
+      logger.error('Error during health checks:', error);
     }
   }
 
@@ -109,7 +111,7 @@ class HealthCheckService {
 
       return response.status === 200;
     } catch (error) {
-      console.log('[HealthCheck] Online API health check failed:', error.message);
+      logger.debug('Online API health check failed', { error: error.message });
       return false;
     }
   }
@@ -131,7 +133,7 @@ class HealthCheckService {
 
       return response.status === 200 && hasDeepSeek;
     } catch (error) {
-      console.log('[HealthCheck] Local health check failed:', error.message);
+      logger.debug('Local health check failed', { error: error.message });
       return false;
     }
   }
@@ -173,7 +175,7 @@ class HealthCheckService {
     const isCurrentHealthy = healthResults[currentMode];
 
     if (!isCurrentHealthy) {
-      console.log(`[HealthCheck] Current mode ${currentMode} is unhealthy, checking fallback...`);
+      logger.warn(`Current mode ${currentMode} is unhealthy, checking fallback...`);
 
       // Get failure count
       const stats = await redisStateService.getFailoverStats();
@@ -182,10 +184,10 @@ class HealthCheckService {
       if (failureCount >= this.failureThreshold) {
         const fallbackTriggered = await this.modeManager.performFallback(currentMode);
         if (fallbackTriggered) {
-          console.log(`[HealthCheck] Fallback triggered after ${failureCount} failures`);
+          logger.info(`Fallback triggered after ${failureCount} failures`);
         }
       } else {
-        console.log(`[HealthCheck] Waiting for more failures (${failureCount}/${this.failureThreshold})`);
+        logger.debug(`Waiting for more failures (${failureCount}/${this.failureThreshold})`);
       }
     }
   }
@@ -207,7 +209,7 @@ class HealthCheckService {
       if (healthResults[higherMode]) {
         const recovered = await this.modeManager.attemptRecovery(higherMode);
         if (recovered) {
-          console.log(`[HealthCheck] Recovered to ${higherMode}`);
+          logger.info(`Recovered to ${higherMode}`);
           break;
         }
       }

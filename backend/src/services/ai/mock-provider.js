@@ -1,4 +1,6 @@
 const { getMockResponse } = require('../../../config/mode-config');
+const { createLogger } = require('../../utils/logger');
+const logger = createLogger('MockProvider');
 
 /**
  * Generate a synchronous mock response
@@ -48,7 +50,7 @@ const generateMockStreamResponse = async (prompt, onChunk, onDone, onError) => {
       });
     }
   } catch (error) {
-    console.error('[MockProvider] Error generating stream response:', error);
+    logger.error('Error generating stream response:', error);
     if (onError) {
       onError(error);
     }

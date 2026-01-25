@@ -1,7 +1,9 @@
 const express = require('express');
 const { mysqlPool } = require('../config/database');
 const { roleMiddleware } = require('../middleware/auth.middleware');
+const { createLogger } = require('../utils/logger');
 
+const logger = createLogger('StatsRoutes');
 const router = express.Router();
 
 const clampInt = (value, fallback, min, max) => {
@@ -79,7 +81,7 @@ router.get('/overview', async (req, res) => {
       eraStats
     });
   } catch (error) {
-    console.error('获取统计数据错误:', error);
+    logger.error('获取统计数据错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -126,7 +128,7 @@ router.get('/timeline', async (req, res) => {
       timeline: timelineData
     });
   } catch (error) {
-    console.error('获取时间线数据错误:', error);
+    logger.error('获取时间线数据错误:', error);
     res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -174,7 +176,7 @@ router.get('/recent-activities', async (req, res) => {
       activities
     });
   } catch (error) {
-    console.error('获取最近活动错误:', error);
+    logger.error('获取最近活动错误:', error);
     const payload = { message: '服务器内部错误' };
     if (process.env.NODE_ENV !== 'production') {
       payload.error = error.message;
@@ -210,7 +212,7 @@ router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res
       hasPassword: process.env.MYSQL_PASSWORD ? '已设置' : '未设置'
     };
 
-    console.log('测试最近活动API - 数据库信息:', dbInfo);
+    logger.debug('测试最近活动API - 数据库信息:', dbInfo);
     
     // 检查logs表中是否有数据
     let logsCount = 0;
@@ -218,7 +220,7 @@ router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res
       const [logsCountResult] = await mysqlPool.execute('SELECT COUNT(*) as count FROM logs');
       logsCount = logsCountResult[0].count;
     } catch (err) {
-      console.error('检查logs表数据失败:', err);
+      logger.error('检查logs表数据失败:', err);
       return res.status(500).json({
         status: 'error',
         message: '日志表不存在或无法访问',
@@ -233,7 +235,7 @@ router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res
       const [usersCountResult] = await mysqlPool.execute('SELECT COUNT(*) as count FROM users');
       usersCount = usersCountResult[0].count;
     } catch (err) {
-      console.error('检查users表数据失败:', err);
+      logger.error('检查users表数据失败:', err);
       usersError = {
         message: err.message,
         code: err.code
@@ -262,7 +264,7 @@ router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res
       
       joinResult = activities;
     } catch (err) {
-      console.error('JOIN查询失败:', err);
+      logger.error('JOIN查询失败:', err);
       error = {
         message: err.message,
         stack: err.stack,
@@ -298,7 +300,7 @@ router.get('/test-recent-activities', roleMiddleware(['admin']), async (req, res
       dbInfo
     });
   } catch (error) {
-    console.error('测试最近活动API失败:', error);
+    logger.error('测试最近活动API失败:', error);
     res.status(500).json({ 
       message: '测试失败',
       error: error.message,
@@ -341,8 +343,8 @@ router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) =>
       : [];
     
     // 记录实际查询结果，用于调试
-    console.log('数据库名称:', process.env.MYSQL_DATABASE || 'artifact_dashboard');
-    console.log('表查询结果:', tables);
+    logger.debug('数据库名称:', process.env.MYSQL_DATABASE || 'artifact_dashboard');
+    logger.debug('表查询结果:', tables);
 
     // 获取logs表结构
     let logsColumns = [];
@@ -355,9 +357,9 @@ router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) =>
           AND table_name = 'logs'
         `, [process.env.MYSQL_DATABASE || 'artifact_dashboard']);
         logsColumns = logsColumnsResult || [];
-        console.log('logs表列:', logsColumns);
+        logger.debug('logs表列:', logsColumns);
       } catch (err) {
-        console.error('获取logs表结构出错:', err);
+        logger.error('获取logs表结构出错:', err);
       }
     }
     
@@ -372,9 +374,9 @@ router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) =>
           AND table_name = 'users'
         `, [process.env.MYSQL_DATABASE || 'artifact_dashboard']);
         usersColumns = usersColumnsResult || [];
-        console.log('users表列:', usersColumns);
+        logger.debug('users表列:', usersColumns);
       } catch (err) {
-        console.error('获取users表结构出错:', err);
+        logger.error('获取users表结构出错:', err);
       }
     }    // 检查logs和users表之间的关系
     let relationValid = false;
@@ -394,7 +396,7 @@ router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) =>
           `);
           relationValid = true;
         } catch (e) {
-          console.error('检查logs和users关系出错:', e);
+          logger.error('检查logs和users关系出错:', e);
           relationValid = false;
           relationError = {
             message: e.message,
@@ -425,7 +427,7 @@ router.get('/test-db-connection', roleMiddleware(['admin']), async (req, res) =>
       dbTest: result[0]
     });
   } catch (error) {
-    console.error('数据库连接测试失败:', error);
+    logger.error('数据库连接测试失败:', error);
     res.status(500).json({ 
       connection: 'failed',
       message: '数据库连接失败',

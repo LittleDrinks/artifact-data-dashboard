@@ -1,4 +1,7 @@
 const jwt = require('jsonwebtoken');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('AuthMiddleware');
 
 // 认证中间件
 const authMiddleware = (req, res, next) => {
@@ -28,7 +31,7 @@ const authMiddleware = (req, res, next) => {
       return res.status(401).json({ message: '未授权：无效的Token' });
     }
     
-    console.error('认证中间件错误:', error);
+    logger.error('认证中间件错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 };

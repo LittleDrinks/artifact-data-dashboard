@@ -1,12 +1,33 @@
+const { createLogger } = require('./utils/logger');
+const logger = createLogger('Application');
+
+// 捕获未处理的异常
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
+  console.error('FATAL ERROR:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection', { reason, promise });
+  console.error('FATAL REJECTION:', reason);
+  process.exit(1);
+});
+
 const { loadAndValidateEnv } = require('./config/env');
 const { ok, diagnostics } = loadAndValidateEnv();
 
 // stdout: structured startup diagnostics (redacted)
-console.log(JSON.stringify(diagnostics));
+logger.debug('Environment diagnostics', diagnostics);
 
 if (!ok) {
+  logger.error('Environment validation failed, exiting');
   process.exit(1);
 }
+
+logger.info('Environment validated, loading dependencies...');
+
+logger.info('Environment validated, loading dependencies...');
 
 const express = require('express');
 const cors = require('cors');
@@ -16,23 +37,44 @@ const rateLimit = require('express-rate-limit');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
+logger.info('Core dependencies loaded, loading routes...');
+
 // 导入路由
+logger.debug('Loading auth routes...');
 const authRoutes = require('./routes/auth.routes');
+logger.debug('Loading artifact routes...');
 const artifactRoutes = require('./routes/artifact.routes');
+logger.debug('Loading stats routes...');
 const statsRoutes = require('./routes/stats.routes');
+logger.debug('Loading graph routes...');
 const graphRoutes = require('./routes/graph.routes');
+logger.debug('Loading wordcloud routes...');
 const wordcloudRoutes = require('./routes/wordcloud.routes');
+logger.debug('Loading chat routes...');
 const chatRoutes = require('./routes/chat.routes');
+logger.debug('Loading ai-plugins routes...');
 const aiPluginsRoutes = require('./routes/ai-plugins.routes');
+logger.debug('Loading mcp routes...');
 const mcpRoutes = require('./routes/mcp.routes');
+logger.debug('Loading mode routes...');
 const modeRoutes = require('./routes/mode.routes');
+logger.debug('Loading cypher routes...');
 const cypherRoutes = require('./routes/cypher.routes');
+logger.debug('Loading debug routes...');
 const debugRoutes = require('./routes/debug.routes');
+logger.debug('Loading attachment routes...');
 const attachmentRoutes = require('./routes/attachment.routes');
+
+logger.info('Routes loaded, registering tools...');
 
 // 注册工具
 const { registerAllTools } = require('./services/tools');
-registerAllTools();
+try {
+  registerAllTools();
+} catch (toolError) {
+  logger.error('Failed to register tools', { error: toolError.message, stack: toolError.stack });
+  // 继续启动，部分工具失败不应阻止服务器启动
+}
 
 // 初始化AI服务依赖关系
 const modeManager = require('./services/ai/mode-manager');
@@ -40,13 +82,18 @@ const healthCheckService = require('./services/ai/health-check.service');
 const modeNotifier = require('./services/ai/mode-notifier');
 const { redisClient } = require('./config/database');
 
-// 初始化服务依赖
-modeManager.init({ healthCheckService, modeNotifier });
-healthCheckService.init({ modeManager });
-modeNotifier.init({ redisClient });
+try {
+  // 初始化服务依赖
+  modeManager.init({ healthCheckService, modeNotifier });
+  healthCheckService.init({ modeManager });
+  modeNotifier.init({ redisClient });
 
-// 启动健康检查
-healthCheckService.startHealthChecks();
+  // 启动健康检查
+  healthCheckService.startHealthChecks();
+} catch (initError) {
+  logger.error('Failed to initialize AI services', { error: initError.message, stack: initError.stack });
+  // 继续启动服务器
+}
 
 // 导入中间件
 const { errorHandler, notFoundHandler } = require('./middleware/error.middleware');
@@ -88,7 +135,9 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('不允许的CORS来源'));
+      // 修复：不抛出Error（会导致500），而是返回false拒绝请求（返回403）
+      logger.warn('CORS origin rejected', { origin, allowedOrigins });
+      callback(null, false);
     }
   },
   credentials: true, // 允许携带凭据
@@ -195,8 +244,8 @@ app.use(errorHandler);
 
 // 启动服务器
 app.listen(PORT, () => {
-  console.log(`服务器已启动，运行在端口 ${PORT}`);
-  console.log(`API文档可在 http://localhost:${PORT}/api-docs 访问`);
+  logger.info(`服务器已启动，运行在端口 ${PORT}`);
+  logger.info(`API文档可在 http://localhost:${PORT}/api-docs 访问`);
 });
 
 module.exports = app; // 用于测试

@@ -1,3 +1,5 @@
+const { createLogger } = require('../utils/logger');
+const logger = createLogger('Database');
 const mysql = require('mysql2/promise');
 const neo4j = require('neo4j-driver');
 const redis = require('redis');
@@ -100,7 +102,7 @@ const classifyConnectionError = (service, err) => {
 
 redisClient.on('error', err => {
   const diag = classifyConnectionError('redis', err);
-  console.error('Redis客户端错误:', diag);
+  logger.error('Redis客户端错误:', diag);
 });
 
 let redisConnectPromise = null;
@@ -124,10 +126,10 @@ const ensureRedisConnected = async () => {
 (async () => {
   try {
     await ensureRedisConnected();
-    console.log('Redis连接成功');
+    logger.info('Redis连接成功');
   } catch (err) {
     const diag = classifyConnectionError('redis', err);
-    console.error('Redis连接失败:', diag);
+    logger.error('Redis连接失败:', diag);
   }
 })();
 
@@ -139,11 +141,11 @@ const testConnections = async () => {
   try {
     const mysqlConnection = await mysqlPool.getConnection();
     mysqlConnection.release();
-    console.log('MySQL连接成功');
+    logger.info('MySQL连接成功');
   } catch (err) {
     ok = false;
     const diag = classifyConnectionError('mysql', err);
-    console.error('MySQL连接失败:', diag);
+    logger.error('MySQL连接失败:', diag);
   }
 
   // 测试Neo4j
@@ -151,22 +153,22 @@ const testConnections = async () => {
     const neo4jSession = neo4jDriver.session();
     await neo4jSession.run('RETURN 1 AS result');
     await neo4jSession.close();
-    console.log('Neo4j连接成功');
+    logger.info('Neo4j连接成功');
   } catch (err) {
     ok = false;
     const diag = classifyConnectionError('neo4j', err);
-    console.error('Neo4j连接失败:', diag);
+    logger.error('Neo4j连接失败:', diag);
   }
 
   // 测试Redis
   try {
     await ensureRedisConnected();
     await redisClient.ping();
-    console.log('Redis连接成功');
+    logger.info('Redis连接成功');
   } catch (err) {
     ok = false;
     const diag = classifyConnectionError('redis', err);
-    console.error('Redis连接失败:', diag);
+    logger.error('Redis连接失败:', diag);
   }
 
   return ok;
@@ -180,9 +182,9 @@ const closeConnections = async () => {
     if (redisClient.isOpen) {
       await redisClient.quit();
     }
-    console.log('所有数据库连接已关闭');
+    logger.info('所有数据库连接已关闭');
   } catch (err) {
-    console.error('关闭数据库连接时出错:', err);
+    logger.error('关闭数据库连接时出错:', err);
   }
 };
 

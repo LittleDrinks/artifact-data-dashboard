@@ -6,6 +6,9 @@ const axios = require('axios');
 const { getAiMode } = require('../config/env');
 const { toolManager } = require('./tool-manager');
 const { safeJsonParse } = require('../utils/json-parser');
+const { createLogger } = require('../utils/logger');
+
+const logger = createLogger('MCPService');
 
 let fetchPolyfillPromise;
 async function ensureFetchAvailable() {
@@ -20,11 +23,11 @@ async function ensureFetchAvailable() {
 
 class ChatFlow {
   async beforeToolCall({ question, tools }) {
-    console.log('[ChatFlow] beforeToolCall', { question: question?.slice(0, 60), tools: tools?.map((t) => t.name) });
+    logger.debug('ChatFlow beforeToolCall', { question: question?.slice(0, 60), tools: tools?.map((t) => t.name) });
   }
 
   async afterToolCall({ question, results }) {
-    console.log('[ChatFlow] afterToolCall', { question: question?.slice(0, 60), results: results?.map((r) => ({ name: r.name, status: r.status })) });
+    logger.debug('ChatFlow afterToolCall', { question: question?.slice(0, 60), results: results?.map((r) => ({ name: r.name, status: r.status })) });
   }
 }
 
@@ -56,12 +59,10 @@ class MCPService {
     // 打印初始化日志（仅非生产环境）
     if (this.apiEndpoint) {
       if (!isProd) {
-        console.log(`[MCP] 服务已初始化`);
-        console.log(`[MCP] 模型: ${this.model}`);
-        console.log(`[MCP] 端点: ${this.apiEndpoint}`);
+        logger.info('MCP服务已初始化', { model: this.model, endpoint: this.apiEndpoint });
       }
     } else {
-      console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
+      logger.warn('MCP 未配置 API 端点，将使用模拟模式');
     }
   }
 
@@ -196,7 +197,7 @@ class MCPService {
         });
         return { ...result, intent: 'general_chat', metadata: { provider: 'deepseek' }, mode: aiMode };
       } catch (error) {
-        console.error('DeepSeek 调用失败:', error.message);
+        logger.error('DeepSeek调用失败', { error: error.message });
         return {
           content: `DeepSeek 调用失败: ${error.message}`,
           intent: 'error',
@@ -210,7 +211,7 @@ class MCPService {
     try {
       // 检查API配置
       if (!this._shouldUseDeepSeek() && (!this.apiEndpoint || (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)))) {
-        console.warn('[MCP] 未配置 API，使用模拟模式');
+        logger.warn('MCP 未配置 API，使用模拟模式');
         return { ...this.simulateResponse(question, history), mode: aiMode };
       }
 
@@ -243,7 +244,7 @@ class MCPService {
         mode: aiMode
       };
     } catch (error) {
-      console.error('MCP API 调用失败:', error.message);
+      logger.error('MCP API 调用失败', { error: error.message });
       return { ...this.simulateResponse(question, history), mode: aiMode };
     }
   }
@@ -299,7 +300,7 @@ class MCPService {
     }
 
     if (!responseContent) {
-      console.warn('[MCP调用] Ollama 原生响应内容为空，完整数据：', JSON.stringify(response.data));
+      logger.warn('[MCP调用] Ollama 原生响应内容为空，完整数据：', JSON.stringify(response.data));
     }
 
     return { content: responseContent };
@@ -364,7 +365,7 @@ Ensure your response is valid JSON. Do not return any other text.
 
     const parsed = safeJsonParse(selectionResponse.content, { fallback: null });
     if (!parsed.ok || !parsed.value) {
-      console.warn('[智能问答] JSON解析错误:', parsed.error?.message, selectionResponse.content);
+      logger.warn('[智能问答] JSON解析错误:', parsed.error?.message, selectionResponse.content);
       return { action: 'chat', response: selectionResponse.content || '抱歉，我无法理解您的意图。' };
     }
     return parsed.value;
@@ -382,9 +383,9 @@ Ensure your response is valid JSON. Do not return any other text.
       : executed.error;
 
     if (executed.status === 'success') {
-      console.log(`[智能问答] 工具执行成功 | 结果摘要: ${String(resultStr).slice(0, 150)}...`);
+      logger.info(`[智能问答] 工具执行成功 | 结果摘要: ${String(resultStr).slice(0, 150)}...`);
     } else {
-      console.error('[智能问答] 工具执行错误:', executed.error);
+      logger.error('[智能问答] 工具执行错误:', executed.error);
     }
 
     await this.chatFlow.afterToolCall({ question, results: toolsCalled });
@@ -534,7 +535,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       // 检查API配置
       if (!this.apiEndpoint) {
-        console.warn('[MCP] 未配置 API 端点，将使用模拟模式');
+        logger.warn('[MCP] 未配置 API 端点，将使用模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
         onEnd();
@@ -542,7 +543,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       }
 
       if (!this.apiKey && !this._isOllamaEndpoint(this.apiEndpoint)) {
-        console.warn('[MCP] 未配置 API Key，将使用模拟模式');
+        logger.warn('[MCP] 未配置 API Key，将使用模拟模式');
         const response = this.simulateResponse(question, history);
         onData(response.content);
         onEnd();
@@ -550,9 +551,9 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       }
 
       if (!isProd) {
-        console.log(`[MCP] 正在调用大模型: ${this.model}`);
-        console.log(`[MCP] 端点: ${this.apiEndpoint}`);
-        console.log(`[MCP] 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
+        logger.debug(`[MCP] 正在调用大模型: ${this.model}`);
+        logger.debug(`[MCP] 端点: ${this.apiEndpoint}`);
+        logger.debug(`[MCP] 问题: "${question.substring(0, 50)}${question.length > 50 ? '...' : ''}"`);
       }
 
       const messages = [];
@@ -605,7 +606,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
               if (content) onData(this.sanitizeModelText(content));
             } catch (e) {
               // 忽略解析错误，可能是因为数据不完整（虽然我们已经处理了buffer，但仍需防范）
-              console.warn('JSON解析失败:', e.message, dataStr);
+              logger.warn('JSON解析失败:', e.message, dataStr);
             }
           }
         }
@@ -623,7 +624,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
                 const content = json.choices[0].delta.content;
                 if (content) onData(this.sanitizeModelText(content));
               } catch (e) {
-                console.warn('JSON解析失败(end):', e.message, dataStr);
+                logger.warn('JSON解析失败(end):', e.message, dataStr);
               }
             }
            }
@@ -634,13 +635,13 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       response.data.on('error', (err) => onError(err));
 
     } catch (error) {
-      console.error(`[MCP] API 流式调用失败 (${this.apiEndpoint}):`, error.message);
+      logger.error(`[MCP] API 流式调用失败 (${this.apiEndpoint})`, { error: error.message });
       
       // 如果是连接错误，给出具体建议
       if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
-        console.error('[MCP] 提示: 无法连接到 AI 服务。');
-        console.error('[MCP] 1. 如果在本地运行，请确保 .env 中 AI_API_ENDPOINT 为 http://localhost:11434/...');
-        console.error('[MCP] 2. 如果在 Docker 中运行，请确保使用 http://host.docker.internal:11434/... 且宿主机 Ollama 已启动');
+        logger.error('[MCP] 提示: 无法连接到 AI 服务。');
+        logger.error('[MCP] 1. 如果在本地运行，请确保 .env 中 AI_API_ENDPOINT 为 http://localhost:11434/...');
+        logger.error('[MCP] 2. 如果在 Docker 中运行，请确保使用 http://host.docker.internal:11434/... 且宿主机 Ollama 已启动');
       }
       
       onError(error);
@@ -655,7 +656,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
    */
   simulateResponse(question, history = []) {
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[MCP] 正在生成模拟响应 (Simulation Mode)');
+      logger.debug('[MCP] 正在生成模拟响应 (Simulation Mode)');
     }
 
     // 简单的关键词匹配
@@ -740,11 +741,11 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       const { getMCPStatus } = require('./redis-state.service');
       mcpEnabled = await getMCPStatus();
     } catch (e) {
-      console.warn('Failed to check MCP status, assuming enabled');
+      logger.warn('Failed to check MCP status, assuming enabled');
     }
 
     if (!mcpEnabled) {
-      console.log('[智能问答] MCP已禁用，改为直接聊天');
+      logger.info('[智能问答] MCP已禁用，改为直接聊天');
       try {
         const response = await this._callInternalModel({
           messages: [...history, { role: 'user', content: question }],
@@ -758,7 +759,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
           source: 'mcp_model'
         };
       } catch (err) {
-        console.error('[智能问答] 直接聊天失败:', err);
+        logger.error('[智能问答] 直接聊天失败:', err);
         return {
           content: '抱歉，处理您的请求时遇到错误。',
           intent: 'error',
@@ -771,7 +772,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
     const tools = this.toolManager.listTools();
     if (!tools || tools.length === 0) {
-      console.log('[智能问答] 检索工具不可用');
+      logger.info('[智能问答] 检索工具不可用');
       return {
         content: '检索工具暂时不可用，请稍后重试',
         intent: 'tool_calling',
@@ -801,10 +802,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     }
 
     try {
-      console.log('[智能问答] 开始处理问题:', question);
+      logger.info('[智能问答] 开始处理问题:', question);
 
       // 1. Tool Selection Phase
-      console.log('[智能问答] 阶段1: 意图分析与工具选择...');
+      logger.info('[智能问答] 阶段1: 意图分析与工具选择...');
       const decision = await this._selectTool({ question, tools, history, signal });
 
       // 检查中止
@@ -812,7 +813,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       // 2. Execution Phase
       if (decision.action === 'chat') {
-        console.log('[智能问答] 决策: 直接聊天 (无需工具)');
+        logger.info('[智能问答] 决策: 直接聊天 (无需工具)');
         return {
           content: decision.response || '你好！',
           intent: 'chat',
@@ -822,10 +823,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       }
 
       if (decision.action === 'tool' && decision.tool) {
-        console.log(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
+        logger.info(`[智能问答] 决策: 调用工具 [${decision.tool}] | 参数: ${JSON.stringify(decision.params)}`);
         const targetTool = this.toolManager.getTool(decision.tool);
         if (!targetTool) {
-          console.warn('[智能问答] 工具未找到:', decision.tool);
+          logger.warn('[智能问答] 工具未找到:', decision.tool);
           return {
             content: `无法找到工具: ${decision.tool}`,
             intent: 'tool_calling',
@@ -834,17 +835,17 @@ If the tool output is empty or indicates not found, verify if you can answer wit
           };
         }
 
-        console.log('[智能问答] 阶段2: 工具执行');
+        logger.info('[智能问答] 阶段2: 工具执行');
         const { toolsCalled, toolResult } = await this._executeTool({ targetTool, params: decision.params, question, signal });
 
         // 检查中止
         if (signal?.aborted) throw new Error('AbortError');
 
         // 3. Synthesis Phase
-        console.log('[智能问答] 阶段3: 最终回答合成...');
+        logger.info('[智能问答] 阶段3: 最终回答合成...');
         const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult, signal });
 
-        console.log('[智能问答] 流程结束');
+        logger.info('[智能问答] 流程结束');
 
         return {
           content: finalContent,
@@ -854,7 +855,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         };
       }
 
-      console.log('[智能问答] 未做出有效决策');
+      logger.info('[智能问答] 未做出有效决策');
       return {
         content: '未做出有效决策',
         intent: 'unknown',
@@ -863,7 +864,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       };
 
     } catch (error) {
-      console.error('[智能问答] 处理错误:', error);
+      logger.error('[智能问答] 处理错误:', error);
       const isTimeout = error?.code === 'ECONNABORTED' || String(error?.message || '').includes('timeout');
       return {
         content: isTimeout
@@ -885,7 +886,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       try {
         return await this._callDeepSeekCompletion({ messages, temperature, max_tokens, signal });
       } catch (error) {
-        console.error('[MCP调用] DeepSeek 调用失败:', error.message);
+        logger.error('[MCP调用] DeepSeek 调用失败', { error: error.message });
         throw error;
       }
     }
@@ -904,7 +905,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       // 仅在非流式调用时打印简略日志（避免刷屏完整Prompt）
       const lastMsg = messages[messages.length - 1];
-      console.log(`[MCP调用] 发送请求 (tokens_limit=${max_tokens}) | 最后一条消息: ${lastMsg?.content?.slice(0, 100).replace(/\n/g, ' ')}...`);
+      logger.debug(`[MCP调用] 发送请求 (tokens_limit=${max_tokens}) | 最后一条消息: ${lastMsg?.content?.slice(0, 100).replace(/\n/g, ' ')}...`);
 
       const shouldTryOllamaNativeFirst = this._useOllamaNativeChat && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
       const response = shouldTryOllamaNativeFirst
@@ -936,15 +937,15 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
       if (!responseContent && isSelectionPhase) {
         const fallback = JSON.stringify({ action: 'chat', response: '抱歉，模型未返回可用内容，请稍后重试。' });
-        console.warn('[MCP调用] 选择阶段模型未返回内容，使用 JSON 回退:', fallback);
+        logger.warn('[MCP调用] 选择阶段模型未返回内容，使用 JSON 回退:', fallback);
         return { content: fallback };
       }
 
       if (!responseContent) {
-        console.warn(`[MCP调用] 响应内容为空! HTTP Status: ${response.status}`);
-        console.warn('[MCP调用] 完整响应数据:', JSON.stringify(response.data));
+        logger.warn(`[MCP调用] 响应内容为空! HTTP Status: ${response.status}`);
+        logger.warn('[MCP调用] 完整响应数据:', JSON.stringify(response.data));
       } else {
-        console.log(`[MCP调用] 收到响应 | 长度: ${responseContent.length} | 内容摘要: ${responseContent.slice(0, 100).replace(/\n/g, ' ')}...`);
+        logger.debug(`[MCP调用] 收到响应 | 长度: ${responseContent.length} | 内容摘要: ${responseContent.slice(0, 100).replace(/\n/g, ' ')}...`);
       }
 
       return { content: responseContent };
@@ -956,7 +957,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       const canFallbackToOllamaNative = status === 404 && this._isLikelyOllamaOpenAIEndpoint(this.apiEndpoint);
       if (canFallbackToOllamaNative) {
         if (!this._useOllamaNativeChat) {
-          console.warn('[MCP调用] OpenAI兼容端点返回404，尝试降级为 Ollama 原生 /api/chat');
+          logger.warn('[MCP调用] OpenAI兼容端点返回404，尝试降级为 Ollama 原生 /api/chat');
           this._useOllamaNativeChat = true;
         }
         try {
@@ -977,7 +978,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
             return { content: friendly };
           }
 
-          console.error('[MCP调用] Ollama 原生 /api/chat 调用也失败:', fallbackError.message);
+          logger.error('[MCP调用] Ollama 原生 /api/chat 调用也失败:', fallbackError.message);
           throw fallbackError;
         }
       }
@@ -997,7 +998,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         return { content: friendly };
       }
 
-      console.error('[MCP调用] 调用失败:', e.message);
+      logger.error('[MCP调用] 调用失败:', e.message);
       throw e;
     }
   }
