@@ -58,6 +58,7 @@ services:
     volumes:
       - ./backend/src:/app/src
       - ./backend/__tests__:/app/__tests__
+      - ./backend/config:/app/config
       - ./backend/package.json:/app/package.json
       - ./backend/logs:/app/logs
       - ./backend/scripts:/app/scripts
