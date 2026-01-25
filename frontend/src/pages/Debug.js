@@ -5,6 +5,7 @@ import axios from 'axios';
 import { testDbConnection, testRecentActivities } from '../services/stats.service';
 import { exportTableToExcel, importTableFromExcel } from '../services/debug.service';
 import { getCurrentUser } from '../services/auth.service';
+import MCPToggle from '../components/Admin/MCPToggle';
 
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
@@ -200,6 +201,13 @@ const Debug = () => {
           <Alert message="未登录" description="请先登录系统" type="warning" showIcon />
         )}
       </Card>
+
+      {state.userInfo && state.userInfo.role === 'admin' && (
+        <>
+          <Divider orientation="left">智能助手控制</Divider>
+          <MCPToggle />
+        </>
+      )}
 
       <Divider orientation="left">数据库连接</Divider>
       <Space direction="vertical" style={{ width: '100%' }}>

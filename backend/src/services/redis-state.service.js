@@ -4,7 +4,7 @@
  * Purpose: Manage AI mode state and MCP settings in Redis for global access
  */
 
-const { redisClient } = require('../../config/database');
+const { redisClient } = require('../config/database');
 const { AI_MODES, isValidMode } = require('../../config/mode-config');
 
 // Redis keys

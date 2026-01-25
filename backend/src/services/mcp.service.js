@@ -734,6 +734,41 @@ If the tool output is empty or indicates not found, verify if you can answer wit
   }
 
   async handleToolCalling({ question, history = [], context = '', signal }) {
+    // Check MCP Status
+    let mcpEnabled = true;
+    try {
+      const { getMCPStatus } = require('./redis-state.service');
+      mcpEnabled = await getMCPStatus();
+    } catch (e) {
+      console.warn('Failed to check MCP status, assuming enabled');
+    }
+
+    if (!mcpEnabled) {
+      console.log('[智能问答] MCP已禁用，改为直接聊天');
+      try {
+        const response = await this._callInternalModel({
+          messages: [...history, { role: 'user', content: question }],
+          signal
+        });
+        return {
+          content: response.content,
+          intent: 'chat',
+          toolsCalled: [],
+          mode: 'tool_calling',
+          source: 'mcp_model'
+        };
+      } catch (err) {
+        console.error('[智能问答] 直接聊天失败:', err);
+        return {
+          content: '抱歉，处理您的请求时遇到错误。',
+          intent: 'error',
+          toolsCalled: [],
+          mode: 'tool_calling',
+          errorMessage: err.message
+        };
+      }
+    }
+
     const tools = this.toolManager.listTools();
     if (!tools || tools.length === 0) {
       console.log('[智能问答] 检索工具不可用');

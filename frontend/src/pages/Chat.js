@@ -3,6 +3,7 @@ import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert } from 'antd';
 import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getChatHistory, clearChatHistory } from '../services/chat.service';
+import mcpService from '../services/mcpService';
 import { ChatSession } from '../utils/chat-session';
 import MessageRenderer from '../components/Chat/MessageRenderer';
 
@@ -18,6 +19,7 @@ const Chat = () => {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [mcpStatus, setMcpStatus] = useState({ isEnabled: true });
   const [messages, setMessages] = useState(() => ChatSession.loadMessages());
   const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
@@ -56,6 +58,19 @@ const Chat = () => {
         abortControllerRef.current.abort();
       }
     };
+  }, []);
+
+  // 加载MCP状态
+  useEffect(() => {
+    const loadMcpStatus = async () => {
+      try {
+        const status = await mcpService.getStatus();
+        setMcpStatus(status);
+      } catch (e) {
+        console.error('Failed to load MCP status:', e);
+      }
+    };
+    loadMcpStatus();
   }, []);
 
   // 加载聊天历史
@@ -537,6 +552,16 @@ const Chat = () => {
       )}
       
       <div className="chat-container">
+        {!mcpStatus.isEnabled && (
+          <Alert
+            message="MCP工具已禁用"
+            description="AI助手将无法通过MCP调用外部工具查询最新知识图谱数据，仅能依靠内置知识回答。"
+            type="warning"
+            showIcon
+            style={{ margin: '8px 16px 0 16px' }}
+            closable
+          />
+        )}
         <div className="chat-messages" ref={chatMessagesRef}>
           {initialLoading ? (
             <div style={{ textAlign: 'center', padding: '50px 0' }}>
