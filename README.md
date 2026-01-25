@@ -130,6 +130,72 @@ Excel 导入/导出（移自 Debug，Admin Only）：
 - 导出为附件：`POST /api/attachments/excel/export`（生成 `ownerType="system_export"` 的附件）
 - 从附件触发导入：`POST /api/attachments/{id}/excel/import?strategy=append|overwrite`（要求该附件为 `ownerType="system_import"`）
 
+### 4. 智能问答增强功能 (Smart Q&A Enhancements) 🆕
+
+#### 4.1 Markdown 渲染支持
+聊天界面现已支持完整的 Markdown 格式显示，包括：
+- **代码高亮**: 支持 JavaScript、Python、Cypher 等多种语言语法高亮
+- **数学公式**: 支持 LaTeX/KaTeX 数学公式渲染
+- **富文本格式**: 表格、列表、链接、引用块等
+- **XSS 防护**: 使用 rehype-sanitize 进行内容安全过滤
+
+**配置**: 前端自动启用，无需额外配置
+
+#### 4.2 MCP 功能管理
+管理员可以通过 API 或前端界面控制 MCP (Model Context Protocol) 功能的启用/禁用：
+
+- **管理接口**:
+  - 查询状态: `GET /api/mcp/status`
+  - 切换开关: `POST /api/mcp/toggle` (Body: `{"enabled": true/false}`)
+  - 查看历史: `GET /api/mcp/history`
+- **状态同步**: MCP 状态实时同步到所有连接的客户端
+- **审计日志**: 所有 MCP 状态变更记录到审计日志
+
+**使用场景**: 在维护期间或排查问题时临时禁用 MCP 功能
+
+#### 4.3 AI 模式自动降级机制
+系统全局监控 AI API 健康状态，在外部服务不可用时自动降级：
+
+- **模式层级**: 在线模式 (Online) → 本地模型 (Local deepseek-r1) → 模拟模式 (Mock)
+- **健康检查**: 后台定时检查 API 可用性（默认 30 秒间隔）
+- **自动降级**: API 连续失败 3 次后自动切换到下一级模式
+- **自动恢复**: 高优先级模式恢复健康后自动切回
+- **手动锁定**: 管理员可手动锁定特定模式，阻止自动切换
+- **实时通知**: 模式变化时通过 Toast 消息通知用户
+
+**管理接口**:
+- 查询当前模式: `GET /api/mode/current`
+- 锁定模式: `POST /api/mode/lock` (Body: `{"mode": "ONLINE|LOCAL|MOCK"}`)
+- 解锁模式: `POST /api/mode/unlock`
+- 模式历史: `GET /api/mode/history`
+
+**环境变量**:
+```bash
+HEALTH_CHECK_INTERVAL_MS=30000      # 健康检查间隔（毫秒）
+HEALTH_CHECK_TIMEOUT_MS=10000       # 检查超时时间
+HEALTH_CHECK_FAILURE_THRESHOLD=3    # 降级触发阈值
+```
+
+#### 4.4 Cypher 知识图谱查询
+AI 现在可以生成并执行 Cypher 查询来访问 Neo4j 知识图谱：
+
+- **安全验证**: 
+  - 语法检查和关键字黑名单（禁止 DELETE、CREATE、DROP 等破坏性操作）
+  - 函数白名单验证（仅允许安全的只读函数）
+  - 查询长度限制和超时控制（默认 5 秒）
+- **审计追踪**: 所有 Cypher 查询（成功/失败）记录到审计日志
+- **扩展性**: 预留权限级别字段，为未来受控写入管理预留接口
+
+**管理接口**:
+- 执行查询: `POST /api/cypher/execute` (Body: `{"query": "MATCH (n) RETURN n LIMIT 10", "executor": "user123"}`)
+- 验证查询: `POST /api/cypher/validate` (Body: `{"query": "..."}`)
+- 审计日志: `GET /api/cypher/audit-logs?page=1&limit=50`
+- 健康检查: `GET /api/cypher/health`
+
+**配置**: 修改 `backend/config/cypher-rules.js` 自定义验证规则
+
+**安全考虑**: 当前版本仅支持只读查询。未来版本将支持基于用户权限的受控写入操作。
+
 ## 🛠️ 开发与维护
 
 ### 目录结构

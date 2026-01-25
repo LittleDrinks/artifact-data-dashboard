@@ -71,10 +71,41 @@ if (rawTrustProxy === undefined) {
 }
 
 // 基本中间件
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cors());
-app.use(helmet());
+app.use(express.json({ limit: '10mb' })); // 限制请求体大小
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// CORS配置 - 根据环境变量配置允许的源
+const allowedOrigins = process.env.CORS_ORIGINS 
+  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:8080', 'http://localhost:3000'];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // 允许无origin的请求（如Postman、服务端调用）
+    if (!origin || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('不允许的CORS来源'));
+    }
+  },
+  credentials: true, // 允许携带凭据
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
 app.use(morgan('combined'));
 
 // 限流配置
