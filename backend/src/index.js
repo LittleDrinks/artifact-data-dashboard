@@ -26,6 +26,7 @@ const chatRoutes = require('./routes/chat.routes');
 const aiPluginsRoutes = require('./routes/ai-plugins.routes');
 const mcpRoutes = require('./routes/mcp.routes');
 const modeRoutes = require('./routes/mode.routes');
+const cypherRoutes = require('./routes/cypher.routes');
 const debugRoutes = require('./routes/debug.routes');
 const attachmentRoutes = require('./routes/attachment.routes');
 
@@ -149,6 +150,7 @@ app.use('/api/attachments', authMiddleware, attachmentRoutes);
 app.use('/api/ai-plugins', authMiddleware, roleMiddleware(['admin']), aiPluginsRoutes);
 app.use('/api/mcp', mcpRoutes); // Middleware defined in route file to support mixed access if needed
 app.use('/api/mode', modeRoutes);
+app.use('/api/cypher', cypherRoutes); // US4 - Cypher query execution API
 app.use('/api/debug', authMiddleware, roleMiddleware(['admin']), debugRoutes);
 
 // API文档路由 - 必须在其他路由之后注册
