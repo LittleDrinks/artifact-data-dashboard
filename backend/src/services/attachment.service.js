@@ -232,7 +232,8 @@ class AttachmentService {
     hash,
     thumbnailStorageName,
     meta,
-    status = 'ok'
+    status = 'ok',
+    folderId = null
   }) {
     const schema = await this._ensureSchema();
 
@@ -244,7 +245,8 @@ class AttachmentService {
       'mime_type',
       'size_bytes',
       'storage_name',
-      'created_at'
+      'created_at',
+      'folder_id'
     ];
 
     const values = [
@@ -255,7 +257,8 @@ class AttachmentService {
       mimeType,
       sizeBytes,
       storageName,
-      new Date()
+      new Date(),
+      folderId
     ];
 
     if (schema.hasHash) {
@@ -318,7 +321,7 @@ class AttachmentService {
     };
   }
 
-  async ingestBuffer({ uploadedBy, ownerType = null, ownerId = null, originalName, mimeType = null, buffer, extraMeta = null }) {
+  async ingestBuffer({ uploadedBy, ownerType = null, ownerId = null, folderId = null, originalName, mimeType = null, buffer, extraMeta = null }) {
     if (!buffer || !Buffer.isBuffer(buffer)) {
       throw new Error('buffer 无效');
     }
@@ -359,7 +362,8 @@ class AttachmentService {
           hash,
           thumbnailStorageName: existing.thumbnail_storage_name,
           meta: mergedMeta,
-          status: 'ok'
+          status: 'ok',
+          folderId
         });
 
         return { id: attachmentId, deduped: true };
@@ -401,7 +405,8 @@ class AttachmentService {
         hash,
         thumbnailStorageName: thumb,
         meta,
-        status: 'ok'
+        status: 'ok',
+        folderId
       });
 
       return { id: attachmentId, deduped: false };
@@ -417,7 +422,7 @@ class AttachmentService {
     return run();
   }
 
-  async ingestLocalFile({ uploadedBy, ownerType = null, ownerId = null, filePath, originalName, mimeType = null, extraMeta = null }) {
+  async ingestLocalFile({ uploadedBy, ownerType = null, ownerId = null, folderId = null, filePath, originalName, mimeType = null, extraMeta = null }) {
     const stat = await fsp.stat(filePath);
     if (!stat.isFile()) {
       throw new Error('不是文件');
@@ -458,7 +463,8 @@ class AttachmentService {
           hash,
           thumbnailStorageName: existing.thumbnail_storage_name,
           meta: mergedMeta,
-          status: 'ok'
+          status: 'ok',
+          folderId
         });
 
         return { id: attachmentId, deduped: true };
@@ -470,6 +476,7 @@ class AttachmentService {
         uploadedBy,
         ownerType,
         ownerId,
+        folderId,
         originalName: normalizedName,
         mimeType,
         buffer,
@@ -493,6 +500,157 @@ class AttachmentService {
       const result = await this.queue.enqueue(() => this.ingestBuffer(item));
       results.push(result);
     }
+    return results;
+  }
+
+  /**
+   * 获取附件的引用列表
+   * 返回引用该附件的文物和聊天记录
+   * @param {number} attachmentId - 附件ID
+   * @returns {Promise<Object>} 引用信息 { artifacts: [], chats: [] }
+   */
+  async listReferences(attachmentId) {
+    const results = {
+      artifacts: [],
+      chats: [],
+      total: 0
+    };
+
+    // 1. 查询 attachment_refs 表中的引用（如果存在）
+    try {
+      const [refRows] = await mysqlPool.execute(
+        `SELECT ar.owner_type, ar.owner_id, ar.relation_type, ar.created_at
+         FROM attachment_refs ar
+         WHERE ar.attachment_id = ?
+         ORDER BY ar.created_at DESC`,
+        [attachmentId]
+      );
+
+      for (const ref of refRows) {
+        if (ref.owner_type === 'artifact') {
+          // 获取文物信息
+          const [artifactRows] = await mysqlPool.execute(
+            'SELECT id, name, category, era FROM artifacts WHERE id = ?',
+            [ref.owner_id]
+          );
+          if (artifactRows.length > 0) {
+            results.artifacts.push({
+              id: artifactRows[0].id,
+              name: artifactRows[0].name,
+              category: artifactRows[0].category,
+              era: artifactRows[0].era,
+              relationType: ref.relation_type,
+              linkedAt: ref.created_at
+            });
+          }
+        } else if (ref.owner_type === 'chat') {
+          // 获取聊天记录信息
+          const [chatRows] = await mysqlPool.execute(
+            'SELECT id, user_id, created_at FROM chats WHERE id = ?',
+            [ref.owner_id]
+          );
+          if (chatRows.length > 0) {
+            results.chats.push({
+              id: chatRows[0].id,
+              userId: chatRows[0].user_id,
+              createdAt: chatRows[0].created_at,
+              relationType: ref.relation_type,
+              linkedAt: ref.created_at
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // attachment_refs 表可能不存在，尝试其他方式
+    }
+
+    // 2. 从 attachments 表的 owner_type/owner_id 查询
+    try {
+      const [attachmentRow] = await mysqlPool.execute(
+        'SELECT owner_type, owner_id FROM attachments WHERE id = ?',
+        [attachmentId]
+      );
+
+      if (attachmentRow.length > 0 && attachmentRow[0].owner_type && attachmentRow[0].owner_id) {
+        const ownerType = attachmentRow[0].owner_type;
+        const ownerId = attachmentRow[0].owner_id;
+
+        if (ownerType === 'artifact') {
+          // 检查是否已经在 artifacts 列表中
+          const exists = results.artifacts.some(a => a.id === ownerId);
+          if (!exists) {
+            const [artifactRows] = await mysqlPool.execute(
+              'SELECT id, name, category, era FROM artifacts WHERE id = ?',
+              [ownerId]
+            );
+            if (artifactRows.length > 0) {
+              results.artifacts.push({
+                id: artifactRows[0].id,
+                name: artifactRows[0].name,
+                category: artifactRows[0].category,
+                era: artifactRows[0].era,
+                relationType: 'owner',
+                linkedAt: null
+              });
+            }
+          }
+        } else if (ownerType === 'chat') {
+          const exists = results.chats.some(c => c.id === ownerId);
+          if (!exists) {
+            const [chatRows] = await mysqlPool.execute(
+              'SELECT id, user_id, created_at FROM chats WHERE id = ?',
+              [ownerId]
+            );
+            if (chatRows.length > 0) {
+              results.chats.push({
+                id: chatRows[0].id,
+                userId: chatRows[0].user_id,
+                createdAt: chatRows[0].created_at,
+                relationType: 'owner',
+                linkedAt: null
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // 忽略错误
+    }
+
+    // 3. 查询 artifacts 表中 image_url 包含该附件的记录
+    try {
+      const [attachmentInfo] = await mysqlPool.execute(
+        'SELECT id FROM attachments WHERE id = ?',
+        [attachmentId]
+      );
+      
+      if (attachmentInfo.length > 0) {
+        // 搜索 image_url 包含附件下载链接的文物
+        const downloadUrl = `/api/attachments/${attachmentId}/download`;
+        const [artifactRows] = await mysqlPool.execute(
+          'SELECT id, name, category, era FROM artifacts WHERE image_url LIKE ?',
+          [`%${downloadUrl}%`]
+        );
+        
+        for (const artifact of artifactRows) {
+          const exists = results.artifacts.some(a => a.id === artifact.id);
+          if (!exists) {
+            results.artifacts.push({
+              id: artifact.id,
+              name: artifact.name,
+              category: artifact.category,
+              era: artifact.era,
+              relationType: 'image_url',
+              linkedAt: null
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // 忽略错误
+    }
+
+    results.total = results.artifacts.length + results.chats.length;
     return results;
   }
 }

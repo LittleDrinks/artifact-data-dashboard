@@ -52,8 +52,14 @@ const isAdmin = (req) => req.user && req.user.role === 'admin';
 // 读取权限：所有已登录用户可见
 const canReadAttachment = (req, attachmentRow) => Boolean(req.user && attachmentRow);
 
-// 删除权限：仅管理员
-const canDeleteAttachment = (req) => Boolean(req.user && isAdmin(req));
+// 删除权限：管理员可删除任何文件；普通用户可删除自己上传的文件（特别是资产库文件）
+const canDeleteAttachment = (req, attachmentRow) => {
+  if (!req.user) return false;
+  if (isAdmin(req)) return true;
+  // 普通用户可删除自己上传的文件或资产库中的文件
+  if (attachmentRow && attachmentRow.uploaded_by === req.user.id) return true;
+  return false;
+};
 
 const writeLog = writeAuditLog;
 
@@ -170,6 +176,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const ownerId = req.body.ownerId !== undefined && req.body.ownerId !== null && String(req.body.ownerId).trim() !== ''
       ? Number(req.body.ownerId)
       : null;
+    const folderId = req.body.folderId !== undefined && req.body.folderId !== null && String(req.body.folderId).trim() !== ''
+      ? Number(req.body.folderId)
+      : null;
 
     if (ownerType && ownerType.length > 50) {
       return res.status(400).json({ message: 'ownerType过长' });
@@ -177,12 +186,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     if (ownerId !== null && !Number.isFinite(ownerId)) {
       return res.status(400).json({ message: 'ownerId无效' });
     }
+    if (folderId !== null && !Number.isFinite(folderId)) {
+      return res.status(400).json({ message: 'folderId无效' });
+    }
 
     // 统一走附件处理逻辑（hash/缩略图/去重）
     const result = await attachmentService.ingestLocalFile({
       uploadedBy: req.user.id,
       ownerType,
       ownerId,
+      folderId,
       filePath: req.file.path,
       originalName: normalizeOriginalName(req.file.originalname),
       mimeType: req.file.mimetype || 'application/octet-stream'
@@ -796,6 +809,47 @@ router.post('/:id/excel/import', async (req, res) => {
 
 /**
  * @swagger
+ * /api/attachments/{id}/references:
+ *   get:
+ *     summary: 获取附件的引用列表
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: 返回引用该附件的文物和聊天记录列表
+ *       404:
+ *         description: 附件不存在
+ */
+router.get('/:id/references', async (req, res) => {
+  try {
+    const attachmentId = Number(req.params.id);
+    if (!Number.isFinite(attachmentId)) {
+      return res.status(400).json({ message: '附件ID无效' });
+    }
+
+    // 验证附件存在
+    const [rows] = await mysqlPool.execute('SELECT id FROM attachments WHERE id = ?', [attachmentId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '附件不存在' });
+    }
+
+    const references = await attachmentService.listReferences(attachmentId);
+    return res.status(200).json(references);
+  } catch (error) {
+    logger.error('获取附件引用错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
  * /api/attachments/{id}:
  *   get:
  *     summary: 获取单个附件元数据
@@ -844,6 +898,120 @@ router.get('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('获取附件元数据错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/{id}/thumbnail:
+ *   get:
+ *     summary: 获取附件缩略图
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: string
+ *           enum: [small, medium, large]
+ *           default: small
+ *         description: 缩略图大小
+ *     responses:
+ *       200:
+ *         description: 返回缩略图
+ *       404:
+ *         description: 附件或缩略图不存在
+ */
+router.get('/:id/thumbnail', async (req, res) => {
+  try {
+    const attachmentId = Number(req.params.id);
+    if (!Number.isFinite(attachmentId)) {
+      return res.status(400).json({ message: '附件ID无效' });
+    }
+
+    const [rows] = await mysqlPool.execute('SELECT * FROM attachments WHERE id = ?', [attachmentId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '附件不存在' });
+    }
+
+    const attachment = rows[0];
+    if (!canReadAttachment(req, attachment)) {
+      return res.status(403).json({ message: '无权访问此附件' });
+    }
+
+    // 获取缩略图大小参数
+    const size = req.query.size || 'small';
+    const sizeMap = { small: 200, medium: 800, large: 1200 };
+    const thumbSize = sizeMap[size] || sizeMap.small;
+
+    let thumbnail_name = null;
+
+    // 优先从 meta.thumbnails 获取
+    try {
+      if (attachment.meta) {
+        const meta = typeof attachment.meta === 'string' ? JSON.parse(attachment.meta) : attachment.meta;
+        if (meta && meta.thumbnails) {
+          if (size === 'small' && meta.thumbnails.small) {
+            thumbnail_name = meta.thumbnails.small;
+          } else if (size === 'medium' && meta.thumbnails.medium) {
+            thumbnail_name = meta.thumbnails.medium;
+          }
+        }
+      }
+    } catch (err) {
+      // meta 解析失败，继续
+    }
+
+    // 备选：使用 thumbnail_storage_name
+    if (!thumbnail_name && size === 'small') {
+      thumbnail_name = attachment.thumbnail_storage_name;
+    }
+
+    if (!thumbnail_name) {
+      // 如果是图片且没有缩略图，返回原始文件
+      if (attachment.mime_type && attachment.mime_type.startsWith('image/')) {
+        const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);
+        if (!filePath.startsWith(RESOLVED_UPLOAD_DIR + path.sep)) {
+          return res.status(400).json({ message: '非法文件路径' });
+        }
+        if (!fs.existsSync(filePath)) {
+          return res.status(404).json({ message: '文件不存在或已被删除' });
+        }
+        return res.sendFile(filePath);
+      }
+      return res.status(404).json({ message: '该附件没有缩略图' });
+    }
+
+    const thumbPath = path.resolve(UPLOAD_DIR, thumbnail_name);
+    if (!thumbPath.startsWith(RESOLVED_UPLOAD_DIR + path.sep)) {
+      return res.status(400).json({ message: '非法文件路径' });
+    }
+
+    if (!fs.existsSync(thumbPath)) {
+      // 缩略图不存在，返回原始文件作为备选
+      if (attachment.mime_type && attachment.mime_type.startsWith('image/')) {
+        const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);
+        if (!filePath.startsWith(RESOLVED_UPLOAD_DIR + path.sep)) {
+          return res.status(400).json({ message: '非法文件路径' });
+        }
+        if (!fs.existsSync(filePath)) {
+          return res.status(404).json({ message: '文件不存在或已被删除' });
+        }
+        return res.sendFile(filePath);
+      }
+      return res.status(404).json({ message: '缩略图不存在或已被删除' });
+    }
+
+    return res.sendFile(thumbPath);
+  } catch (error) {
+    logger.error('获取缩略图错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });
@@ -904,6 +1072,121 @@ router.get('/:id/download', async (req, res) => {
 
 /**
  * @swagger
+ * /api/attachments/batch-delete:
+ *   post:
+ *     summary: 批量删除附件
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - ids
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *     responses:
+ *       200:
+ *         description: 批量删除成功
+ */
+router.post('/batch-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: '请提供有效的附件ID列表' });
+    }
+    
+    if (ids.length > 100) {
+      return res.status(400).json({ message: '单次最多删除100个文件' });
+    }
+
+    const validIds = ids.filter(id => Number.isFinite(Number(id))).map(Number);
+    if (validIds.length === 0) {
+      return res.status(400).json({ message: '未找到有效的附件ID' });
+    }
+
+    // 获取所有附件
+    const placeholders = validIds.map(() => '?').join(',');
+    const [rows] = await mysqlPool.execute(
+      `SELECT * FROM attachments WHERE id IN (${placeholders})`,
+      validIds
+    );
+
+    // 检查权限
+    const deletableRows = rows.filter(row => canDeleteAttachment(req, row));
+    if (deletableRows.length === 0) {
+      return res.status(403).json({ message: '无权删除所选文件' });
+    }
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const attachment of deletableRows) {
+      try {
+        // 检查引用
+        try {
+          const [refRows] = await mysqlPool.execute(
+            'SELECT COUNT(*) AS cnt FROM attachment_refs WHERE attachment_id = ?',
+            [attachment.id]
+          );
+          if (Number(refRows?.[0]?.cnt || 0) > 0) {
+            failedCount++;
+            continue;
+          }
+        } catch (err) {
+          // attachment_refs 可能尚未迁移，忽略
+        }
+
+        // 删除文件
+        const filePath = path.resolve(UPLOAD_DIR, attachment.storage_name);
+        if (filePath.startsWith(RESOLVED_UPLOAD_DIR + path.sep) && fs.existsSync(filePath)) {
+          try {
+            await fsp.unlink(filePath);
+          } catch (err) {
+            logger.warn('删除文件失败:', err.message);
+          }
+        }
+
+        // 删除数据库记录
+        await mysqlPool.execute('DELETE FROM attachments WHERE id = ?', [attachment.id]);
+
+        await writeLog({
+          userId: req.user.id,
+          action: 'delete_attachment',
+          targetId: attachment.id,
+          details: JSON.stringify({
+            originalName: attachment.original_name,
+            batchDelete: true
+          })
+        });
+
+        successCount++;
+      } catch (err) {
+        logger.error(`删除附件 ${attachment.id} 失败:`, err);
+        failedCount++;
+      }
+    }
+
+    return res.json({
+      message: `成功删除 ${successCount} 个文件，失败 ${failedCount} 个`,
+      successCount,
+      failedCount
+    });
+  } catch (error) {
+    logger.error('批量删除附件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
  * /api/attachments/{id}:
  *   delete:
  *     summary: 删除附件
@@ -933,8 +1216,8 @@ router.delete('/:id', async (req, res) => {
     }
 
     const attachment = rows[0];
-    if (!canDeleteAttachment(req)) {
-      return res.status(403).json({ message: '权限不足：仅管理员可删除附件' });
+    if (!canDeleteAttachment(req, attachment)) {
+      return res.status(403).json({ message: '权限不足：仅管理员或文件上传者可删除' });
     }
 
     try {
@@ -976,6 +1259,92 @@ router.delete('/:id', async (req, res) => {
     return res.status(200).json({ message: '删除成功' });
   } catch (error) {
     logger.error('删除附件错误:', error);
+    return res.status(500).json({ message: '服务器内部错误' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/attachments/bulk/tags:
+ *   post:
+ *     summary: 批量添加或移除标签
+ *     tags: [Attachments]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - attachmentIds
+ *               - tagIds
+ *               - action
+ *             properties:
+ *               attachmentIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: 附件ID列表
+ *               tagIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: 标签ID列表
+ *               action:
+ *                 type: string
+ *                 enum: [add, remove]
+ *                 description: 操作类型
+ *     responses:
+ *       200:
+ *         description: 操作成功
+ *       400:
+ *         description: 参数无效
+ *       403:
+ *         description: 权限不足
+ */
+router.post('/bulk/tags', async (req, res) => {
+  try {
+    const { attachmentIds, tagIds, action } = req.body;
+
+    if (!Array.isArray(attachmentIds) || attachmentIds.length === 0) {
+      return res.status(400).json({ message: '请提供附件ID列表' });
+    }
+    if (!Array.isArray(tagIds) || tagIds.length === 0) {
+      return res.status(400).json({ message: '请提供标签ID列表' });
+    }
+    if (!['add', 'remove'].includes(action)) {
+      return res.status(400).json({ message: '操作类型无效，必须是 add 或 remove' });
+    }
+
+    // 动态导入避免循环依赖
+    const tagService = require('../services/tag.service');
+
+    let result;
+    if (action === 'add') {
+      result = await tagService.bulkAddTags(attachmentIds, tagIds, req.user.id);
+    } else {
+      result = await tagService.bulkRemoveTags(attachmentIds, tagIds);
+    }
+
+    await writeLog({
+      userId: req.user.id,
+      action: `bulk_${action}_tags`,
+      targetId: null,
+      details: JSON.stringify({
+        attachmentIds,
+        tagIds,
+        result: result.message
+      })
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.status === 404) {
+      return res.status(404).json({ message: error.message });
+    }
+    logger.error('批量标签操作错误:', error);
     return res.status(500).json({ message: '服务器内部错误' });
   }
 });

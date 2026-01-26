@@ -1,5 +1,7 @@
-import React, { useEffect } from 'react';
-import { Button, Form, Input, Modal, Space, Switch } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Button, Form, Input, Modal, Space, Switch, Image } from 'antd';
+import { PictureOutlined } from '@ant-design/icons';
+import AssetPicker from './AssetLibrary/AssetPicker';
 
 const normalizeInitial = (artifact) => {
   const src = artifact || {};
@@ -27,6 +29,7 @@ const ArtifactForm = ({
   onSubmit
 }) => {
   const [form] = Form.useForm();
+  const [assetPickerVisible, setAssetPickerVisible] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -34,6 +37,17 @@ const ArtifactForm = ({
     }
     form.setFieldsValue(normalizeInitial(initialValues));
   }, [open, initialValues, form]);
+
+  // 处理从资产库选择图片
+  const handleAssetSelect = (asset) => {
+    if (asset && asset.downloadUrl) {
+      form.setFieldsValue({ image_url: asset.downloadUrl });
+    }
+    setAssetPickerVisible(false);
+  };
+
+  // 获取当前图片URL用于预览
+  const currentImageUrl = Form.useWatch('image_url', form);
 
   return (
     <Modal
@@ -94,8 +108,37 @@ const ArtifactForm = ({
           <Input disabled={readOnly} placeholder="例如：湖南宁乡" />
         </Form.Item>
 
-        <Form.Item label="图片链接" name="image_url">
-          <Input disabled={readOnly} placeholder="http(s)://..." />
+        <Form.Item label="图片" name="image_url">
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space>
+              <Input 
+                disabled={readOnly} 
+                placeholder="图片链接或从资产库选择..." 
+                style={{ width: 400 }}
+                value={form.getFieldValue('image_url')}
+                onChange={(e) => form.setFieldsValue({ image_url: e.target.value })}
+              />
+              {!readOnly && (
+                <Button 
+                  icon={<PictureOutlined />}
+                  onClick={() => setAssetPickerVisible(true)}
+                >
+                  从资产库选择
+                </Button>
+              )}
+            </Space>
+            {currentImageUrl && (
+              <div style={{ marginTop: 8 }}>
+                <Image
+                  src={currentImageUrl}
+                  alt="预览"
+                  width={200}
+                  style={{ borderRadius: 4 }}
+                  fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8rAzCDMwMtgyGCQmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1N"
+                />
+              </div>
+            )}
+          </Space>
         </Form.Item>
 
         <Form.Item label="标签（逗号分隔）" name="tags">
@@ -118,6 +161,16 @@ const ArtifactForm = ({
           </Form.Item>
         </Space>
       </Form>
+
+      {/* 资产选择器 */}
+      <AssetPicker
+        visible={assetPickerVisible}
+        onClose={() => setAssetPickerVisible(false)}
+        onSelect={handleAssetSelect}
+        multiple={false}
+        accept="image/*"
+        title="选择文物图片"
+      />
     </Modal>
   );
 };

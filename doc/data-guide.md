@@ -88,6 +88,153 @@ REDIS_PORT=16379
 NEO4J_URI=bolt://localhost:17687
 ```
 
+## 数字资产管理 (DAMS)
+
+### 概述
+数字资产管理系统提供企业级的文件管理能力，将附件从简单存储升级为可管理、可分类、可共享的数字资产。
+
+### 核心功能
+
+#### 文件夹管理
+- **层级结构**：支持无限层级的文件夹嵌套
+- **拖拽操作**：通过拖拽移动文件和文件夹
+- **批量管理**：支持批量移动、删除操作
+
+#### 标签系统
+- **多标签**：每个资产可添加多个标签
+- **颜色标识**：每个标签可自定义颜色
+- **筛选过滤**：根据标签快速筛选资产
+- **批量打标**：支持批量添加/移除标签
+
+#### 公开分享
+- **临时链接**：生成带有效期的公开访问链接
+- **密码保护**：可选密码保护敏感资产
+- **下载限制**：可设置最大下载次数
+- **访问日志**：记录每次访问的IP和时间
+
+#### 资产选择器
+- **文物关联**：在创建文物时直接从资产库选择图片
+- **双模式**：支持"从资产库选择"或"上传新文件"
+- **预览支持**：选择前可预览图片内容
+
+#### 引用追踪
+- **双向关联**：查看资产被哪些文物/对话引用
+- **快速导航**：点击引用可跳转到关联内容
+
+### API 端点
+
+#### 文件夹操作
+```bash
+# 获取文件夹树
+GET /api/folders
+
+# 创建文件夹
+POST /api/folders
+{
+  "name": "文物图片",
+  "parentFolderId": null  # null表示根目录
+}
+
+# 移动文件夹
+PUT /api/folders/:id/move
+{
+  "parentFolderId": "目标父文件夹ID"
+}
+```
+
+#### 标签操作
+```bash
+# 获取所有标签
+GET /api/tags
+
+# 创建标签
+POST /api/tags
+{
+  "name": "重要",
+  "color": "#ff4d4f"
+}
+
+# 为资产添加标签
+POST /api/tags/file/:attachmentId
+{
+  "tagId": "标签ID"
+}
+
+# 批量打标
+POST /api/attachments/bulk/tags
+{
+  "attachmentIds": [1, 2, 3],
+  "tagIds": [10, 11],
+  "action": "add"  # 或 "remove"
+}
+```
+
+#### 公开链接
+```bash
+# 创建公开链接
+POST /api/public-links
+{
+  "attachmentId": 123,
+  "expiresAt": "2024-12-31T23:59:59Z",  # 可选
+  "password": "secret123",               # 可选
+  "maxDownloads": 10                     # 可选
+}
+
+# 公开访问（无需认证）
+GET /public/:token/download
+GET /public/:token/info
+```
+
+#### 引用查询
+```bash
+# 查询资产引用
+GET /api/attachments/:id/references
+
+# 响应示例
+{
+  "artifacts": [
+    {"id": 1, "name": "青铜鼎", "type": "image_url"}
+  ],
+  "chats": [
+    {"id": 5, "preview": "这件文物的图片..."}
+  ]
+}
+```
+
+### 数据库表结构
+
+#### folders 表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INT | 主键 |
+| name | VARCHAR(255) | 文件夹名称 |
+| parent_folder_id | INT | 父文件夹ID |
+| created_at | DATETIME | 创建时间 |
+
+#### tags 表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INT | 主键 |
+| name | VARCHAR(100) | 标签名称 |
+| color | VARCHAR(7) | 颜色代码 |
+
+#### file_tags 表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| file_id | INT | 附件ID |
+| tag_id | INT | 标签ID |
+
+#### public_links 表
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INT | 主键 |
+| attachment_id | INT | 关联附件 |
+| token | VARCHAR(36) | 访问令牌 |
+| expires_at | DATETIME | 过期时间 |
+| password_hash | VARCHAR(255) | 密码哈希 |
+| max_downloads | INT | 最大下载次数 |
+| download_count | INT | 已下载次数 |
+
 ## 常见问题与校验
 
 ### 数据校验要点

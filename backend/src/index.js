@@ -64,6 +64,12 @@ logger.debug('Loading debug routes...');
 const debugRoutes = require('./routes/debug.routes');
 logger.debug('Loading attachment routes...');
 const attachmentRoutes = require('./routes/attachment.routes');
+logger.debug('Loading folder routes...');
+const folderRoutes = require('./routes/folder.routes');
+logger.debug('Loading tag routes...');
+const tagRoutes = require('./routes/tag.routes');
+logger.debug('Loading public-link routes...');
+const publicLinkRoutes = require('./routes/public-link.routes');
 
 logger.info('Routes loaded, registering tools...');
 
@@ -227,6 +233,10 @@ app.use('/api/graph', authMiddleware, graphRoutes);
 app.use('/api/wordcloud', authMiddleware, wordcloudRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
 app.use('/api/attachments', authMiddleware, attachmentRoutes);
+app.use('/api/folders', folderRoutes); // DAMS - 文件夹管理
+app.use('/api/tags', tagRoutes); // DAMS - 标签管理
+app.use('/api/public-links', publicLinkRoutes); // DAMS - 公开链接管理
+app.use('/public', publicLinkRoutes); // DAMS - 公开访问端点（无需认证）
 app.use('/api/ai-plugins', authMiddleware, roleMiddleware(['admin']), aiPluginsRoutes);
 app.use('/api/mcp', mcpRoutes); // Middleware defined in route file to support mixed access if needed
 app.use('/api/mode', modeRoutes);

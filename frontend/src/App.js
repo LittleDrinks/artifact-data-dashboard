@@ -11,7 +11,8 @@ import {
   UserOutlined,
   LoginOutlined,
   LogoutOutlined,
-  BugOutlined
+  BugOutlined,
+  FolderOutlined
 } from '@ant-design/icons';
 
 // 导入页面组件
@@ -25,6 +26,7 @@ import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import Debug from './pages/Debug'; // 导入调试页面
 import Attachments from './pages/Attachments';
+import AssetLibrary from './pages/AssetLibrary'; // 导入资产库页面
 import ModeManager from './components/Admin/ModeManager'; // 导入模式管理组件
 
 // 导入服务和上下文
@@ -86,6 +88,9 @@ function App() {
         break;
       case 'attachments':
         navigate('/attachments');
+        break;
+      case 'asset-library':
+        navigate('/asset-library');
         break;
       case 'debug':
         if (isAdmin) {
@@ -150,6 +155,11 @@ function App() {
       key: 'attachments',
       icon: <PaperClipOutlined />,
       label: '附件管理',
+    },
+    {
+      key: 'asset-library',
+      icon: <FolderOutlined />,
+      label: '资产库',
     }
   ];
 
@@ -179,6 +189,7 @@ function App() {
     if (path === '/chat') return 'chat';
     if (path === '/profile') return 'profile';
     if (path === '/attachments') return 'attachments';
+    if (path === '/asset-library') return 'asset-library';
     if (path === '/debug') {
       return isAdmin ? 'debug' : 'dashboard';
     }
@@ -250,6 +261,7 @@ function App() {
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/attachments" element={<Attachments />} />
+            <Route path="/asset-library" element={<AssetLibrary />} />
             <Route
               path="/debug"
               element={isAdmin ? <Debug /> : <Navigate to="/" replace />}

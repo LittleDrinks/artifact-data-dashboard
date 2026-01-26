@@ -9,7 +9,7 @@ if (normalizedBaseURL && axios.defaults.baseURL !== normalizedBaseURL) {
   axios.defaults.baseURL = normalizedBaseURL;
 }
 
-export const uploadAttachment = async ({ file, ownerType, ownerId, signal, onUploadProgress } = {}) => {
+export const uploadAttachment = async ({ file, ownerType, ownerId, folderId, signal, onUploadProgress } = {}) => {
   const form = new FormData();
   form.append('file', file);
   if (ownerType !== undefined && ownerType !== null && String(ownerType).trim() !== '') {
@@ -17,6 +17,9 @@ export const uploadAttachment = async ({ file, ownerType, ownerId, signal, onUpl
   }
   if (ownerId !== undefined && ownerId !== null && String(ownerId).trim() !== '') {
     form.append('ownerId', ownerId);
+  }
+  if (folderId !== undefined && folderId !== null) {
+    form.append('folderId', folderId);
   }
   return axios.post(`${BASE}/upload`, form, {
     headers: {
@@ -50,6 +53,10 @@ export const getAttachment = async (id) => {
 
 export const deleteAttachment = async (id) => {
   return axios.delete(`${BASE}/${id}`);
+};
+
+export const batchDeleteAttachments = async (ids) => {
+  return axios.post(`${BASE}/batch-delete`, { ids });
 };
 
 export const getAttachmentDownloadUrl = (id) => {

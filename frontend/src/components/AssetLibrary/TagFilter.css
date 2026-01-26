@@ -1,0 +1,119 @@
+/* TagFilter.css - 标签过滤组件样式 */
+
+.tag-filter {
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.tag-filter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+  font-weight: 500;
+}
+
+.tag-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.tag-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tag-item:hover {
+  background: #f5f5f5;
+}
+
+.tag-item.selected {
+  background: #e6f7ff;
+}
+
+.tag-badge {
+  margin-right: 8px;
+}
+
+.tag-count {
+  font-size: 12px;
+  color: #999;
+  flex: 1;
+}
+
+.tag-actions {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.tag-item:hover .tag-actions {
+  opacity: 1;
+}
+
+.action-icon {
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.action-icon:hover {
+  color: #1890ff;
+}
+
+.action-icon.danger:hover {
+  color: #ff4d4f;
+}
+
+.tag-loading,
+.tag-empty {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+}
+
+.tag-filter-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  gap: 8px;
+}
+
+/* 创建/编辑标签表单 */
+.tag-create-form,
+.tag-edit-form {
+  width: 200px;
+}
+
+.color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.color-option {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+}
+
+.color-option.selected {
+  outline: 2px solid #333;
+  outline-offset: 2px;
+}

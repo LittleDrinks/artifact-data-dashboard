@@ -3,16 +3,29 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('AuthMiddleware');
 
+/**
+ * 从请求中提取 token
+ * 支持: Authorization header, query 参数 (?token=xxx)
+ */
+const extractToken = (req) => {
+  // 优先从 Authorization header 获取
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.split(' ')[1];
+  }
+  
+  // 备选：从 query 参数获取（用于 img src 等场景）
+  if (req.query && req.query.token) {
+    return req.query.token;
+  }
+  
+  return null;
+};
+
 // 认证中间件
 const authMiddleware = (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: '未授权：无效的Token格式' });
-    }
-    
-    const token = authHeader.split(' ')[1];
+    const token = extractToken(req);
     
     if (!token) {
       return res.status(401).json({ message: '未授权：Token不存在' });
