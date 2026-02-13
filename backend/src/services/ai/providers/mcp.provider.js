@@ -19,8 +19,8 @@ class McpProvider {
     return this.toolManager.listTools();
   }
 
-  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult }) {
-    return mcpService.askStream({ question, history, context, mode, onData, onEnd, onError, onToolResult });
+  async askStream({ question, history = [], context = '', mode, config = {}, onData, onEnd, onError, onToolResult, signal }) {
+    return mcpService.askStream({ question, history, context, mode, config, onData, onEnd, onError, onToolResult, signal });
   }
 }
 

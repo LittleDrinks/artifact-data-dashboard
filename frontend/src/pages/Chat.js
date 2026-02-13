@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert, Space } from 'antd';
-import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -10,9 +10,18 @@ import modeService from '../services/modeService';
 import { ChatSession } from '../utils/chat-session';
 import ModeIndicator from '../components/Chat/ModeIndicator';
 import MessageRenderer from '../components/Chat/MessageRenderer';
+import AIConfigPanel from '../components/Chat/AIConfigPanel';
 
 const { TextArea } = Input;
 const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
+
+// 默认 AI 配置
+const DEFAULT_AI_CONFIG = {
+  model: 'LOCAL',
+  modelLocked: false,
+  answerMode: 'knowledge',
+  mcpTools: ['query_graph', 'search_artifacts']
+};
 
 const findPendingAssistantMessage = (messages) => {
   if (!Array.isArray(messages) || messages.length === 0) return null;
@@ -29,6 +38,8 @@ const Chat = () => {
   const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
   const [streamingMessageId, setStreamingMessageId] = useState(() => ChatSession.loadStreamingMessageId());
+  const [configPanelVisible, setConfigPanelVisible] = useState(false);
+  const [aiConfig, setAiConfig] = useState(DEFAULT_AI_CONFIG);
   const chatMessagesRef = useRef(null);
   const abortControllerRef = useRef(null);
   const navigate = useNavigate();
@@ -64,6 +75,11 @@ const Chat = () => {
       }
     };
   }, []);
+
+  // 处理 AI 配置变更
+  const handleConfigChange = (newConfig) => {
+    setAiConfig(newConfig);
+  };
 
   // 加载MCP状态
   useEffect(() => {
@@ -248,7 +264,12 @@ const Chat = () => {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ question, conversationId, mode: DEFAULT_MODE }),
+        body: JSON.stringify({
+        question,
+        conversationId,
+        mode: DEFAULT_MODE,
+        config: aiConfig
+      }),
         signal: abortControllerRef.current.signal
       });
 
@@ -562,6 +583,13 @@ const Chat = () => {
         <Space>
           <ModeIndicator onModeChange={handleModeChange} />
           <Button
+            icon={<SettingOutlined />}
+            onClick={() => setConfigPanelVisible(!configPanelVisible)}
+            type={configPanelVisible ? 'primary' : 'default'}
+          >
+            配置
+          </Button>
+          <Button
             danger
             icon={<DeleteOutlined />}
             onClick={handleClearHistory}
@@ -583,6 +611,13 @@ const Chat = () => {
         />
       )}
       
+      <AIConfigPanel
+        visible={configPanelVisible}
+        onToggle={() => setConfigPanelVisible(!configPanelVisible)}
+        onConfigChange={handleConfigChange}
+        className="ai-config-panel"
+      />
+
       <div className="chat-container">
         {!mcpStatus.isEnabled && (
           <Alert

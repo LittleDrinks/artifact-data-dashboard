@@ -52,6 +52,8 @@ logger.debug('Loading wordcloud routes...');
 const wordcloudRoutes = require('./routes/wordcloud.routes');
 logger.debug('Loading chat routes...');
 const chatRoutes = require('./routes/chat.routes');
+logger.debug('Loading chat-config routes...');
+const chatConfigRoutes = require('./routes/chat-config.routes');
 logger.debug('Loading ai-plugins routes...');
 const aiPluginsRoutes = require('./routes/ai-plugins.routes');
 logger.debug('Loading mcp routes...');
@@ -232,6 +234,7 @@ app.use('/api/stats', authMiddleware, statsRoutes);
 app.use('/api/graph', authMiddleware, graphRoutes);
 app.use('/api/wordcloud', authMiddleware, wordcloudRoutes);
 app.use('/api/chat', authMiddleware, chatRoutes);
+app.use('/api/chat', authMiddleware, chatConfigRoutes);
 app.use('/api/attachments', authMiddleware, attachmentRoutes);
 app.use('/api/folders', folderRoutes); // DAMS - 文件夹管理
 app.use('/api/tags', tagRoutes); // DAMS - 标签管理

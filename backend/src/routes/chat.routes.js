@@ -10,6 +10,7 @@ const { McpProvider } = require('../services/ai/providers/mcp.provider');
 const { applyInputCapabilities } = require('../services/ai/capabilities');
 const { extractKeywords: extractKeywordsService } = require('../services/keyword.service');
 const modeManager = require('../services/ai/mode-manager');
+const chatConfigService = require('../services/ai/chat-config.service');
 const { generateMockResponse, generateMockStreamResponse } = require('../services/ai/mock-provider');
 
 const router = express.Router();
@@ -71,7 +72,7 @@ router.use(async (req, res, next) => {
  */
 router.post('/ask', async (req, res) => {
   try {
-    const { question, conversationId = null, mode: requestMode } = req.body;
+    const { question, conversationId = null, mode: requestMode, config: requestConfig } = req.body;
     const aiMode = (requestMode || process.env.AI_MODE || 'pre_retrieve').trim();
     
     if (!question) {
@@ -86,6 +87,25 @@ router.post('/ask', async (req, res) => {
     // 生成会话ID或使用现有ID
     const sessionId = conversationId || `chat_${req.user.id}_${Date.now()}`;
     const assistantMessageId = `assistant_${req.user.id}_${Date.now()}`;
+
+    // 获取或初始化会话配置
+    let sessionConfig;
+    try {
+      sessionConfig = await chatConfigService.getConfig(sessionId);
+      
+      // 如果请求中提供了配置更新，则更新配置
+      if (requestConfig && typeof requestConfig === 'object') {
+        sessionConfig = await chatConfigService.setConfig(sessionId, {
+          ...requestConfig,
+          // 确保 modelLocked 保持一致
+          modelLocked: sessionConfig.modelLocked
+        });
+        logger.info(`[Chat] 会话 ${sessionId} 配置已更新`, { config: sessionConfig });
+      }
+    } catch (configError) {
+      logger.warn('[Chat] 获取/更新会话配置失败，使用默认配置:', configError);
+      sessionConfig = chatConfigService.getDefaultConfig();
+    }
 
     // 注意：刷新/导航会导致 SSE 连接断开，但不应该中止后端生成。
     // 否则会出现“后端继续跑但不落库，刷新后前端既看不到思考气泡也拿不到最终答案”。
@@ -283,9 +303,10 @@ router.post('/ask', async (req, res) => {
     
     // 获取当前 AI 模式配置
     const currentModeConfig = await modeManager.getCurrentMode();
-    const effectiveMode = currentModeConfig.mode; // ONLINE/LOCAL/MOCK
+    // 优先使用会话配置中的模型设置
+    const effectiveMode = sessionConfig.model || currentModeConfig.mode; // ONLINE/LOCAL/MOCK
     
-    logger.info(`[Chat] 当前 AI 模式: ${effectiveMode}, 锁定状态: ${currentModeConfig.locked}`);
+    logger.info(`[Chat] 当前 AI 模式: ${effectiveMode}, 会话问答模式: ${sessionConfig.mode}, 锁定状态: ${currentModeConfig.locked}`);
     
     // 如果是 MOCK 模式，使用模拟 Provider
     if (effectiveMode === 'MOCK') {
@@ -465,11 +486,13 @@ router.post('/ask', async (req, res) => {
     }
 
     // 调用 provider（目前实现为 MCP），保持原 SSE 流式输出格式
+    // 传递会话配置给 provider
     await provider.askStream({
       question: applied.question,
       history,
       context: applied.context,
       mode: aiMode,
+      config: sessionConfig, // 传递会话配置（包含问答模式、启用工具等）
       signal: abortController.signal,
       onData: (content) => {
         // 即使客户端断开也要继续累积并落库

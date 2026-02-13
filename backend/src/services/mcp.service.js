@@ -7,6 +7,7 @@ const { getAiMode } = require('../config/env');
 const { toolManager } = require('./tool-manager');
 const { safeJsonParse } = require('../utils/json-parser');
 const { createLogger } = require('../utils/logger');
+const { getSystemPromptByMode } = require('./ai/mode-prompts');
 
 const logger = createLogger('MCPService');
 
@@ -393,7 +394,7 @@ Ensure your response is valid JSON. Do not return any other text.
     return { toolsCalled, toolResult: executed.status === 'success' ? executed.result : `Error: ${executed.error}` };
   }
 
-  async _synthesizeResponse({ question, history, context, targetTool, toolResult, signal }) {
+  async _synthesizeResponse({ question, history, context, targetTool, toolResult, signal, chatMode = null }) {
     const synthesisPrompt = `
 User Question: "${question}"
 Tool "${targetTool.name}" Output: ${typeof toolResult === 'string' ? toolResult.substring(0, 2000) : JSON.stringify(toolResult).substring(0, 2000)}
@@ -404,7 +405,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
     const finalResponse = await this._callInternalModel({
       messages: [
-        { role: 'system', content: this.buildSystemPrompt(context) },
+        { role: 'system', content: this.buildSystemPrompt(context, chatMode) },
         ...history,
         { role: 'user', content: synthesisPrompt }
       ],
@@ -426,7 +427,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
   sanitizeModelText(text) {
     if (!text) return text;
 
-    // 过滤掉明显的“伪工具/伪函数调用”噪声（常见于某些模型的输出模式）
+    // 过滤掉明显的"伪工具/伪函数调用"噪声（常见于某些模型的输出模式）
     // 注意：这是保底措施，主要依赖系统提示词约束。
     return text
       .replace(/\bloadData\([^\)]*\)/g, '')
@@ -443,23 +444,50 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       .replace(/\n{4,}/g, '\n\n');
   }
 
-  buildSystemPrompt(context) {
-    const baseRules = [
-      '你是一个文物领域的智能助手。',
-      '只输出中文。',
-      '避免使用英文单词；如不可避免，请用中文解释并尽量不直接输出英文。',
-      '严禁输出任何代码、函数调用、JSON、HTML、Markdown 代码块。',
-      "严禁输出类似 loadData('q') / fetch(...) 等伪函数调用。",
-      '回答必须优先、尽可能引用【检索上下文】中的事实。',
-      '如果【检索上下文】为空或确实无关，必须明确说“未在数据中找到”，不要编造具体实体、年代、地点、数值。',
-      '允许补充少量通用常识，但需用“常识补充：”开头，并避免具体细节。'
-    ].join('\n');
+  buildSystemPrompt(context, chatMode = null) {
+    // 如果指定了问答模式，使用对应的系统提示词
+    let baseRules;
+    if (chatMode) {
+      baseRules = getSystemPromptByMode(chatMode);
+    } else {
+      baseRules = [
+        '你是一个文物领域的智能助手。',
+        '只输出中文。',
+        '避免使用英文单词；如不可避免，请用中文解释并尽量不直接输出英文。',
+        '严禁输出任何代码、函数调用、JSON、HTML、Markdown 代码块。',
+        "严禁输出类似 loadData('q') / fetch(...) 等伪函数调用。",
+        '回答必须优先、尽可能引用【检索上下文】中的事实。',
+        '如果【检索上下文】为空或确实无关，必须明确说"未在数据中找到"，不要编造具体实体、年代、地点、数值。',
+        '允许补充少量通用常识，但需用"常识补充："开头，并避免具体细节。'
+      ].join('\n');
+    }
 
     if (context) {
       return `${baseRules}\n\n【检索上下文】\n${context}`;
     }
 
     return baseRules;
+  }
+
+  /**
+   * 根据启用的工具列表过滤工具
+   * @param {Array} enabledTools - 启用的工具名称列表
+   * @returns {Array} 过滤后的工具列表
+   */
+  _filterTools(enabledTools) {
+    const allTools = this.toolManager.listTools();
+    
+    if (!enabledTools || enabledTools.length === 0) {
+      return allTools;
+    }
+
+    const filtered = allTools.filter(tool => enabledTools.includes(tool.name));
+    logger.debug(`[MCP] 工具过滤: ${allTools.length} -> ${filtered.length}`, {
+      enabled: enabledTools,
+      available: allTools.map(t => t.name)
+    });
+    
+    return filtered;
   }
 
   async ask(question, history = [], context = '') {
@@ -480,11 +508,14 @@ If the tool output is empty or indicates not found, verify if you can answer wit
    * @param {Function} onEnd 结束回调
    * @param {Function} onError 错误回调
    */
-  async askStream({ question, history = [], context = '', mode, onData, onEnd, onError, onToolResult, signal }) {
+  async askStream({ question, history = [], context = '', mode, config = {}, onData, onEnd, onError, onToolResult, signal }) {
     const aiMode = (mode || this.getAiModeFn({})).trim();
+    const chatMode = config.mode || null; // graph | knowledge | general
+    const enabledTools = config.enabledTools || null;
+    
     if (aiMode === 'tool_calling') {
       try {
-        const result = await this._executeToolCalling({ question, history, context, signal });
+        const result = await this._executeToolCalling({ question, history, context, signal, config });
         if (onToolResult) {
           onToolResult(result);
         }
@@ -514,7 +545,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         }
 
         const messages = [];
-        messages.push({ role: 'system', content: this.buildSystemPrompt(context) });
+        messages.push({ role: 'system', content: this.buildSystemPrompt(context, chatMode) });
         messages.push(...history);
         messages.push({ role: 'user', content: question });
 
@@ -558,10 +589,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
       const messages = [];
 
-      // 添加系统提示词和上下文
+      // 添加系统提示词和上下文（根据问答模式）
       messages.push({
         role: 'system',
-        content: this.buildSystemPrompt(context)
+        content: this.buildSystemPrompt(context, chatMode)
       });
 
       // 添加历史记录
@@ -734,7 +765,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     return 'unknown';
   }
 
-  async handleToolCalling({ question, history = [], context = '', signal }) {
+  async handleToolCalling({ question, history = [], context = '', signal, config = {} }) {
+    const chatMode = config.mode || null;
+    const enabledTools = config.enabledTools || null;
+    
     // Check MCP Status
     let mcpEnabled = true;
     try {
@@ -748,7 +782,11 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       logger.info('[智能问答] MCP已禁用，改为直接聊天');
       try {
         const response = await this._callInternalModel({
-          messages: [...history, { role: 'user', content: question }],
+          messages: [
+            { role: 'system', content: this.buildSystemPrompt(context, chatMode) },
+            ...history, 
+            { role: 'user', content: question }
+          ],
           signal
         });
         return {
@@ -770,7 +808,8 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       }
     }
 
-    const tools = this.toolManager.listTools();
+    // 根据配置过滤工具
+    const tools = this._filterTools(enabledTools);
     if (!tools || tools.length === 0) {
       logger.info('[智能问答] 检索工具不可用');
       return {
@@ -843,7 +882,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
         // 3. Synthesis Phase
         logger.info('[智能问答] 阶段3: 最终回答合成...');
-        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult, signal });
+        const finalContent = await this._synthesizeResponse({ question, history, context, targetTool, toolResult, signal, chatMode });
 
         logger.info('[智能问答] 流程结束');
 
@@ -970,7 +1009,7 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
           if (fbIsModelNotFound) {
             const modelName = this.model;
-            const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+            const friendly = `本地 Ollama 未找到模型"${modelName}"。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
             const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
             if (isSelectionPhase) {
               return { content: JSON.stringify({ action: 'chat', response: friendly }) };
@@ -983,11 +1022,11 @@ If the tool output is empty or indicates not found, verify if you can answer wit
         }
       }
 
-      // Ollama 原生接口常用 404 表示“模型未下载/不存在”
+      // Ollama 原生接口常用 404 表示"模型未下载/不存在"
       const isOllamaModelNotFound = status === 404 && /model\s+['"][^'"]+['"]\s+not\s+found/i.test(errText);
       if (isOllamaModelNotFound) {
         const modelName = this.model;
-        const friendly = `本地 Ollama 未找到模型“${modelName}”。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
+        const friendly = `本地 Ollama 未找到模型"${modelName}"。\n\n请在宿主机执行：ollama pull ${modelName}\n或修改根目录 .env 的 AI_MODEL 为你已安装的模型名称。\n\n当前已降级为模拟回答（不影响页面使用，但工具选择将受限）。`;
 
         // 选择工具阶段需要严格 JSON，直接返回可解析 JSON 让流程走 chat 分支。
         const isSelectionPhase = String(messages?.[0]?.content || '').includes('strict JSON-outputting assistant');
