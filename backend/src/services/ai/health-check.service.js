@@ -90,21 +90,26 @@ class HealthCheckService {
   }
 
   /**
-   * Check online API health
+   * Check online API health (DeepSeek)
    * @returns {Promise<boolean>} True if healthy
    */
   async checkOnlineHealth() {
     try {
-      const apiEndpoint = process.env.AI_API_ENDPOINT;
-      if (!apiEndpoint) {
+      // Check if DeepSeek API key is configured
+      const deepseekKey = process.env.DEEPSEEK_API_KEY;
+      const deepseekUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+      
+      if (!deepseekKey) {
         return false;
       }
 
-      const response = await axios.get(apiEndpoint.replace('/v1/chat/completions', '/health') || `${apiEndpoint}/health`, {
+      // Try to list models (lightweight check)
+      const response = await axios.get(`${deepseekUrl}/models`, {
         timeout: this.timeout,
         headers: {
-          'Authorization': process.env.AI_API_KEY ? `Bearer ${process.env.AI_API_KEY}` : undefined
-        }
+          'Authorization': `Bearer ${deepseekKey}`
+        },
+        validateStatus: (status) => true // Accept any status to check connectivity
       });
 
       return response.status === 200;
@@ -115,21 +120,25 @@ class HealthCheckService {
   }
 
   /**
-   * Check local deepseek-r1 health
+   * Check local Ollama health
    * @returns {Promise<boolean>} True if healthy
    */
   async checkLocalHealth() {
     try {
-      const ollamaEndpoint = process.env.DEEPSEEK_BASE_URL || 'http://localhost:11434';
-      const response = await axios.get(`${ollamaEndpoint}/api/tags`, {
-        timeout: this.timeout
+      // Use AI_API_ENDPOINT which points to Ollama in local setup
+      const ollamaEndpoint = process.env.AI_API_ENDPOINT || 'http://localhost:11434/v1/chat/completions';
+      // Check if the base URL is accessible by making a simple POST request
+      const baseUrl = ollamaEndpoint.replace('/v1/chat/completions', '');
+      
+      // Try to get model list from Ollama API
+      const response = await axios.get(`${baseUrl}/api/tags`, {
+        timeout: this.timeout,
+        validateStatus: (status) => status < 500 // Accept any status < 500
       });
 
-      // Check if deepseek-r1 model is available
-      const models = response.data?.models || [];
-      const hasDeepSeek = models.some(model => model.name.includes('deepseek-r1'));
-
-      return response.status === 200 && hasDeepSeek;
+      // If we get any response (even 401/403), the service is running
+      // Just check if HTTP connection succeeds
+      return response.status < 500;
     } catch (error) {
       console.log('[HealthCheck] Local health check failed:', error.message);
       return false;

@@ -4,26 +4,24 @@ const API_URL = '/api/chat/config';
 
 /**
  * 获取当前 AI 配置
+ * @param {string} [sessionId] - 会话ID，可选
  * @returns {Promise<{
  *   model: 'ONLINE'|'LOCAL'|'MOCK',
- *   modelLocked: boolean,
- *   healthStatus: 'healthy'|'unhealthy'|'unknown',
- *   answerMode: 'graph'|'knowledge'|'general',
- *   mcpTools: string[]
+ *   enabledTools: string[]
  * }>}
  */
-const getConfig = async () => {
-  const response = await axios.get(API_URL);
+const getConfig = async (sessionId) => {
+  const params = sessionId ? { sessionId } : {};
+  const response = await axios.get(API_URL, { params });
   return response.data;
 };
 
 /**
  * 更新 AI 配置
  * @param {Object} config - 配置对象
+ * @param {string} [config.sessionId] - 会话ID，可选
  * @param {'ONLINE'|'LOCAL'|'MOCK'} config.model - 模型选择
- * @param {boolean} config.modelLocked - 是否锁定模型
- * @param {'graph'|'knowledge'|'general'} config.answerMode - 问答模式
- * @param {string[]} config.mcpTools - 启用的 MCP 工具列表
+ * @param {string[]} config.enabledTools - 启用的 MCP 工具列表
  * @returns {Promise<{message: string, config: Object}>}
  */
 const updateConfig = async (config) => {
@@ -42,22 +40,41 @@ const getDefaultConfig = async () => {
 
 /**
  * 获取可用 MCP 工具列表
- * @returns {Promise<Array<{
+ * @returns {Promise<{tools: Array<{
  *   name: string,
  *   description: string,
- *   enabled: boolean
- * }>>}
+ *   enabledByDefault: boolean
+ * }>}>}
  */
 const getAvailableTools = async () => {
   const response = await axios.get(`${API_URL}/tools`);
   return response.data;
 };
 
+/**
+ * 获取模型健康状态
+ * @returns {Promise<{
+ *   ONLINE: 'healthy'|'unhealthy'|'unknown',
+ *   LOCAL: 'healthy'|'unhealthy'|'unknown',
+ *   MOCK: 'healthy'
+ * }>}
+ */
+const getModelHealth = async () => {
+  try {
+    const response = await axios.get(`${API_URL}/health`);
+    return response.data?.health || {};
+  } catch (err) {
+    console.error('获取模型健康状态失败:', err);
+    return { ONLINE: 'unknown', LOCAL: 'unknown', MOCK: 'healthy' };
+  }
+};
+
 const chatConfigService = {
   getConfig,
   updateConfig,
   getDefaultConfig,
-  getAvailableTools
+  getAvailableTools,
+  getModelHealth
 };
 
 export default chatConfigService;

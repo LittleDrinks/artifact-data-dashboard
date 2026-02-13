@@ -7,7 +7,8 @@ const STORAGE_KEYS = {
   MESSAGES: 'chat_messages',
   INPUT_DRAFT: 'chat_input_draft',
   STREAMING_MESSAGE_ID: 'chat_streaming_message_id',
-  LAST_ACTIVE: 'chat_last_active'
+  LAST_ACTIVE: 'chat_last_active',
+  SESSION_ID: 'chat_session_id'
 };
 
 const TTL_MINUTES = 30; // Session TTL: 30 minutes
@@ -163,8 +164,29 @@ class ChatSession {
       sessionStorage.removeItem(STORAGE_KEYS.INPUT_DRAFT);
       sessionStorage.removeItem(STORAGE_KEYS.STREAMING_MESSAGE_ID);
       sessionStorage.removeItem(STORAGE_KEYS.LAST_ACTIVE);
+      sessionStorage.removeItem(STORAGE_KEYS.SESSION_ID);
     } catch (error) {
       console.error('Failed to clear chat session:', error);
+    }
+  }
+
+  /**
+   * Get or create a unique session ID for this chat session
+   * @returns {string} Session ID
+   */
+  static getSessionId() {
+    try {
+      let sessionId = sessionStorage.getItem(STORAGE_KEYS.SESSION_ID);
+      if (!sessionId) {
+        sessionId = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        sessionStorage.setItem(STORAGE_KEYS.SESSION_ID, sessionId);
+      }
+      this.updateLastActive();
+      return sessionId;
+    } catch (error) {
+      console.error('Failed to get session ID:', error);
+      // Return a temporary in-memory ID if sessionStorage fails
+      return `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
   }
 }

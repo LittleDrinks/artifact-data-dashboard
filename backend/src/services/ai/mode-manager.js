@@ -209,6 +209,33 @@ class ModeManager {
   async getModeHistory(limit = 50) {
     return await auditService.getModeSwitchHistory(limit);
   }
+
+  /**
+   * Check if a specific model is healthy
+   * @param {string} mode - The mode to check (ONLINE, LOCAL, MOCK)
+   * @returns {Promise<boolean>} True if healthy
+   */
+  async checkModelHealth(mode) {
+    if (!Object.values(AI_MODES).includes(mode)) {
+      return false;
+    }
+
+    // MOCK is always healthy
+    if (mode === AI_MODES.MOCK) {
+      return true;
+    }
+
+    if (!this.healthCheckService) {
+      return false;
+    }
+
+    try {
+      return await this.healthCheckService.checkModeHealth(mode);
+    } catch (err) {
+      console.warn(`[ModeManager] Health check failed for ${mode}:`, err.message);
+      return false;
+    }
+  }
 }
 
 module.exports = new ModeManager();

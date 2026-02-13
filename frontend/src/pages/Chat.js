@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert, Space } from 'antd';
+import { Input, Button, Card, Avatar, Spin, Divider, Empty, Alert, Space, Popover, message } from 'antd';
 import { UserOutlined, RobotOutlined, SendOutlined, DeleteOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
@@ -18,9 +18,7 @@ const DEFAULT_MODE = process.env.REACT_APP_AI_MODE || 'tool_calling';
 // 默认 AI 配置
 const DEFAULT_AI_CONFIG = {
   model: 'LOCAL',
-  modelLocked: false,
-  answerMode: 'knowledge',
-  mcpTools: ['query_graph', 'search_artifacts']
+  enabledTools: ['query_graph', 'search_artifacts']
 };
 
 const findPendingAssistantMessage = (messages) => {
@@ -38,8 +36,9 @@ const Chat = () => {
   const [inputValue, setInputValue] = useState(() => ChatSession.loadInputDraft() || '');
   const [conversationId, setConversationId] = useState(null);
   const [streamingMessageId, setStreamingMessageId] = useState(() => ChatSession.loadStreamingMessageId());
-  const [configPanelVisible, setConfigPanelVisible] = useState(false);
+  const [configPopoverVisible, setConfigPopoverVisible] = useState(false);
   const [aiConfig, setAiConfig] = useState(DEFAULT_AI_CONFIG);
+  const [sessionId] = useState(() => ChatSession.getSessionId());
   const chatMessagesRef = useRef(null);
   const abortControllerRef = useRef(null);
   const navigate = useNavigate();
@@ -79,6 +78,7 @@ const Chat = () => {
   // 处理 AI 配置变更
   const handleConfigChange = (newConfig) => {
     setAiConfig(newConfig);
+    message.success('配置已保存');
   };
 
   // 加载MCP状态
@@ -583,13 +583,6 @@ const Chat = () => {
         <Space>
           <ModeIndicator onModeChange={handleModeChange} />
           <Button
-            icon={<SettingOutlined />}
-            onClick={() => setConfigPanelVisible(!configPanelVisible)}
-            type={configPanelVisible ? 'primary' : 'default'}
-          >
-            配置
-          </Button>
-          <Button
             danger
             icon={<DeleteOutlined />}
             onClick={handleClearHistory}
@@ -611,12 +604,7 @@ const Chat = () => {
         />
       )}
       
-      <AIConfigPanel
-        visible={configPanelVisible}
-        onToggle={() => setConfigPanelVisible(!configPanelVisible)}
-        onConfigChange={handleConfigChange}
-        className="ai-config-panel"
-      />
+
 
       <div className="chat-container">
         {!mcpStatus.isEnabled && (
@@ -651,6 +639,27 @@ const Chat = () => {
         )}
         
         <div className="chat-input">
+          <Popover
+            content={
+              <AIConfigPanel
+                onConfigChange={handleConfigChange}
+                sessionId={sessionId}
+                onClose={() => setConfigPopoverVisible(false)}
+              />
+            }
+            title={<Space><SettingOutlined /> AI 配置</Space>}
+            trigger="click"
+            open={configPopoverVisible}
+            onOpenChange={setConfigPopoverVisible}
+            placement="topLeft"
+            arrow={false}
+          >
+            <Button
+              icon={<SettingOutlined />}
+              style={{ marginRight: 8 }}
+              title="AI 配置"
+            />
+          </Popover>
           <TextArea
             placeholder="请输入您的问题，例如：西周时期有哪些著名的青铜器？"
             autoSize={{ minRows: 1, maxRows: 4 }}

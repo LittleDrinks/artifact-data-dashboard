@@ -1,32 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Card,
   Radio,
-  Switch,
   Checkbox,
   Tooltip,
   Space,
   Typography,
   Divider,
   Badge,
-  Alert,
-  Button,
   Spin,
-  message
+  message,
+  Modal
 } from 'antd';
 import {
-  SettingOutlined,
-  UpOutlined,
-  DownOutlined,
   InfoCircleOutlined,
-  LockOutlined,
-  UnlockOutlined
+  ExclamationCircleOutlined
 } from '@ant-design/icons';
 import chatConfigService from '../../services/chatConfig.service';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 const { Group: RadioGroup } = Radio;
-const { Group: CheckboxGroup } = Checkbox;
 
 // 模型选项
 const MODEL_OPTIONS = [
@@ -35,88 +27,56 @@ const MODEL_OPTIONS = [
   { label: '模拟', value: 'MOCK', color: 'orange' }
 ];
 
-// 问答模式选项
-const ANSWER_MODE_OPTIONS = [
-  {
-    value: 'graph',
-    label: '图谱模式',
-    description: '只查询知识图谱，回答客观事实'
-  },
-  {
-    value: 'knowledge',
-    label: '知识模式',
-    description: '查询图谱并归纳总结知识'
-  },
-  {
-    value: 'general',
-    label: '通用模式',
-    description: 'AI 自由回答，不限制知识来源'
-  }
-];
-
-// 健康状态颜色映射
-const HEALTH_STATUS_MAP = {
-  healthy: { color: 'success', text: '正常' },
-  unhealthy: { color: 'error', text: '异常' },
-  unknown: { color: 'default', text: '未知' }
-};
-
 /**
- * AI 配置面板组件
+ * AI 配置面板组件（弹窗内容）
  * @param {Object} props
- * @param {boolean} props.visible - 是否展开
- * @param {() => void} props.onToggle - 展开/收起回调
  * @param {(config: Object) => void} props.onConfigChange - 配置变更回调
- * @param {string} [props.className] - 额外样式类名
+ * @param {string} [props.sessionId] - 会话ID
+ * @param {() => void} [props.onClose] - 关闭回调
  */
-const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
+const AIConfigPanel = ({ onConfigChange, sessionId, onClose }) => {
   // 配置状态
   const [config, setConfig] = useState({
     model: 'LOCAL',
-    modelLocked: false,
-    healthStatus: 'unknown',
-    answerMode: 'knowledge',
-    mcpTools: []
+    enabledTools: ['query_graph', 'search_artifacts']
   });
 
   // 可用工具列表
   const [availableTools, setAvailableTools] = useState([]);
+  
+  // 模型健康状态
+  const [modelHealth, setModelHealth] = useState({
+    ONLINE: 'unknown',
+    LOCAL: 'unknown',
+    MOCK: 'healthy'
+  });
 
   // UI 状态
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [warning, setWarning] = useState(null);
 
   // 初始化加载配置
   useEffect(() => {
     loadConfig();
     loadAvailableTools();
-  }, []);
+    loadModelHealth();
+  }, [sessionId]);
 
   // 加载配置
   const loadConfig = async () => {
     try {
       setLoading(true);
-      setError(null);
-      const data = await chatConfigService.getConfig();
+      const data = await chatConfigService.getConfig(sessionId);
       setConfig({
         model: data.model || 'LOCAL',
-        modelLocked: data.modelLocked || false,
-        healthStatus: data.healthStatus || 'unknown',
-        answerMode: data.mode || data.answerMode || 'knowledge',
-        mcpTools: data.enabledTools || data.mcpTools || []
+        enabledTools: data.enabledTools || []
       });
     } catch (err) {
       console.error('加载配置失败:', err);
-      setError('加载配置失败，使用默认配置');
       // 使用默认配置
       setConfig({
         model: 'LOCAL',
-        modelLocked: false,
-        healthStatus: 'unknown',
-        answerMode: 'knowledge',
-        mcpTools: ['query_graph', 'search_artifacts']
+        enabledTools: ['query_graph', 'search_artifacts']
       });
     } finally {
       setLoading(false);
@@ -127,7 +87,6 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
   const loadAvailableTools = async () => {
     try {
       const response = await chatConfigService.getAvailableTools();
-      // API 返回格式: { tools: [...] }
       const tools = response?.tools || response || [];
       setAvailableTools(Array.isArray(tools) ? tools : []);
     } catch (err) {
@@ -136,12 +95,23 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
     }
   };
 
+  // 加载模型健康状态
+  const loadModelHealth = async () => {
+    try {
+      const health = await chatConfigService.getModelHealth();
+      if (health) {
+        setModelHealth(prev => ({ ...prev, ...health }));
+      }
+    } catch (err) {
+      console.error('加载模型健康状态失败:', err);
+    }
+  };
+
   // 保存配置
   const saveConfig = useCallback(async (newConfig) => {
     try {
       setSaving(true);
-      setError(null);
-      await chatConfigService.updateConfig(newConfig);
+      await chatConfigService.updateConfig({ ...newConfig, sessionId });
       setConfig(newConfig);
       if (onConfigChange) {
         onConfigChange(newConfig);
@@ -152,131 +122,73 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
     } finally {
       setSaving(false);
     }
-  }, [onConfigChange]);
+  }, [sessionId, onConfigChange]);
 
   // 处理模型变更
   const handleModelChange = (e) => {
     const newModel = e.target.value;
-    const newConfig = { ...config, model: newModel };
-    saveConfig(newConfig);
-  };
-
-  // 处理模型锁定变更
-  const handleLockChange = (checked) => {
-    const newConfig = { ...config, modelLocked: checked };
-    saveConfig(newConfig);
-  };
-
-  // 处理问答模式变更
-  const handleAnswerModeChange = (e) => {
-    const newMode = e.target.value;
-    const newConfig = { ...config, answerMode: newMode };
-    saveConfig(newConfig);
+    const currentHealth = modelHealth[newModel];
+    
+    // 如果模型不健康，询问是否切换
+    if (currentHealth === 'unhealthy' || currentHealth === 'unknown') {
+      // 找到健康的模型
+      const healthyModel = MODEL_OPTIONS.find(opt => 
+        opt.value !== newModel && modelHealth[opt.value] === 'healthy'
+      );
+      
+      Modal.confirm({
+        title: '模型可能不可用',
+        icon: <ExclamationCircleOutlined />,
+        content: (
+          <div>
+            <p>您选择的模型 <strong>{MODEL_OPTIONS.find(o => o.value === newModel)?.label}</strong> 当前状态异常或未响应。</p>
+            {healthyModel && (
+              <p>是否临时切换到 <strong>{healthyModel.label}</strong>？</p>
+            )}
+            <p style={{ color: '#999', fontSize: 12 }}>您也可以坚持使用当前选择，但可能会遇到响应失败。</p>
+          </div>
+        ),
+        okText: healthyModel ? `切换到${healthyModel.label}` : '坚持使用',
+        cancelText: '取消',
+        onOk: () => {
+          if (healthyModel) {
+            // 切换到健康模型
+            const finalConfig = { ...config, model: healthyModel.value };
+            saveConfig(finalConfig);
+            message.info(`已自动切换到 ${healthyModel.label}`);
+          } else {
+            // 用户坚持选择
+            const finalConfig = { ...config, model: newModel };
+            saveConfig(finalConfig);
+          }
+        }
+      });
+    } else {
+      // 模型健康，直接切换
+      const newConfig = { ...config, model: newModel };
+      saveConfig(newConfig);
+    }
   };
 
   // 处理工具变更
   const handleToolsChange = (checkedValues) => {
-    // 检查是否禁用了 query_graph
-    const hasQueryGraph = checkedValues.includes('query_graph');
-    const newConfig = { ...config, mcpTools: checkedValues };
-
-    // 如果禁用了 query_graph 且当前模式需要图谱，降级为通用模式
-    if (!hasQueryGraph && (config.answerMode === 'graph' || config.answerMode === 'knowledge')) {
-      newConfig.answerMode = 'general';
-      setWarning('已禁用图谱查询工具，问答模式自动降级为通用模式');
-    } else {
-      setWarning(null);
-    }
-
+    const newConfig = { ...config, enabledTools: checkedValues };
     saveConfig(newConfig);
   };
 
-  // 获取健康状态显示
-  const getHealthStatusDisplay = () => {
-    const status = HEALTH_STATUS_MAP[config.healthStatus] || HEALTH_STATUS_MAP.unknown;
-    return <Badge status={status.color} text={status.text} />;
+  // 获取模型状态显示
+  const getModelStatusDisplay = (modelValue) => {
+    const health = modelHealth[modelValue];
+    if (health === 'healthy') {
+      return <Badge status="success" />;
+    } else if (health === 'unhealthy') {
+      return <Badge status="error" />;
+    }
+    return <Badge status="default" />;
   };
 
-  // 构建工具选项
-  const toolOptions = availableTools.map(tool => ({
-    label: (
-      <Tooltip title={tool.description} placement="right">
-        <Space>
-          <span>{tool.name}</span>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {tool.description}
-          </Text>
-        </Space>
-      </Tooltip>
-    ),
-    value: tool.name
-  }));
-
-  // 面板头部
-  const panelHeader = (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        cursor: 'pointer',
-        padding: '8px 0'
-      }}
-      onClick={onToggle}
-    >
-      <Space>
-        <SettingOutlined />
-        <Title level={5} style={{ margin: 0 }}>AI 配置面板</Title>
-        {saving && <Spin size="small" />}
-      </Space>
-      <Button type="text" icon={visible ? <UpOutlined /> : <DownOutlined />} size="small" />
-    </div>
-  );
-
-  if (!visible) {
-    return (
-      <Card
-        size="small"
-        className={className}
-        bodyStyle={{ padding: '8px 16px' }}
-      >
-        {panelHeader}
-      </Card>
-    );
-  }
-
   return (
-    <Card
-      size="small"
-      className={className}
-      bodyStyle={{ padding: '16px' }}
-    >
-      {panelHeader}
-
-      <Divider style={{ margin: '12px 0' }} />
-
-      {error && (
-        <Alert
-          message={error}
-          type="error"
-          showIcon
-          style={{ marginBottom: 12 }}
-          closable
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {warning && (
-        <Alert
-          message={warning}
-          type="warning"
-          showIcon
-          style={{ marginBottom: 12 }}
-          closable
-          onClose={() => setWarning(null)}
-        />
-      )}
-
+    <div style={{ width: 280 }}>
       <Spin spinning={loading}>
         {/* 模型选择 */}
         <div style={{ marginBottom: 16 }}>
@@ -291,50 +203,16 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
             >
               {MODEL_OPTIONS.map(option => (
                 <Radio.Button key={option.value} value={option.value}>
-                  {option.label}
+                  <Space>
+                    {option.label}
+                    {getModelStatusDisplay(option.value)}
+                  </Space>
                 </Radio.Button>
               ))}
             </RadioGroup>
-            <Space>
-              <Tooltip title={config.modelLocked ? '解锁后可自动切换模型' : '锁定后禁止自动切换模型'}>
-                <Switch
-                  checked={config.modelLocked}
-                  onChange={handleLockChange}
-                  disabled={saving}
-                  checkedChildren={<LockOutlined />}
-                  unCheckedChildren={<UnlockOutlined />}
-                />
-              </Tooltip>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                锁定模型
-              </Text>
-              <Divider type="vertical" />
-              <Text style={{ fontSize: 12 }}>健康状态:</Text>
-              {getHealthStatusDisplay()}
-            </Space>
-          </Space>
-        </div>
-
-        <Divider style={{ margin: '12px 0' }} />
-
-        {/* 问答模式 */}
-        <div style={{ marginBottom: 16 }}>
-          <Space direction="vertical" style={{ width: '100%' }} size="small">
-            <Text strong>问答模式</Text>
-            <RadioGroup
-              value={config.answerMode}
-              onChange={handleAnswerModeChange}
-              disabled={saving}
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
-            >
-              {ANSWER_MODE_OPTIONS.map(option => (
-                <Tooltip key={option.value} title={option.description}>
-                  <Radio.Button value={option.value}>
-                    {option.label}
-                  </Radio.Button>
-                </Tooltip>
-              ))}
-            </RadioGroup>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              绿点表示模型可用，红点表示异常，灰点表示未检测
+            </Text>
           </Space>
         </div>
 
@@ -344,11 +222,14 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
         <div>
           <Space direction="vertical" style={{ width: '100%' }} size="small">
             <Text strong>MCP 工具</Text>
-            <CheckboxGroup
-              value={config.mcpTools}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              勾选的工具会被提供给 AI 使用，取消勾选后 AI 将无法看到该工具
+            </Text>
+            <Checkbox.Group
+              value={config.enabledTools}
               onChange={handleToolsChange}
               disabled={saving}
-              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}
             >
               {availableTools.map(tool => (
                 <Checkbox key={tool.name} value={tool.name}>
@@ -360,11 +241,11 @@ const AIConfigPanel = ({ visible, onToggle, onConfigChange, className }) => {
                   </Tooltip>
                 </Checkbox>
               ))}
-            </CheckboxGroup>
+            </Checkbox.Group>
           </Space>
         </div>
       </Spin>
-    </Card>
+    </div>
   );
 };
 

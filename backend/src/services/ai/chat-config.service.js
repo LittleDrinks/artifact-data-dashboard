@@ -5,6 +5,7 @@
 
 const { redisClient } = require('../../config/database');
 const { createLogger } = require('../../utils/logger');
+const modeManager = require('./mode-manager');
 
 const logger = createLogger('ChatConfigService');
 
@@ -13,21 +14,12 @@ const CONFIG_KEY_PREFIX = 'chat:config';
 
 // Default configuration values
 const DEFAULT_CONFIG = {
-  mode: 'knowledge',           // 问答模式: graph | knowledge | general
   model: 'LOCAL',              // AI模型: ONLINE | LOCAL | MOCK
-  modelLocked: false,          // 是否手动锁定
-  enabledTools: ['query_graph', 'search_artifacts'], // 启用的工具列表
-  graphView: 'core'            // 图谱视图: core | conservation
+  enabledTools: ['query_graph', 'search_artifacts'] // 启用的工具列表
 };
-
-// Valid modes
-const VALID_MODES = ['graph', 'knowledge', 'general'];
 
 // Valid models
 const VALID_MODELS = ['ONLINE', 'LOCAL', 'MOCK'];
-
-// Valid graph views
-const VALID_GRAPH_VIEWS = ['core', 'conservation'];
 
 // Available tools with descriptions
 const AVAILABLE_TOOLS = [
@@ -56,6 +48,12 @@ const AVAILABLE_TOOLS = [
 class ChatConfigService {
   constructor() {
     this.defaultConfig = { ...DEFAULT_CONFIG };
+    this.modelHealthCache = {
+      ONLINE: 'unknown',
+      LOCAL: 'unknown',
+      MOCK: 'healthy'
+    };
+    this.lastHealthCheck = 0;
   }
 
   /**
@@ -98,11 +96,8 @@ class ChatConfigService {
 
       // Parse the configuration
       const config = {
-        mode: configData.mode || DEFAULT_CONFIG.mode,
         model: configData.model || DEFAULT_CONFIG.model,
-        modelLocked: configData.modelLocked === 'true' || configData.modelLocked === true,
-        enabledTools: this._parseTools(configData.enabledTools),
-        graphView: configData.graphView || DEFAULT_CONFIG.graphView
+        enabledTools: this._parseTools(configData.enabledTools)
       };
 
       logger.debug(`[ChatConfig] 获取会话 ${sessionId} 配置成功`, { config });
@@ -161,22 +156,15 @@ class ChatConfigService {
       // Merge with new config
       const updatedConfig = {
         ...existingConfig,
-        ...this._validateAndSanitizeConfig(config),
-        // Preserve modelLocked if not explicitly provided
-        modelLocked: config.modelLocked !== undefined 
-          ? (config.modelLocked === true || config.modelLocked === 'true')
-          : existingConfig.modelLocked
+        ...this._validateAndSanitizeConfig(config)
       };
 
       const configKey = this._getConfigKey(sessionId);
 
       // Store in Redis
       await redisClient.hSet(configKey, {
-        mode: updatedConfig.mode,
         model: updatedConfig.model,
-        modelLocked: updatedConfig.modelLocked.toString(),
-        enabledTools: JSON.stringify(updatedConfig.enabledTools),
-        graphView: updatedConfig.graphView
+        enabledTools: JSON.stringify(updatedConfig.enabledTools)
       });
 
       // Set TTL (7 days)
@@ -197,16 +185,6 @@ class ChatConfigService {
    */
   _validateAndSanitizeConfig(config) {
     const validated = {};
-
-    // Validate mode
-    if (config.mode !== undefined) {
-      if (VALID_MODES.includes(config.mode)) {
-        validated.mode = config.mode;
-      } else {
-        logger.warn(`[ChatConfig] 无效的问答模式: ${config.mode}，使用默认值`);
-        validated.mode = DEFAULT_CONFIG.mode;
-      }
-    }
 
     // Validate model
     if (config.model !== undefined) {
@@ -236,16 +214,6 @@ class ChatConfigService {
       }
     }
 
-    // Validate graphView
-    if (config.graphView !== undefined) {
-      if (VALID_GRAPH_VIEWS.includes(config.graphView)) {
-        validated.graphView = config.graphView;
-      } else {
-        logger.warn(`[ChatConfig] 无效的图谱视图: ${config.graphView}，使用默认值`);
-        validated.graphView = DEFAULT_CONFIG.graphView;
-      }
-    }
-
     return validated;
   }
 
@@ -255,6 +223,51 @@ class ChatConfigService {
    */
   getAvailableTools() {
     return AVAILABLE_TOOLS.map(tool => ({ ...tool }));
+  }
+
+  /**
+   * Get model health status
+   * Checks health of ONLINE and LOCAL models
+   * @returns {Promise<Object>} Health status for each model
+   */
+  async getModelHealthStatus() {
+    const now = Date.now();
+    
+    // Cache health check for 30 seconds
+    if (now - this.lastHealthCheck < 30000) {
+      return { ...this.modelHealthCache };
+    }
+
+    try {
+      // Check ONLINE model (DeepSeek)
+      try {
+        // Try to get mode status from modeManager
+        const modeStatus = await modeManager.checkModelHealth('ONLINE');
+        this.modelHealthCache.ONLINE = modeStatus ? 'healthy' : 'unhealthy';
+      } catch (err) {
+        logger.debug('[ChatConfig] ONLINE 模型健康检查失败:', err.message);
+        this.modelHealthCache.ONLINE = 'unhealthy';
+      }
+
+      // Check LOCAL model (Ollama)
+      try {
+        const modeStatus = await modeManager.checkModelHealth('LOCAL');
+        this.modelHealthCache.LOCAL = modeStatus ? 'healthy' : 'unhealthy';
+      } catch (err) {
+        logger.debug('[ChatConfig] LOCAL 模型健康检查失败:', err.message);
+        this.modelHealthCache.LOCAL = 'unhealthy';
+      }
+
+      // MOCK is always healthy
+      this.modelHealthCache.MOCK = 'healthy';
+
+      this.lastHealthCheck = now;
+      
+      return { ...this.modelHealthCache };
+    } catch (error) {
+      logger.error('[ChatConfig] 获取模型健康状态失败:', error);
+      return { ...this.modelHealthCache };
+    }
   }
 
   /**
@@ -293,11 +306,8 @@ class ChatConfigService {
       const defaultConfig = this.getDefaultConfig();
 
       await redisClient.hSet(configKey, {
-        mode: defaultConfig.mode,
         model: defaultConfig.model,
-        modelLocked: defaultConfig.modelLocked.toString(),
-        enabledTools: JSON.stringify(defaultConfig.enabledTools),
-        graphView: defaultConfig.graphView
+        enabledTools: JSON.stringify(defaultConfig.enabledTools)
       });
 
       await redisClient.expire(configKey, 60 * 60 * 24 * 7);

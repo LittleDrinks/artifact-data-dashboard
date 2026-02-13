@@ -7,7 +7,7 @@ const { getAiMode } = require('../config/env');
 const { toolManager } = require('./tool-manager');
 const { safeJsonParse } = require('../utils/json-parser');
 const { createLogger } = require('../utils/logger');
-const { getSystemPromptByMode } = require('./ai/mode-prompts');
+
 
 const logger = createLogger('MCPService');
 
@@ -165,7 +165,16 @@ class MCPService {
 
   async _executePreRetrieve({ question, history = [], context = '', aiMode = 'pre_retrieve' }) {
     // 检查 DeepSeek 模型但缺少 API 密钥的情况
-    if (this.model.startsWith('deepseek') && !this.deepseekApiKey) {
+    // 根据用户选择的模型决定调用哪个端点
+    const userModel = this._currentModel || null;
+    const useOnline = userModel === 'ONLINE' || (!userModel && this._shouldUseDeepSeek());
+    const useMock = userModel === 'MOCK';
+    
+    if (useMock) {
+      return { ...this.simulateResponse(question, history), mode: aiMode };
+    }
+
+    if (this.model.startsWith('deepseek') && !this.deepseekApiKey && useOnline) {
       return {
         content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
         intent: 'error',
@@ -175,7 +184,7 @@ class MCPService {
       };
     }
 
-    if (this._shouldUseDeepSeek()) {
+    if (useOnline) {
       if (!this.deepseekApiKey) {
         return {
           content: 'DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。',
@@ -444,23 +453,18 @@ If the tool output is empty or indicates not found, verify if you can answer wit
       .replace(/\n{4,}/g, '\n\n');
   }
 
-  buildSystemPrompt(context, chatMode = null) {
-    // 如果指定了问答模式，使用对应的系统提示词
-    let baseRules;
-    if (chatMode) {
-      baseRules = getSystemPromptByMode(chatMode);
-    } else {
-      baseRules = [
-        '你是一个文物领域的智能助手。',
-        '只输出中文。',
-        '避免使用英文单词；如不可避免，请用中文解释并尽量不直接输出英文。',
-        '严禁输出任何代码、函数调用、JSON、HTML、Markdown 代码块。',
-        "严禁输出类似 loadData('q') / fetch(...) 等伪函数调用。",
-        '回答必须优先、尽可能引用【检索上下文】中的事实。',
-        '如果【检索上下文】为空或确实无关，必须明确说"未在数据中找到"，不要编造具体实体、年代、地点、数值。',
-        '允许补充少量通用常识，但需用"常识补充："开头，并避免具体细节。'
-      ].join('\n');
-    }
+  buildSystemPrompt(context, _chatMode = null) {
+    // 使用统一的系统提示词，AI 自行判断是否需要调用工具
+    const baseRules = [
+      '你是一个文物领域的智能助手。',
+      '只输出中文。',
+      '避免使用英文单词；如不可避免，请用中文解释并尽量不直接输出英文。',
+      '严禁输出任何代码、函数调用、JSON、HTML、Markdown 代码块。',
+      "严禁输出类似 loadData('q') / fetch(...) 等伪函数调用。",
+      '回答必须优先、尽可能引用【检索上下文】中的事实。',
+      '如果【检索上下文】为空或确实无关，必须明确说"未在数据中找到"，不要编造具体实体、年代、地点、数值。',
+      '允许补充少量通用常识，但需用"常识补充："开头，并避免具体细节。'
+    ].join('\n');
 
     if (context) {
       return `${baseRules}\n\n【检索上下文】\n${context}`;
@@ -512,6 +516,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     const aiMode = (mode || this.getAiModeFn({})).trim();
     const chatMode = config.mode || null; // graph | knowledge | general
     const enabledTools = config.enabledTools || null;
+    const userModel = config.model || 'LOCAL'; // ONLINE | LOCAL | MOCK
+    
+    // 设置当前模型，供 _callInternalModel 使用
+    this._currentModel = userModel;
     
     if (aiMode === 'tool_calling') {
       try {
@@ -537,7 +545,20 @@ If the tool output is empty or indicates not found, verify if you can answer wit
     try {
       const isProd = process.env.NODE_ENV === 'production';
 
-      if (this._shouldUseDeepSeek()) {
+      // 根据用户选择的模型决定调用哪个端点
+      // ONLINE -> DeepSeek 云端, LOCAL -> Ollama 本地, MOCK -> 模拟响应
+      const useOnline = userModel === 'ONLINE' || (userModel !== 'LOCAL' && userModel !== 'MOCK' && this._shouldUseDeepSeek());
+      const useMock = userModel === 'MOCK';
+
+      if (useMock) {
+        logger.info('[MCP] 使用模拟模式响应');
+        const response = this.simulateResponse(question, history);
+        onData(response.content);
+        onEnd();
+        return;
+      }
+
+      if (useOnline) {
         if (!this.deepseekApiKey) {
           const err = new Error('DEEPSEEK_API_KEY 未配置，请在根目录 .env 设置后重试。');
           if (onError) onError(err);
@@ -768,6 +789,10 @@ If the tool output is empty or indicates not found, verify if you can answer wit
   async handleToolCalling({ question, history = [], context = '', signal, config = {} }) {
     const chatMode = config.mode || null;
     const enabledTools = config.enabledTools || null;
+    const userModel = config.model || 'LOCAL';
+    
+    // 设置当前模型，供 _callInternalModel 使用
+    this._currentModel = userModel;
     
     // Check MCP Status
     let mcpEnabled = true;
@@ -919,9 +944,24 @@ If the tool output is empty or indicates not found, verify if you can answer wit
 
   /**
    * Internal helper to call model non-streamingly, separate from main ask flow
+   * @param {Object} options
+   * @param {Array} options.messages - Messages array
+   * @param {number} options.temperature - Temperature
+   * @param {number} options.max_tokens - Max tokens
+   * @param {AbortSignal} options.signal - Abort signal
+   * @param {string} options.model - User selected model (ONLINE/LOCAL/MOCK), optional
    */
-  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000, signal }) {
-    if (this._shouldUseDeepSeek()) {
+  async _callInternalModel({ messages, temperature = 0.2, max_tokens = 1000, signal, model = null }) {
+    // 根据用户选择的模型或默认逻辑决定调用哪个端点
+    const userModel = model || this._currentModel || null;
+    const useOnline = userModel === 'ONLINE' || (!userModel && this._shouldUseDeepSeek());
+    const useMock = userModel === 'MOCK';
+    
+    if (useMock) {
+      return { content: '这是一个模拟响应。' };
+    }
+    
+    if (useOnline) {
       try {
         return await this._callDeepSeekCompletion({ messages, temperature, max_tokens, signal });
       } catch (error) {
