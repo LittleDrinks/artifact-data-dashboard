@@ -4,7 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
-const tagService = require('../services/tag.service');
+const tagService = require('../services/core/tag.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const logger = require('../config/logger');
 

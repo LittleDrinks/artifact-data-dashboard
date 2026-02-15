@@ -4,7 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
-const folderService = require('../services/folder.service');
+const folderService = require('../services/core/folder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 // 所有路由都需要认证

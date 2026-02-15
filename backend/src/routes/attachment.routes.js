@@ -9,7 +9,7 @@ const XLSX = require('xlsx');
 
 const { mysqlPool } = require('../config/database');
 const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
-const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/attachment.service');
+const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/core/attachment.service');
 const { IntegrityService, parseBool } = require('../services/integrity.service');
 const { getStorageDriver } = require('../services/storage');
 const { writeAuditLog } = require('../services/audit.service');
