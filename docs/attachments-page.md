@@ -1,0 +1,122 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 文物数据系统
+      - menu [ref=e7]:
+        - menuitem "dashboard 数据大屏" [ref=e8] [cursor=pointer]:
+          - img "dashboard" [ref=e9]:
+            - img [ref=e10]
+          - generic [ref=e12]: 数据大屏
+        - menuitem "search 关键词搜索" [ref=e13] [cursor=pointer]:
+          - img "search" [ref=e14]:
+            - img [ref=e15]
+          - generic [ref=e17]: 关键词搜索
+        - menuitem "cloud 词云分析" [ref=e18] [cursor=pointer]:
+          - img "cloud" [ref=e19]:
+            - img [ref=e20]
+          - generic [ref=e22]: 词云分析
+        - menuitem "share-alt 知识图谱" [ref=e23] [cursor=pointer]:
+          - img "share-alt" [ref=e24]:
+            - img [ref=e25]
+          - generic [ref=e27]: 知识图谱
+        - menuitem "message 智能问答" [ref=e28] [cursor=pointer]:
+          - img "message" [ref=e29]:
+            - img [ref=e30]
+          - generic [ref=e32]: 智能问答
+        - menuitem "user 个人信息" [ref=e33] [cursor=pointer]:
+          - img "user" [ref=e34]:
+            - img [ref=e35]
+          - generic [ref=e37]: 个人信息
+        - menuitem "paper-clip 附件管理" [ref=e38] [cursor=pointer]:
+          - img "paper-clip" [ref=e39]:
+            - img [ref=e40]
+          - generic [ref=e42]: 附件管理
+        - menuitem "folder 资产库" [ref=e43] [cursor=pointer]:
+          - img "folder" [ref=e44]:
+            - img [ref=e45]
+          - generic [ref=e47]: 资产库
+        - menuitem "bug 系统调试" [ref=e48] [cursor=pointer]:
+          - img "bug" [ref=e49]:
+            - img [ref=e50]
+          - generic [ref=e53]: 系统调试
+        - menuitem "logout 退出登录" [ref=e54] [cursor=pointer]:
+          - img "logout" [ref=e55]:
+            - img [ref=e56]
+          - generic [ref=e58]: 退出登录
+    - img "left" [ref=e60] [cursor=pointer]:
+      - img [ref=e61]
+  - generic [ref=e63]:
+    - banner [ref=e64]:
+      - generic [ref=e65]: 文物大数据与人工智能集成系统
+      - generic [ref=e66]:
+        - img "user" [ref=e67]:
+          - img [ref=e68]
+        - text: admin
+    - main [ref=e70]:
+      - generic [ref=e72]:
+        - generic [ref=e74]:
+          - generic [ref=e75]: 附件管理
+          - generic [ref=e77]:
+            - textbox "ownerType（可选）" [ref=e80]
+            - textbox "ownerId（可选）" [ref=e84]
+            - button "刷 新" [ref=e87] [cursor=pointer]:
+              - generic [ref=e88]: 刷 新
+        - generic [ref=e90]:
+          - table [ref=e182]:
+            - rowgroup [ref=e193]:
+              - row "ID 文件名 类型 大小 关联类型 关联ID 上传者 创建时间 操作" [ref=e194]:
+                - columnheader "ID" [ref=e195]
+                - columnheader "文件名" [ref=e196]
+                - columnheader "类型" [ref=e197]
+                - columnheader "大小" [ref=e198]
+                - columnheader "关联类型" [ref=e199]
+                - columnheader "关联ID" [ref=e200]
+                - columnheader "上传者" [ref=e201]
+                - columnheader "创建时间" [ref=e202]
+                - columnheader "操作" [ref=e203]
+            - rowgroup [ref=e204]:
+              - row "暂无数据 暂无数据" [ref=e205]:
+                - cell "暂无数据 暂无数据" [ref=e206]:
+                  - generic [ref=e207]:
+                    - img "暂无数据" [ref=e209]
+                    - generic [ref=e215]: 暂无数据
+          - generic [ref=e102]:
+            - generic [ref=e104]:
+              - generic [ref=e107]: 上传
+              - generic [ref=e108]:
+                - button "upload 选择文件上传" [ref=e110] [cursor=pointer]:
+                  - img "upload" [ref=e112]:
+                    - img [ref=e113]
+                  - generic [ref=e115]: 选择文件上传
+                - progressbar [ref=e116]:
+                  - generic "0%" [ref=e119]
+                - generic [ref=e120]: 未选择文件
+            - generic [ref=e122]:
+              - generic [ref=e125]: 目录导入（推荐，适合超大图片）
+              - generic [ref=e126]:
+                - generic [ref=e127]:
+                  - generic [ref=e128]: 需要先用 Docker 把本机目录挂载到容器。
+                  - generic [ref=e129]: 白名单前缀：/data/import/crawler
+                - generic [ref=e130]:
+                  - textbox "容器内路径，例如 /data/import/crawler/shenzhen/images_shenzhen" [ref=e132]: /data/import/crawler
+                  - textbox "maxFiles（可选）" [ref=e134]
+                  - button "开始导入目录" [ref=e136] [cursor=pointer]:
+                    - generic [ref=e137]: 开始导入目录
+            - generic [ref=e139]:
+              - generic [ref=e142]: 关联导入（把图片挂到文物）
+              - generic [ref=e143]:
+                - generic [ref=e145]: 上传 data.xlsx（含 ArtifactAttachments sheet），把附件关联到 artifact。
+                - generic [ref=e146]:
+                  - button "upload 选择 data.xlsx" [ref=e151] [cursor=pointer]:
+                    - img "upload" [ref=e153]:
+                      - img [ref=e154]
+                    - generic [ref=e156]: 选择 data.xlsx
+                  - button "执行关联导入" [ref=e158] [cursor=pointer]:
+                    - generic [ref=e159]: 执行关联导入
+            - generic [ref=e161]:
+              - generic [ref=e164]: 知识图谱 Excel
+              - generic [ref=e166]:
+                - button "导出知识图谱Excel（生成附件）" [ref=e168] [cursor=pointer]:
+                  - generic [ref=e169]: 导出知识图谱Excel（生成附件）
+                - button "上传并导入知识图谱Excel" [ref=e174] [cursor=pointer]:
+                  - generic [ref=e175]: 上传并导入知识图谱Excel

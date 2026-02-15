@@ -71,14 +71,76 @@ CREATE TABLE IF NOT EXISTS attachments (
   meta JSON NULL,
   status ENUM('processing','ok','failed') NOT NULL DEFAULT 'ok',
   thumbnail_storage_name VARCHAR(255) NULL,
+  folder_id INT UNSIGNED DEFAULT NULL,
+  is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+  deleted_at DATETIME DEFAULT NULL,
+  deleted_by INT UNSIGNED DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_attachments_owner (owner_type, owner_id),
   INDEX idx_attachments_original_name (original_name),
   INDEX idx_attachments_hash (`hash`),
   INDEX idx_attachments_status (status),
   INDEX idx_attachments_uploaded_by (uploaded_by),
+  INDEX idx_folder (folder_id),
+  INDEX idx_is_deleted (is_deleted),
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 创建folders表（虚拟文件夹）
+CREATE TABLE IF NOT EXISTS folders (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    parent_id INT UNSIGNED DEFAULT NULL,
+    path VARCHAR(1000) NOT NULL DEFAULT '/',
+    depth TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    created_by INT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_folder_parent FOREIGN KEY (parent_id) 
+        REFERENCES folders(id) ON DELETE SET NULL ON UPDATE CASCADE,
+    INDEX idx_parent_id (parent_id),
+    INDEX idx_path (path(255)),
+    UNIQUE INDEX idx_parent_name (parent_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 创建tags表（标签）
+CREATE TABLE IF NOT EXISTS tags (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    color VARCHAR(7) DEFAULT '#1890ff',
+    created_by INT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE INDEX idx_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 创建file_tags表（文件标签关联）
+CREATE TABLE IF NOT EXISTS file_tags (
+    attachment_id INT UNSIGNED NOT NULL,
+    tag_id INT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (attachment_id, tag_id),
+    CONSTRAINT fk_filetag_attachment FOREIGN KEY (attachment_id) 
+        REFERENCES attachments(id) ON DELETE CASCADE,
+    CONSTRAINT fk_filetag_tag FOREIGN KEY (tag_id) 
+        REFERENCES tags(id) ON DELETE CASCADE,
+    INDEX idx_tag_id (tag_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 创建public_links表（公开链接）
+CREATE TABLE IF NOT EXISTS public_links (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    attachment_id INT UNSIGNED NOT NULL,
+    token VARCHAR(64) NOT NULL,
+    expires_at DATETIME DEFAULT NULL,
+    created_by INT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    access_count INT UNSIGNED NOT NULL DEFAULT 0,
+    revoked_at DATETIME DEFAULT NULL,
+    UNIQUE INDEX idx_token (token),
+    INDEX idx_attachment (attachment_id),
+    CONSTRAINT fk_publiclink_attachment FOREIGN KEY (attachment_id) 
+        REFERENCES attachments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 创建attachment_refs表（附件引用关系）
 CREATE TABLE IF NOT EXISTS attachment_refs (
@@ -99,6 +161,13 @@ CREATE TABLE IF NOT EXISTS attachment_refs (
 -- 插入管理员账户
 INSERT INTO users (username, email, password_hash, role) VALUES
 ('admin', 'admin@example.com', '$2a$10$myBxkYDPKMFPrwZG9psVUupG3hoX7W.TYp0moN.Ez0/4f573TW1sy', 'admin'); -- 密码: admin123
+
+-- 插入默认标签
+INSERT IGNORE INTO tags (name, color, created_by) VALUES
+    ('需修复', '#f5222d', 1),
+    ('高分辨率', '#52c41a', 1),
+    ('展出用', '#1890ff', 1),
+    ('待归档', '#faad14', 1);
 
 -- 插入示例文物数据
 INSERT INTO artifacts (name, description, category, era, location, image_url, tags, is_cataloged, is_digitized, needs_repair) VALUES
