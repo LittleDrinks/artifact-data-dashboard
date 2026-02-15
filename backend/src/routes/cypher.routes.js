@@ -9,8 +9,8 @@ const router = express.Router();
 const { body, query } = require('express-validator');
 const { createLogger } = require('../utils/logger');
 const { validateRequest } = require('../middleware/validation.middleware');
-const { validateQuery } = require('../services/ai/cypher-validator');
-const { executeQuery, executeQueryAsTable, getDatabaseInfo, testConnection } = require('../services/ai/cypher-executor');
+const { validateQuery } = require('../services/kg/cypher-validator');
+const { executeQuery, executeQueryAsTable, getDatabaseInfo, testConnection } = require('../services/kg/cypher-executor');
 const auditService = require('../services/audit.service');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
 

@@ -17,7 +17,7 @@ jest.mock('../src/config/logger', () => ({
 }));
 
 const PublicLinkModel = require('../src/models/public_link.model');
-const publicLinkService = require('../src/services/public-link.service');
+const publicLinkService = require('../src/services/core/public-link.service');
 
 describe('PublicLinkService', () => {
   beforeEach(() => {

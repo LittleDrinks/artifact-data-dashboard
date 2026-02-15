@@ -11,7 +11,7 @@ jest.mock('../src/config/database', () => ({
 }));
 
 const { mysqlPool } = require('../src/config/database');
-const { AttachmentService } = require('../src/services/attachment.service');
+const { AttachmentService } = require('../src/services/core/attachment.service');
 
 describe('AttachmentService.listReferences', () => {
   let attachmentService;

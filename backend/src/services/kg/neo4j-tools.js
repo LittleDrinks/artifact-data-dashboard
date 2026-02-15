@@ -1,8 +1,8 @@
 const axios = require('axios');
-const { neo4jDriver } = require('../../config/database');
-const { validateQuery } = require('../ai/cypher-validator');
-const { executeQuery } = require('../ai/cypher-executor');
-const { createLogger } = require('../../utils/logger');
+const { neo4jDriver } = require('../config/database');
+const { validateQuery } = require('./cypher-validator');
+const { executeQuery } = require('./cypher-executor');
+const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('Neo4jTools');
 

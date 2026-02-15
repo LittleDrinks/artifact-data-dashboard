@@ -10,7 +10,7 @@ jest.mock('../src/config/database', () => ({
   }
 }));
 
-const tools = require('../src/services/tools/neo4j.tools');
+const tools = require('../src/services/kg/neo4j-tools');
 
 describe('neo4j.tools handlers', () => {
   test('read_neo4j_cypher uses MCP sidecar when available', async () => {

@@ -4,10 +4,10 @@
  * Purpose: Execute validated Cypher queries against Neo4j with timeout and result limits
  */
 
-const { createLogger } = require('../../utils/logger');
+const { createLogger } = require('../utils/logger');
 const logger = createLogger('CypherExecutor');
-const { neo4jDriver } = require('../../config/database');
-const { VALIDATION_CONFIG } = require('../../../config/cypher-rules');
+const { neo4jDriver } = require('../config/database');
+const { VALIDATION_CONFIG } = require('../../config/cypher-rules');
 
 /**
  * Execute a Cypher query against Neo4j
