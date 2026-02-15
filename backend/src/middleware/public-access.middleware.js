@@ -2,7 +2,7 @@
  * 公开访问中间件
  * 处理公开链接的访问验证
  */
-const publicLinkService = require('../services/public-link.service');
+const publicLinkService = require('../services/core/public-link.service');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('PublicAccessMiddleware');
