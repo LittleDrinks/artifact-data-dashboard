@@ -1,6 +1,6 @@
 const { toolManager } = require('../tool-manager');
 const neo4jTools = require('./neo4j-tools');
-const artifactTools = require('./artifact.tools');
+const artifactTools = require('./artifact-tools');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('ToolsIndex');
