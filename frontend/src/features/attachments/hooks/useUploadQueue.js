@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { message } from 'antd';
 import {
-  uploadAttachment
+  uploadAttachment,
+  deleteAttachment
 } from '../../../services/attachment.service';
 
 const MAX_CONCURRENT = 3;
@@ -71,17 +72,7 @@ const useUploadQueue = ({ isAdmin, ownerType, ownerId, onUploadSuccess }) => {
         };
 
         try {
-          const name = item.file.name;
-          const existsRes = await checkAttachmentExists({
-            fileName: name,
-            ownerType: ownerType.trim() || undefined,
-            ownerId: ownerId.trim() || undefined
-          });
-          if (existsRes.data?.data?.exists) {
-            throw new Error('该文件已存在，请勿重复上传');
-          }
-
-          await directUpload({
+          await uploadAttachment({
             file: item.file,
             ownerType: ownerType.trim() || undefined,
             ownerId: ownerId.trim() || undefined,
@@ -195,7 +186,7 @@ const useUploadQueue = ({ isAdmin, ownerType, ownerId, onUploadSuccess }) => {
     async (id) => {
       if (!isAdmin) return;
       try {
-        await directDelete(id);
+        await deleteAttachment(id);
         message.success('删除成功');
         if (onUploadSuccess) onUploadSuccess();
       } catch (err) {

@@ -6,4 +6,4 @@ export { default as ExcelImport } from './components/ImportPanel/ExcelImport';
 export { default as LinkImport } from './components/ImportPanel/LinkImport';
 export { default as DirImport } from './components/ImportPanel/DirImport';
 export { default as ExportButton } from './components/ImportPanel/ExportButton';
-export { default as AttachmentTable } from './components/AttachmentTable';
+export { default as AttachmentTable } from './components/AttachmentTable.js';
