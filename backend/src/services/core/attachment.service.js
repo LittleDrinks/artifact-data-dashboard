@@ -5,8 +5,8 @@ const fsp = require('fs/promises');
 const sharp = require('sharp');
 
 const { mysqlPool } = require('../config/database');
-const { getStorageDriver } = require('./storage');
-const { getUploadQueue } = require('./queue/upload-queue');
+const { getStorageDriver } = require('../storage');
+const { getUploadQueue } = require('../queue/upload-queue');
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.svg']);
 

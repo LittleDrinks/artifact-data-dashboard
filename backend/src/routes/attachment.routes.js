@@ -1319,7 +1319,7 @@ router.post('/bulk/tags', async (req, res) => {
     }
 
     // 动态导入避免循环依赖
-    const tagService = require('../services/tag.service');
+    const tagService = require('../services/core/tag.service');
 
     let result;
     if (action === 'add') {

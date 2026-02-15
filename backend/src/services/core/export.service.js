@@ -2,7 +2,7 @@ const XLSX = require('xlsx');
 const archiver = require('archiver');
 const path = require('path');
 const fs = require('fs');
-const { getStorageDriver } = require('./storage');
+const { getStorageDriver } = require('../storage');
 
 /**
  * Export attachments metadata to an XLSX buffer.
