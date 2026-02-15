@@ -1,4 +1,4 @@
-const { mysqlPool } = require('../config/database');
+const { mysqlPool } = require('../../config/database');
 
 /**
  * Audit Service

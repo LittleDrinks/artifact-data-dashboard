@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
 const { validateRequest } = require('../middleware/validation.middleware');
-const mcpController = require('../services/mcp/mcp-controller');
+const mcpController = require('../services/infra/mcp-controller');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
 
 /**

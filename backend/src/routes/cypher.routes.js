@@ -11,7 +11,7 @@ const { createLogger } = require('../utils/logger');
 const { validateRequest } = require('../middleware/validation.middleware');
 const { validateQuery } = require('../services/kg/cypher-validator');
 const { executeQuery, executeQueryAsTable, getDatabaseInfo, testConnection } = require('../services/kg/cypher-executor');
-const auditService = require('../services/audit.service');
+const auditService = require('../services/utils/audit.service');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth.middleware');
 
 const logger = createLogger('CypherRoutes');

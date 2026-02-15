@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const { mysqlPool } = require('../config/database');
-const { getStorageDriver } = require('./storage');
+const { mysqlPool } = require('../../config/database');
+const { getStorageDriver } = require('../infra/storage');
 
 const DEFAULT_EXCLUDED_OWNER_TYPES = new Set(['system_export', 'system_import']);
 

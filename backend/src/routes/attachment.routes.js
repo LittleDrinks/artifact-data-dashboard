@@ -8,11 +8,11 @@ const AdmZip = require('adm-zip');
 const XLSX = require('xlsx');
 
 const { mysqlPool } = require('../config/database');
-const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/excel-kg.service');
+const { exportKnowledgeGraphXlsxBuffer, importKnowledgeGraphFromXlsxBuffer } = require('../services/utils/excel-kg.service');
 const { AttachmentService, guessMimeType, normalizeOriginalName } = require('../services/core/attachment.service');
-const { IntegrityService, parseBool } = require('../services/integrity.service');
-const { getStorageDriver } = require('../services/storage');
-const { writeAuditLog } = require('../services/audit.service');
+const { IntegrityService, parseBool } = require('../services/utils/integrity.service');
+const { getStorageDriver } = require('../services/infra/storage');
+const { writeAuditLog } = require('../services/utils/audit.service');
 const { createLogger } = require('../utils/logger');
 
 const router = express.Router();

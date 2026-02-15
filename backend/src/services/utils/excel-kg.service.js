@@ -1,9 +1,9 @@
 const XLSX = require('xlsx');
 const neo4j = require('neo4j-driver');
 
-const { mysqlPool, neo4jDriver } = require('../config/database');
-const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS, EXCEL_SCHEMA } = require('../config/excel-schema');
-const { createLogger } = require('../utils/logger');
+const { mysqlPool, neo4jDriver } = require('../../config/database');
+const { GRAPH_NODE_EXPORTS, GRAPH_REL_EXPORTS, EXCEL_SCHEMA } = require('../../config/excel-schema');
+const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('ExcelKGService');
 
