@@ -3,8 +3,8 @@
  * 处理公开分享链接的业务逻辑
  */
 const { v4: uuidv4 } = require('uuid');
-const PublicLinkModel = require('../models/public_link.model');
-const logger = require('../config/logger');
+const PublicLinkModel = require('../../models/public_link.model');
+const logger = require('../../config/logger');
 
 class PublicLinkService {
   /**

@@ -5,8 +5,8 @@ const mcpService = require('../services/mcp.service');
 
 const logger = createLogger('ChatRoutes');
 const { getAiPluginsConfig } = require('../services/ai/plugin-config');
-const { McpProvider } = require('../services/ai/providers/mcp.provider');
-// const { LocalProvider } = require('../services/ai/providers/local.provider');
+const { McpProvider } = require('../services/ai/providers/mcp-provider');
+// const { LocalProvider } = require('../services/ai/providers/local-provider');
 const { applyInputCapabilities } = require('../services/ai/capabilities');
 const { extractKeywords: extractKeywordsService } = require('../services/keyword.service');
 const modeManager = require('../services/ai/mode-manager');

@@ -4,7 +4,7 @@
  * Purpose: Validate Cypher queries for safety and correctness before execution
  */
 
-const { createLogger } = require('../utils/logger');
+const { createLogger } = require('../../utils/logger');
 const logger = createLogger('CypherValidator');
 const {
   validateCypherQuery,
