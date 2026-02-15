@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS logs (
 
 -- 创建attachments表（附件元数据）
 CREATE TABLE IF NOT EXISTS attachments (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   owner_type VARCHAR(50) NULL,
   owner_id INT NULL,
   uploaded_by INT NOT NULL,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS public_links (
 -- 创建attachment_refs表（附件引用关系）
 CREATE TABLE IF NOT EXISTS attachment_refs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  attachment_id INT NOT NULL,
+  attachment_id INT UNSIGNED NOT NULL,
   owner_type VARCHAR(50) NOT NULL,
   owner_id BIGINT UNSIGNED NOT NULL,
   relation_type VARCHAR(50) NULL,
