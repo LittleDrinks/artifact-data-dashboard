@@ -35,7 +35,7 @@ jest.mock('../src/services/ai/plugin-config', () => ({
   })
 }));
 
-jest.mock('../src/services/ai/providers/mcp.provider', () => {
+jest.mock('../src/services/ai/providers/mcp-provider', () => {
   return {
     McpProvider: jest.fn().mockImplementation(() => ({
       isEnabled: () => true,
