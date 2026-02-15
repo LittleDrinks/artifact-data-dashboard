@@ -421,6 +421,33 @@ export MYSQL_DATABASE=artifact_test
 cd backend && npm test
 ```
 
+### 环境陷阱：路径格式错误
+
+**问题现象**：在资源管理器中出现奇怪的文件夹名，如：
+```
+E$\shared\workplace\ADD\...
+backend\src\services\core\frontend
+```
+
+**根本原因**：
+- Windows路径 `E:\` 被错误解析为 `E$\`（常见于WSL或远程挂载路径）
+- 路径拼接时缺少分隔符，导致 `core` + `frontend` 变成 `corefrontend`
+
+**预防措施**：
+1. **在WSL中**：使用Linux风格路径 `/mnt/e/shared/...` 而非 `E:\`
+2. **在PowerShell中**：路径参数加引号 `"E:\shared\workplace\ADD\..."`
+3. **避免手动拼接路径**：使用 `path.join()` 或 `path.resolve()`
+4. **复制路径时**：右键"复制路径"而非手动输入
+
+**修复方法**：
+```bash
+# 如果出现异常文件夹，手动删除
+rm -rf "E:\\shared\\workplace\\ADD\\artifact-data-dashboard\\backend\\src\\services\\core\\frontend"
+
+# 然后重新用正确路径创建
+mkdir -p "frontend"
+```
+
 ---
 
 ## 相关文档
