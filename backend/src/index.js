@@ -216,7 +216,7 @@ const swaggerOptions = {
   },
   apis: [
     './src/routes/*.js',
-    __dirname + '/routes/*.js'
+    `${__dirname}/routes/*.js`
   ], // 路径到API路由文件
 };
 
