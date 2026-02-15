@@ -1,6 +1,6 @@
 describe('ToolManager (unit)', () => {
   test('register/get/list/clear work', () => {
-    const { ToolManager } = require('../src/services/tool-manager');
+    const { ToolManager } = require('../src/services/utils/tool-manager');
     const tm = new ToolManager();
 
     const handler = jest.fn(async () => ({ ok: true }));
@@ -14,7 +14,7 @@ describe('ToolManager (unit)', () => {
   });
 
   test('registerTool validates name and handler', () => {
-    const { ToolManager } = require('../src/services/tool-manager');
+    const { ToolManager } = require('../src/services/utils/tool-manager');
     const tm = new ToolManager();
 
     expect(() => tm.registerTool('', {}, async () => {})).toThrow();
@@ -22,7 +22,7 @@ describe('ToolManager (unit)', () => {
   });
 
   test('executeTool runs tool handler and returns success ToolResult', async () => {
-    const { ToolManager } = require('../src/services/tool-manager');
+    const { ToolManager } = require('../src/services/utils/tool-manager');
     const tm = new ToolManager();
     const handler = jest.fn(async ({ a }) => ({ a }));
     tm.registerTool('sum', { type: 'object' }, handler);
@@ -38,7 +38,7 @@ describe('ToolManager (unit)', () => {
   });
 
   test('executeTool returns error ToolResult when handler throws', async () => {
-    const { ToolManager } = require('../src/services/tool-manager');
+    const { ToolManager } = require('../src/services/utils/tool-manager');
     const tm = new ToolManager();
     tm.registerTool('boom', { type: 'object' }, async () => {
       throw new Error('kaboom');
@@ -52,7 +52,7 @@ describe('ToolManager (unit)', () => {
   });
 
   test('executeTool throws when tool not found', async () => {
-    const { ToolManager } = require('../src/services/tool-manager');
+    const { ToolManager } = require('../src/services/utils/tool-manager');
     const tm = new ToolManager();
     await expect(tm.executeTool('missing', {})).rejects.toThrow(/not found/i);
   });

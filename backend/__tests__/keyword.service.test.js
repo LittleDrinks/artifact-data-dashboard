@@ -1,4 +1,4 @@
-const { extractKeywords } = require('../src/services/keyword.service');
+const { extractKeywords } = require('../src/services/utils/keyword.service');
 
 describe('keyword.service.extractKeywords', () => {
   test('removes polite stopwords for artifact query', () => {

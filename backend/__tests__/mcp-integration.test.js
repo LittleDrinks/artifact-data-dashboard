@@ -1,4 +1,4 @@
-const { ToolManager } = require('../src/services/tool-manager');
+const { ToolManager } = require('../src/services/utils/tool-manager');
 
 describe('MCP integration (service + env)', () => {
   beforeEach(() => {
