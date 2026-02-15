@@ -2,8 +2,8 @@
  * Folder Service - 文件夹业务逻辑层
  * @module services/folder
  */
-const folderModel = require('../models/folder.model');
-const { createLogger } = require('../utils/logger');
+const folderModel = require('../../models/folder.model');
+const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('FolderService');
 
