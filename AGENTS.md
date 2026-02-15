@@ -5,6 +5,92 @@
 
 ---
 
+## 📋 文档体系说明（必读）
+
+本项目采用**分层文档体系**，所有开发计划、进度、技术决策**必须写成文档保存**，禁止口头约定或仅存在于对话中的计划。
+
+### 文档目录结构
+
+```
+project-root/
+├── AGENTS.md              # 本文件：开发规范和环境配置（供AI阅读）
+├── progress.md            # 总体进度和下一步计划
+├── VERSION.md             # 版本历史和发布说明
+├── README.md              # 项目介绍和部署指南（供用户阅读）
+│
+├── docs/                  # 需求描述和总体架构设计
+│   ├── MRD.md            # 市场需求文档
+│   ├── PRD.md            # 产品需求文档
+│   ├── ARCHITECTURE-v2-workbench.md  # 架构设计
+│   ├── WBS.md            # 工作分解结构
+│   ├── 技术方案.md        # 技术选型方案
+│   ├── 交互流程.md        # 用户交互流程
+│   ├── 设计规范.md        # UI/UX设计规范
+│   ├── 信息架构.md        # 信息架构设计
+│   ├── development-roadmap.md      # 开发路线图
+│   └── *.md              # 其他需求/架构文档
+│
+└── specs/                 # 技术细节记录（前后端具体实现）
+    ├── README.md         # 规格文档总览
+    ├── 01-system-overview/   # 系统概述
+    │   ├── spec.md       # 需求规格
+    │   └── progress.md   # 实现进度
+    ├── 02-architecture/      # 系统架构
+    │   ├── spec.md
+    │   └── progress.md
+    ├── 03-data-model/        # 数据模型
+    │   ├── spec.md
+    │   └── progress.md
+    ├── 04-api-contracts/     # API契约
+    │   ├── spec.md
+    │   └── progress.md
+    ├── 05-frontend/          # 前端规范
+    │   ├── spec.md
+    │   └── progress.md
+    ├── 06-ai-mcp/            # AI与MCP
+    │   ├── spec.md
+    │   └── progress.md
+    ├── 07-deployment/        # 部署配置
+    │   ├── spec.md
+    │   └── progress.md
+    └── 08-external-apis/     # 外部API
+        └── *.md
+```
+
+### 文档职责分工
+
+| 目录 | 用途 | 读者 | 更新时机 |
+|------|------|------|----------|
+| **docs/** | **需求描述和总体架构设计** | 产品经理、架构师、新成员 | 需求变更、架构调整时 |
+| **specs/** | **技术细节和实现进度** | 开发者、技术负责人 | 每完成一个功能/修复一个bug时 |
+| **progress.md** | **总体进度和下一步计划** | 所有协作者 | 每日/每周更新 |
+
+### 强制规则：计划必须写成文档
+
+**❌ 禁止的做法**（会导致信息丢失）：
+- 只在对话中说"我们接下来要做X"
+- 只创建临时todo list而不保存为文档
+- 让计划只存在于某个agent的上下文中
+
+**✅ 正确的做法**：
+1. **任何开发计划** → 写入 `progress.md` 或 `specs/*/progress.md`
+2. **架构决策** → 更新 `docs/` 或 `specs/*/spec.md`
+3. **里程碑总结** → 更新 `VERSION.md`
+4. **AI交接工作** → 更新本文件和 `progress.md`
+
+**更新流程**：
+```
+1. 制定计划/完成工作
+   ↓
+2. 同步更新对应文档（spec.md或progress.md）
+   ↓
+3. 如需，更新progress.md中的总体进度
+   ↓
+4. 提交时注明 "docs: xxx"
+```
+
+---
+
 ## 项目概述
 
 **文物大数据与人工智能集成系统** (Artifact Data Dashboard) 是一个文物数据管理和智能分析平台，集成了大数据分析、知识图谱和人工智能技术。
@@ -452,7 +538,32 @@ mkdir -p "frontend"
 
 ## 相关文档
 
+### 必读文档
 - `README.md`: 用户部署和使用指南
+- `progress.md`: **总体进度和下一步计划（工作前必读）**
+- `VERSION.md`: 版本历史和发布说明
+- `docs/development-roadmap.md`: 后续开发方向规划
+
+### 需求与架构（docs/）
+- `docs/MRD.md`: 市场需求文档
+- `docs/PRD.md`: 产品需求文档
+- `docs/ARCHITECTURE-v2-workbench.md`: 工作台架构设计
+- `docs/WBS.md`: 工作分解结构
+- `docs/技术方案.md`: 技术选型
+- `docs/交互流程.md`: 交互设计
+
+### 技术规格（specs/）
+- `specs/README.md`: 规格文档总览和地图
+- `specs/01-system-overview/`: 系统概述
+- `specs/02-architecture/`: 系统架构
+- `specs/03-data-model/`: 数据模型
+- `specs/04-api-contracts/`: API契约
+- `specs/05-frontend/`: 前端规范
+- `specs/06-ai-mcp/`: AI与MCP
+- `specs/07-deployment/`: 部署配置
+- `specs/08-external-apis/`: 外部API
+
+### 配置与规范
 - `backend/config/ai-plugins.json`: AI 插件配置
 - `backend/config/cypher-rules.js`: Cypher 查询安全规则
 - `.github/rules/`: 编码规范（TypeScript, Go, 安全规则等）
@@ -586,5 +697,5 @@ biome check .
 
 ---
 
-*最后更新: 2026-02-15*
-*配置版本: v1.0 - 完整 LSP/Skills/MCP 支持*
+*最后更新: 2026-02-16*
+*配置版本: v1.1 - 添加文档体系说明*
