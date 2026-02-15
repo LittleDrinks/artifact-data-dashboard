@@ -11,7 +11,7 @@ const { applyInputCapabilities } = require('../services/ai/capabilities');
 const { extractKeywords: extractKeywordsService } = require('../services/utils/keyword.service');
 const modeManager = require('../services/ai/mode-manager');
 const chatConfigService = require('../services/ai/chat-config.service');
-const { generateMockResponse, generateMockStreamResponse } = require('../services/ai/mock-provider');
+const { generateMockResponse, generateMockStreamResponse } = require('../services/ai/providers/mock-provider');
 
 const router = express.Router();
 

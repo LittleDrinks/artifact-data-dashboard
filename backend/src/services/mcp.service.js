@@ -4,7 +4,7 @@
  */
 const axios = require('axios');
 const { getAiMode } = require('../config/env');
-const { toolManager } = require('./tool-manager');
+const { toolManager } = require('./utils/tool-manager');
 const { safeJsonParse } = require('../utils/json-parser');
 const { createLogger } = require('../utils/logger');
 

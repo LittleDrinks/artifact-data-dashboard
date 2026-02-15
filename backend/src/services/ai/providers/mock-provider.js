@@ -1,5 +1,5 @@
-const { getMockResponse } = require('../../../config/mode-config');
-const { createLogger } = require('../../utils/logger');
+const { getMockResponse } = require('../../../../config/mode-config');
+const { createLogger } = require('../../../utils/logger');
 const logger = createLogger('MockProvider');
 
 /**

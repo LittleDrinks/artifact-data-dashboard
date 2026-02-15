@@ -1,6 +1,6 @@
 const { AI_MODES, getModeConfig } = require('../../../config/mode-config');
-const redisStateService = require('../redis-state.service');
-const auditService = require('../audit.service');
+const redisStateService = require('../utils/redis-state.service');
+const auditService = require('../utils/audit.service');
 
 /**
  * Service to manage AI operation modes (ONLINE, LOCAL, MOCK)

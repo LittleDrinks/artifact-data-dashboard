@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { AI_MODES } = require('../../../config/mode-config');
-const redisStateService = require('../redis-state.service');
+const redisStateService = require('../utils/redis-state.service');
 
 /**
  * Health Check Service

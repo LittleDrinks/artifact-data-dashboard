@@ -1,5 +1,5 @@
 const mcpService = require('../../mcp.service');
-const { toolManager } = require('../../tool-manager');
+const { toolManager } = require('../../utils/tool-manager');
 
 class McpProvider {
   constructor(deps = {}) {

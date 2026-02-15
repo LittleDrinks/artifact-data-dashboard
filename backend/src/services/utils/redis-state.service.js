@@ -5,7 +5,7 @@
  */
 
 const { redisClient } = require('../../config/database');
-const { AI_MODES, isValidMode } = require('../../config/mode-config');
+const { AI_MODES, isValidMode } = require('../../../config/mode-config');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('RedisStateService');

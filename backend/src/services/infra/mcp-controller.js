@@ -2,8 +2,8 @@
  * MCP Controller Service
  * Feature: US2 - MCP enable/disable management
  */
-const redisStateService = require('../redis-state.service');
-const auditService = require('../audit.service');
+const redisStateService = require('../utils/redis-state.service');
+const auditService = require('../utils/audit.service');
 
 class MCPController {
     /**
