@@ -1,12 +1,13 @@
 @echo off
+chcp 65001 >nul
 
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "ENV_FILE=.env"
 
 if not exist "%ENV_FILE%" (
-	echo [����] ��Ŀ¼ %ENV_FILE% �����ڡ�
-	echo [����] ���ȴ� .env.example ���� .env ����д MYSQL_ROOT_PASSWORD��
+	echo [ERROR] .env file not found in current directory.
+	echo [INFO] Please copy .env.example to .env and set MYSQL_ROOT_PASSWORD.
 	echo.
 	pause
 	exit /b 1
@@ -25,15 +26,15 @@ for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^NEO4J_USER=" "%EN
 for /f "usebackq tokens=1,* delims==" %%A in (`findstr /R /C:"^NEO4J_PASSWORD=" "%ENV_FILE%"`) do set "NEO4J_PASSWORD=%%B"
 
 if "%MYSQL_ROOT_PASSWORD%"=="" (
-	echo [����] δ�� %ENV_FILE% ���ҵ� MYSQL_ROOT_PASSWORD��
-	echo [����] ���� .env ������ MYSQL_ROOT_PASSWORD=... �����ԡ�
+	echo [ERROR] MYSQL_ROOT_PASSWORD not found in %ENV_FILE%
+	echo [INFO] Please add: MYSQL_ROOT_PASSWORD=your_password
 	echo.
 	pause
 	exit /b 1
 )
 
-echo [����] ������ MySQL ���ݿ⣺%MYSQL_DATABASE%
-echo [����] ��ͬʱ���� Neo4j ͼ���ݿ⣨ɾ�� neo4j-data / neo4j-logs volumes��
+echo [INFO] Resetting MySQL database: %MYSQL_DATABASE%
+echo [INFO] Also resetting Neo4j graph database (removing neo4j-data / neo4j-logs volumes)
 echo.
 
 rem --- Reset Neo4j (data is stored in named volumes; rebuild won't clear volumes) ---
@@ -50,12 +51,12 @@ docker volume rm artifact-data-dashboard_neo4j-logs >nul 2>&1
 rem Start neo4j again
 docker compose up -d neo4j
 if %errorlevel% neq 0 (
-	echo [����] Neo4j ����/����ʧ�ܣ����� docker compose �Ƿ���á�
+	echo [ERROR] Failed to start Neo4j container. Check if docker compose is available.
 	pause
 	exit /b 1
 )
 
-echo [����] �ȴ� Neo4j ����...
+echo [INFO] Waiting for Neo4j to be ready...
 set "NEO4J_READY=0"
 for /L %%i in (1,1,60) do (
 	docker exec artifact-dashboard-neo4j cypher-shell -u %NEO4J_USER% -p %NEO4J_PASSWORD% "RETURN 1;" >nul 2>&1
@@ -67,29 +68,30 @@ for /L %%i in (1,1,60) do (
 )
 :neo4j_ready
 if "%NEO4J_READY%"=="0" (
-	echo [����] Neo4j δ��Ԥ��ʱ���ھ�����
+	echo [ERROR] Neo4j did not become ready within timeout period.
 	pause
 	exit /b 1
 )
 
-echo [����] ��ʼ�� Neo4j ͼ���ݣ�ʾ��֪ʶͼ�ף�...
+echo [INFO] Initializing Neo4j graph data (knowledge graph)...
 docker compose run --rm -T -e NEO4J_URI=bolt://neo4j:7687 -e NEO4J_USER=%NEO4J_USER% -e NEO4J_PASSWORD=%NEO4J_PASSWORD% backend node scripts/init-neo4j.js
 if %errorlevel% neq 0 (
-	echo [����] Neo4j ��ʼ���ű�ִ��ʧ�ܡ�
+	echo [ERROR] Neo4j initialization script failed.
 	pause
 	exit /b 1
 )
 
 docker exec -i artifact-dashboard-mysql mysql -uroot -p%MYSQL_ROOT_PASSWORD% -e "DROP DATABASE IF EXISTS %MYSQL_DATABASE%; CREATE DATABASE %MYSQL_DATABASE% CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 if %errorlevel% neq 0 (
-	echo [����] ִ�����ݿ�����ʧ�ܣ����������Ƿ������Լ� MYSQL_ROOT_PASSWORD �Ƿ���ȷ��
+	echo [ERROR] Failed to recreate database. Check if MySQL container is running and MYSQL_ROOT_PASSWORD is correct.
 	pause
 	exit /b 1
 )
 
-docker exec -i artifact-dashboard-mysql mysql -uroot -p%MYSQL_ROOT_PASSWORD% %MYSQL_DATABASE% < backend/scripts/init-mysql.sql
+set "SCRIPT_DIR=%~dp0"
+docker exec -i artifact-dashboard-mysql mysql -uroot -p%MYSQL_ROOT_PASSWORD% %MYSQL_DATABASE% < "%SCRIPT_DIR%backend\scripts\init-mysql.sql"
 if %errorlevel% neq 0 (
-	echo [����] ���� init-mysql.sql ʧ�ܡ�
+	echo [ERROR] Failed to execute init-mysql.sql
 	pause
 	exit /b 1
 )
@@ -101,4 +103,6 @@ if %errorlevel% neq 0 (
 	echo [WARNING] You can manually sync later by running: docker compose exec backend node scripts/sync-mysql-to-neo4j.js
 )
 
-echo [���] ���������ã�������ϵͳ��
+echo [SUCCESS] Database reset completed. System is ready.
+echo.
+pause
