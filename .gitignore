@@ -1,76 +1,81 @@
+# ==========================================
+# 开发容器
+# ==========================================
 .devcontainer/
 
-# Node.js dependencies
-node_modules/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-
-# Optional npm cache
-.npm
-
-# Optional ESLint cache
-.eslintcache
-
-# Environment variables
+# ==========================================
+# 环境变量（安全敏感）
+# ==========================================
 .env
 .env.*.local
+.env.development.local
+.env.production.local
 
-# Build output
-dist/
-build/
-coverage/
+# ==========================================
+# Node.js / npm / yarn / pnpm
+# ==========================================
+node_modules/
+.npm
+.pnp.cjs
+.pnp.js
+.yarnrc.yml
 
-# TypeScript cache
-*.tsbuildinfo
-
-# Editor settings
-.vscode/
-.idea/
-
-# OS-generated files
-.DS_Store
-Thumbs.db
-
-# Yarn v2/v3
+# Yarn v2/v3 (保留必要文件)
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
-.pnp.cjs
-.pnp.js
-.yarnrc.yml
 
-# github-copilot
-.github/
-.specify/
+# 包管理器日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# large resource files
-.reference/
-**/images_*/
+# ==========================================
+# 构建输出
+# ==========================================
+dist/
+build/
+coverage/
+*.tsbuildinfo
 
-# Generated exports / local artifacts
-*.xlsx
-build_kg/**/*.xlsx
+# ==========================================
+# 日志文件
+# ==========================================
+logs/
+*.log
+.debug/
+debug.log
 
-# Datasets
-data/
-/ollama/
+# ==========================================
+# 编辑器 / IDE
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
 
-# Large crawler outputs (keep locally, avoid committing)
-build_kg/crawler/artifact.json
+# ==========================================
+# 操作系统文件
+# ==========================================
+.DS_Store
+Thumbs.db
+desktop.ini
 
+# ==========================================
 # Python
+# ==========================================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
 .pytest_cache/
 .ipynb_checkpoints/
@@ -79,9 +84,71 @@ venv/
 ENV/
 env/
 
-# test
-docker-compose.data-local.yml
+# ==========================================
+# 缓存文件
+# ==========================================
+.eslintcache
+.biome-cache/
+.jest-cache/
+.cache/
+.parcel-cache/
 
-# data
+# ==========================================
+# 数据与大型资源（本地开发用）
+# ==========================================
+data/
 ollama/
 build_kg/
+.reference/
+**/images_*/
+
+# ==========================================
+# 生成/导出文件
+# ==========================================
+*.xlsx
+build_kg/**/*.xlsx
+*.csv
+*.json.bak
+
+# ==========================================
+# 临时文件
+# ==========================================
+*.tmp
+*.temp
+*.bak
+*.backup
+tmp/
+temp/
+.tmp/
+
+# ==========================================
+# 上传临时目录
+# ==========================================
+uploads/temp/
+
+# ==========================================
+# Docker Compose 本地覆盖
+# ==========================================
+docker-compose.override.yml
+docker-compose.data-local.yml
+
+# ==========================================
+# 其他工具
+# ==========================================
+.specify/
+
+# ==========================================
+# 爬虫输出（大型文件）
+# ==========================================
+build_kg/crawler/artifact.json
+
+# ==========================================
+# 可执行文件（应从包管理器安装）
+# ==========================================
+marksman.exe
+
+# ==========================================
+# 保留项（不要忽略）
+# ==========================================
+# .github/      ← 需要提交的工作流配置
+# package-lock.json / yarn.lock / pnpm-lock.yaml  ← 应该提交锁定文件

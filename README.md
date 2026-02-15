@@ -1,5 +1,6 @@
 # 文物大数据与人工智能集成系统 (Artifact Data Dashboard)
 
+[![版本](https://img.shields.io/badge/版本-v0.0_Genesis-blue.svg)](./VERSION.md)
 [![项目状态](https://img.shields.io/badge/状态-功能基本完整-green.svg)](https://github.com/LittleDrinks/artifact-data-dashboard)
 [![Docker](https://img.shields.io/badge/部署-Docker%20Compose-2496ED.svg?logo=docker)](https://github.com)
 
