@@ -472,4 +472,70 @@ cd backend && npm test
 
 ---
 
-*最后更新: 2026-02-13*
+## AI 助手开发环境配置
+
+### LSP (Language Server Protocol) 支持
+
+项目已配置完整的 LSP 支持，提供代码补全、符号跳转、诊断检查等功能：
+
+| 语言/格式 | LSP 服务器 | 状态 |
+|-----------|-----------|------|
+| JavaScript/TypeScript | `typescript-language-server` | ✅ 已安装 |
+| HTML/CSS/JSON | `vscode-langservers-extracted` | ✅ 已安装 |
+| YAML | `yaml-language-server` | ✅ 已安装 |
+| Docker | `dockerfile-language-server` | ✅ 已安装 |
+| SQL | `sql-language-server` | ✅ 已安装 |
+| Cypher (Neo4j) | `@neo4j-cypher/language-server` | ✅ 已安装 |
+| Markdown | `marksman` | ⚠️ 需手动安装 |
+
+### Skills 系统
+
+项目使用 OpenCode Skills 系统封装领域知识。Skills 文件位于：
+
+```
+.opencode/skills/
+├── nodejs-backend/     # Node.js/Express 开发规范
+├── react-frontend/     # React/Ant Design 开发规范
+├── neo4j-graph/        # 知识图谱/Cypher 查询规范
+└── docker-dev/         # Docker 开发环境管理
+```
+
+**使用方法**：
+- AI 助手在处理相关任务时会自动加载对应 Skill
+- 如需查看特定 Skill 内容：`.opencode/skills/{name}/SKILL.md`
+
+### MCP (Model Context Protocol) 配置
+
+项目配置了以下 MCP 服务器（`.opencode/mcp.json`）：
+
+| MCP 服务器 | 用途 | 状态 |
+|-----------|------|------|
+| `context7` | 技术文档查询 | 需 API Key |
+| `filesystem` | 项目文件访问 | ✅ 可用 |
+| `github` | GitHub 仓库操作 | 需 Token |
+
+**环境变量要求**：
+- `CONTEXT7_API_KEY` - Context7 MCP 认证
+- `GITHUB_TOKEN` - GitHub MCP 认证
+
+### 开发工具链
+
+**代码质量工具**：
+- **Biome** - Linting 和格式化（替代 ESLint + Prettier）
+- **TypeScript** - 类型检查
+
+**验证安装**：
+```bash
+# 检查 LSP 安装
+typescript-language-server --version
+biome --version
+yaml-language-server --version
+
+# 检查 Biome 配置
+biome check .
+```
+
+---
+
+*最后更新: 2026-02-15*
+*配置版本: v1.0 - 完整 LSP/Skills/MCP 支持*
