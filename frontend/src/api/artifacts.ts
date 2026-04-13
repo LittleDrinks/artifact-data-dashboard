@@ -15,8 +15,8 @@ export interface Artifact {
 
 export interface ArtifactListParams {
   page?: number;
-  page_size?: number;
-  search?: string;
+  size?: number;
+  keyword?: string;
   category?: string;
   era?: string;
   location?: string;
@@ -26,7 +26,18 @@ export interface ArtifactListResponse {
   total: number;
   page: number;
   page_size: number;
+  total_pages: number;
   items: Artifact[];
+}
+
+export interface ArtifactFormData {
+  name: string;
+  description?: string | null;
+  category?: string | null;
+  era?: string | null;
+  location?: string | null;
+  image_url?: string | null;
+  tags?: string | null;
 }
 
 /** 获取文物列表 */
@@ -42,13 +53,13 @@ export async function getArtifact(id: number): Promise<Artifact> {
 }
 
 /** 创建文物 */
-export async function createArtifact(data: Partial<Artifact>): Promise<Artifact> {
+export async function createArtifact(data: ArtifactFormData): Promise<Artifact> {
   const res = await client.post<Artifact>('/artifacts', data);
   return res.data;
 }
 
 /** 更新文物 */
-export async function updateArtifact(id: number, data: Partial<Artifact>): Promise<Artifact> {
+export async function updateArtifact(id: number, data: Partial<ArtifactFormData>): Promise<Artifact> {
   const res = await client.put<Artifact>(`/artifacts/${id}`, data);
   return res.data;
 }

@@ -23,3 +23,9 @@
 - **原因**：Windows 系统 locale 默认编码不是 UTF-8
 - **解决**：所有 `open()` 调用都加 `encoding='utf-8'` 参数
 - **教训**：Windows 环境下处理中文文件，永远显式指定 encoding='utf-8'
+
+### [2026-04-14] recharts Tooltip formatter 和 Pie label 的 TypeScript 类型严格检查
+- **现象**：`formatter={(value: number) => ...}` 报 TS2322，`label={({ name, percent }) => ...}` 报 TS2769
+- **原因**：recharts 的 Tooltip formatter 参数类型是 `ValueType | undefined`，Pie label 参数类型是 `PieLabelRenderProps`（name 为 `string | undefined`），不能窄化为非可选类型
+- **解决**：formatter 去掉类型标注用隐式推断，Pie label 导入 `PieLabelRenderProps` 类型并正确处理可选属性
+- **教训**：recharts v2 的 TypeScript 类型定义很严格，不要给回调参数手动标注更窄的类型
