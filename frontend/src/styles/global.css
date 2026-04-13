@@ -1,0 +1,98 @@
+/* ── Stripe-inspired Design System (from demo/style.css) ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;510;590&display=swap');
+
+:root {
+  /* Stripe Backgrounds */
+  --bg-canvas: #ffffff;
+  --bg-panel: #f6f9fc;
+  --bg-surface: #ffffff;
+  --bg-hover: #f0f4f8;
+  --bg-dark: #1c1e54;
+
+  /* Stripe Text */
+  --text-heading: #061b31;
+  --text-label: #273951;
+  --text-body: #64748d;
+  --text-muted: #94a3b8;
+  --text-light: #b0bec5;
+
+  /* Stripe Brand */
+  --purple: #533afd;
+  --purple-hover: #4434d4;
+  --purple-deep: #2e2b8c;
+  --purple-light: #b9b9f9;
+  --purple-soft: #d6d9fc;
+  --purple-bg: rgba(83,58,253,0.05);
+
+  /* Accent Decorative */
+  --ruby: #ea2261;
+  --magenta: #f96bee;
+
+  /* Status */
+  --green: #15be53;
+  --green-text: #108c3d;
+  --green-bg: rgba(21,190,83,0.2);
+  --green-border: rgba(21,190,83,0.4);
+
+  /* Heritage domain colors */
+  --c-bronze: #9a6324;
+  --c-jade: #3d8b37;
+  --c-ceramic: #c45100;
+  --c-gold: #7c5e10;
+  --c-blue: #2874ad;
+  --c-red: #d32f2f;
+
+  /* Borders */
+  --border: #e5edf5;
+  --border-solid: #d4dee9;
+  --border-purple: #b9b9f9;
+  --border-dashed: #362baa;
+
+  /* Shadows (blue-tinted) */
+  --shadow-sm: rgba(23,23,23,0.06) 0px 3px 6px;
+  --shadow-md: rgba(23,23,23,0.08) 0px 15px 35px;
+  --shadow-lg: rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px;
+
+  /* Radius */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-card: 8px;
+
+  /* Layout */
+  --sidebar-w: 240px;
+  --header-h: 56px;
+  --content-pad: 32px;
+
+  /* Typography */
+  --font: 'Inter', -apple-system, 'SF Pro Display', system-ui, 'Segoe UI', sans-serif;
+  --mono: 'SourceCodePro', 'SFMono-Regular', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 300;
+  color: var(--text-body);
+  background: var(--bg-canvas);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--purple); text-decoration: none; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-solid); border-radius: 3px; }
+
+/* Ant Design 全局覆盖 */
+.ant-btn-primary {
+  background: var(--purple) !important;
+  border-color: var(--purple) !important;
+}
+.ant-btn-primary:hover {
+  background: var(--purple-hover) !important;
+  border-color: var(--purple-hover) !important;
+}

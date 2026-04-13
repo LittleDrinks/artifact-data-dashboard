@@ -1,0 +1,59 @@
+import client from './client';
+
+export interface Artifact {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  era: string | null;
+  location: string | null;
+  image_url: string | null;
+  tags: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactListParams {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  category?: string;
+  era?: string;
+  location?: string;
+}
+
+export interface ArtifactListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: Artifact[];
+}
+
+/** 获取文物列表 */
+export async function getArtifacts(params?: ArtifactListParams): Promise<ArtifactListResponse> {
+  const res = await client.get<ArtifactListResponse>('/artifacts', { params });
+  return res.data;
+}
+
+/** 获取文物详情 */
+export async function getArtifact(id: number): Promise<Artifact> {
+  const res = await client.get<Artifact>(`/artifacts/${id}`);
+  return res.data;
+}
+
+/** 创建文物 */
+export async function createArtifact(data: Partial<Artifact>): Promise<Artifact> {
+  const res = await client.post<Artifact>('/artifacts', data);
+  return res.data;
+}
+
+/** 更新文物 */
+export async function updateArtifact(id: number, data: Partial<Artifact>): Promise<Artifact> {
+  const res = await client.put<Artifact>(`/artifacts/${id}`, data);
+  return res.data;
+}
+
+/** 删除文物 */
+export async function deleteArtifact(id: number): Promise<void> {
+  await client.delete(`/artifacts/${id}`);
+}
