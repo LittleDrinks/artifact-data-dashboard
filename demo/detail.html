@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>文物详情 — 文物大数据平台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="../logo.png" alt="logo">
+    <span>文物大数据平台</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">概览</div>
+    <a href="index.html" class="nav-item"><span class="nav-icon">📊</span>Dashboard</a>
+    <div class="nav-group">管理</div>
+    <a href="artifacts.html" class="nav-item"><span class="nav-icon">🏺</span>文物管理</a>
+    <a href="detail.html" class="nav-item active"><span class="nav-icon">📄</span>文物详情</a>
+    <div class="nav-group">智能分析</div>
+    <a href="graph.html" class="nav-item"><span class="nav-icon">🔗</span>知识图谱</a>
+    <a href="chat.html" class="nav-item"><span class="nav-icon">💬</span>AI 问答</a>
+  </div>
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="user-av">管</div>
+      <div><div class="user-name">管理员</div><div class="user-role">Admin</div></div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main -->
+<main class="main">
+  <div class="header">
+    <h1>后母戊鼎 <span class="badge badge-bronze" style="font-size:11px;vertical-align:middle;margin-left:8px">青铜器</span></h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost">编辑</button>
+      <button class="btn btn-brand">在图谱中查看</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Breadcrumb -->
+    <div style="font-size:12px;color:var(--text-quaternary);margin-bottom:16px;display:flex;gap:6px;align-items:center">
+      <a href="artifacts.html" style="color:var(--text-tertiary)">文物管理</a>
+      <span>/</span>
+      <span style="color:var(--text-secondary)">后母戊鼎</span>
+    </div>
+
+    <div class="detail-grid">
+      <!-- Left: Images -->
+      <div class="img-section">
+        <div class="img-main">🏺</div>
+        <div class="img-thumbs">
+          <div class="img-th active">1</div>
+          <div class="img-th">2</div>
+          <div class="img-th">3</div>
+          <div class="img-th">4</div>
+        </div>
+      </div>
+
+      <!-- Right: Info -->
+      <div class="info-col">
+        <div class="card">
+          <div class="card-title">基本信息</div>
+          <div class="meta-grid">
+            <div>
+              <div class="meta-lbl">朝代</div>
+              <div class="meta-val">商后期（约前14—前11世纪）</div>
+            </div>
+            <div>
+              <div class="meta-lbl">类别</div>
+              <div class="meta-val"><span class="badge badge-bronze">青铜器</span></div>
+            </div>
+            <div>
+              <div class="meta-lbl">材质</div>
+              <div class="meta-val">青铜</div>
+            </div>
+            <div>
+              <div class="meta-lbl">出土时间</div>
+              <div class="meta-val">1939年</div>
+            </div>
+            <div>
+              <div class="meta-lbl">出土地点</div>
+              <div class="meta-val">河南省安阳市武官村</div>
+            </div>
+            <div>
+              <div class="meta-lbl">收藏单位</div>
+              <div class="meta-val">中国国家博物馆</div>
+            </div>
+            <div>
+              <div class="meta-lbl">尺寸</div>
+              <div class="meta-val">高133cm 口长110cm 重832.84kg</div>
+            </div>
+            <div>
+              <div class="meta-lbl">级别</div>
+              <div class="meta-val"><span class="badge badge-jade">禁止出境展览</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">描述</div>
+          <div class="desc-text">
+            后母戊鼎，原称司母戊鼎，是商后期（约前14世纪至前11世纪）铸品。此鼎是已知中国古代最重的青铜器。鼎呈长方形，口沿厚实，两耳方形，四柱足。器身与四足为整体铸造，鼎耳则是在鼎身铸好后再装范浇铸而成。鼎身四面以饕餮纹为主要装饰，四面交接处各饰一扉棱，鼎足上部亦饰有兽面纹。整个器形雄伟庄严，纹饰精美，工艺高超。
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Inpainting: full-width horizontal strip -->
+      <div class="inpaint inpaint-strip">
+        <div class="inpaint-head">
+          <div class="inpaint-title">图像修复 <span class="plugin-tag">IOPaint Plugin</span></div>
+          <button class="btn btn-subtle" style="font-size:12px">设置</button>
+        </div>
+        <div class="inpaint-body" style="display:flex;flex-direction:row;gap:16px;padding:16px 20px">
+          <div class="inpaint-panel" style="flex:1">
+            <div class="inpaint-img" style="height:120px">
+              <span style="font-size:24px">🖼</span>
+              <span>原始图片</span>
+            </div>
+            <div class="inpaint-lbl">上传或从附件选择</div>
+          </div>
+          <div style="display:flex;align-items:center;color:var(--text-muted);font-size:20px">→</div>
+          <div class="inpaint-panel" style="flex:1">
+            <div class="inpaint-img" style="height:120px">
+              <span style="font-size:24px">🔧</span>
+              <span>修复结果</span>
+            </div>
+            <div class="inpaint-lbl">AI 自动修复</div>
+          </div>
+          <div style="display:flex;flex-direction:column;justify-content:center;gap:8px;padding-left:16px;border-left:1px solid var(--border)">
+            <button class="btn btn-ghost">绘制遮罩</button>
+            <button class="btn btn-brand">开始修复</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Related: knowledge graph -->
+      <div style="margin-top:24px">
+        <div class="card-title" style="margin-bottom:12px">相关文物</div>
+        <div class="related-graph">
+          <svg class="related-edges" viewBox="0 0 800 260" preserveAspectRatio="xMidYMid meet">
+            <!-- Center to nodes -->
+            <line x1="400" y1="130" x2="130" y2="60"/>
+            <line x1="400" y1="130" x2="270" y2="200"/>
+            <line x1="400" y1="130" x2="540" y2="50"/>
+            <line x1="400" y1="130" x2="680" y2="170"/>
+            <!-- Cross connections -->
+            <line x1="130" y1="60" x2="270" y2="200" style="stroke-dasharray:4 3"/>
+            <line x1="540" y1="50" x2="680" y2="170" style="stroke-dasharray:4 3"/>
+          </svg>
+          <!-- Center node -->
+          <div class="rg-node rg-lg" style="left:368px;top:98px">后母戊鼎</div>
+          <!-- Related nodes -->
+          <div class="rg-node rg-md" style="left:100px;top:32px">四羊方尊</div>
+          <div class="rg-node rg-md" style="left:238px;top:172px">大盂鼎</div>
+          <div class="rg-node rg-md" style="left:508px;top:22px">毛公鼎</div>
+          <div class="rg-node rg-md" style="left:648px;top:142px">妇好鸮尊</div>
+          <!-- Edge labels -->
+          <div class="rg-edge-lbl" style="left:230px;top:70px">同时代</div>
+          <div class="rg-edge-lbl" style="left:290px;top:152px">同类别</div>
+          <div class="rg-edge-lbl" style="left:450px;top:60px">同材质</div>
+          <div class="rg-edge-lbl" style="left:560px;top:138px">同时期</div>
+        </div>
+      </div>
+
+  </div>
+</main>
+
+</div>
+</body>
+</html>

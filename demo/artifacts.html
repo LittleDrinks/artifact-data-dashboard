@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>文物管理 — 文物大数据平台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="../logo.png" alt="logo">
+    <span>文物大数据平台</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">概览</div>
+    <a href="index.html" class="nav-item"><span class="nav-icon">📊</span>Dashboard</a>
+    <div class="nav-group">管理</div>
+    <a href="artifacts.html" class="nav-item active"><span class="nav-icon">🏺</span>文物管理</a>
+    <a href="detail.html" class="nav-item"><span class="nav-icon">📄</span>文物详情</a>
+    <div class="nav-group">智能分析</div>
+    <a href="graph.html" class="nav-item"><span class="nav-icon">🔗</span>知识图谱</a>
+    <a href="chat.html" class="nav-item"><span class="nav-icon">💬</span>AI 问答</a>
+  </div>
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="user-av">管</div>
+      <div><div class="user-name">管理员</div><div class="user-role">Admin</div></div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main -->
+<main class="main">
+  <div class="header">
+    <h1>文物管理</h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost">批量导入</button>
+      <button class="btn btn-brand">+ 添加文物</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- Stats mini-bar -->
+    <div style="display:flex;gap:24px;margin-bottom:20px">
+      <div style="font-size:13px;color:var(--text-tertiary)">共 <span style="color:var(--text-primary);font-weight:510">490</span> 件文物</div>
+      <div style="font-size:13px;color:var(--text-tertiary)">青铜器 <span style="color:var(--c-bronze);font-weight:510">176</span></div>
+      <div style="font-size:13px;color:var(--text-tertiary)">玉器 <span style="color:var(--c-jade);font-weight:510">93</span></div>
+      <div style="font-size:13px;color:var(--text-tertiary)">陶瓷 <span style="color:var(--c-ceramic);font-weight:510">83</span></div>
+      <div style="font-size:13px;color:var(--text-tertiary)">金银器 <span style="color:var(--accent-bg);font-weight:510">69</span></div>
+    </div>
+
+    <!-- Table -->
+    <div class="tbl-wrap">
+      <div class="tbl-bar">
+        <div class="tbl-search">
+          <span style="color:var(--text-quaternary)">⌕</span>
+          <input type="text" placeholder="搜索文物名称、朝代、材质…">
+        </div>
+        <div class="tbl-filters">
+          <button class="btn btn-subtle">全部类别</button>
+          <button class="btn btn-subtle">全部朝代</button>
+          <button class="btn btn-subtle">筛选</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox"></th>
+            <th>名称</th>
+            <th>类别</th>
+            <th>朝代</th>
+            <th>材质</th>
+            <th>来源</th>
+            <th>状态</th>
+            <th style="width:60px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">后母戊鼎</td>
+            <td><span class="badge badge-bronze">青铜器</span></td>
+            <td>商后期</td>
+            <td>青铜</td>
+            <td>河南安阳</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">四羊方尊</td>
+            <td><span class="badge badge-bronze">青铜器</span></td>
+            <td>商晚期</td>
+            <td>青铜</td>
+            <td>湖南宁乡</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">翠玉白菜</td>
+            <td><span class="badge badge-jade">玉器</span></td>
+            <td>清</td>
+            <td>翡翠</td>
+            <td>故宫博物院</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">三星堆青铜大立人</td>
+            <td><span class="badge badge-bronze">青铜器</span></td>
+            <td>商</td>
+            <td>青铜</td>
+            <td>四川广汉</td>
+            <td><span class="badge badge-amber">已收录</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">汝窑天青釉洗</td>
+            <td><span class="badge badge-ceramic">陶瓷</span></td>
+            <td>北宋</td>
+            <td>瓷</td>
+            <td>河南宝丰</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">曾侯乙编钟</td>
+            <td><span class="badge badge-bronze">青铜器</span></td>
+            <td>战国早期</td>
+            <td>青铜</td>
+            <td>湖北随州</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">鎏金铜蚕</td>
+            <td><span class="badge badge-bronze">青铜器</span></td>
+            <td>西汉</td>
+            <td>铜鎏金</td>
+            <td>陕西石泉</td>
+            <td><span class="badge badge-amber">已收录</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">元青花鬼谷子下山罐</td>
+            <td><span class="badge badge-ceramic">陶瓷</span></td>
+            <td>元</td>
+            <td>瓷</td>
+            <td>传世品</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">金缕玉衣</td>
+            <td><span class="badge badge-jade">玉器</span></td>
+            <td>西汉</td>
+            <td>玉+金丝</td>
+            <td>河北满城</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td style="color:var(--text-primary);font-weight:510">越王勾践剑</td>
+            <td><span class="badge badge-blue">兵器</span></td>
+            <td>春秋晚期</td>
+            <td>青铜</td>
+            <td>湖北江陵</td>
+            <td><span class="badge badge-jade">国宝</span></td>
+            <td style="color:var(--text-quaternary)">⋯</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="pager">
+        <span>显示 1–10 / 共 490 件</span>
+        <div class="pager-pages">
+          <div class="pager-page">‹</div>
+          <div class="pager-page active">1</div>
+          <div class="pager-page">2</div>
+          <div class="pager-page">3</div>
+          <div class="pager-page">…</div>
+          <div class="pager-page">49</div>
+          <div class="pager-page">›</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+</div>
+</body>
+</html>

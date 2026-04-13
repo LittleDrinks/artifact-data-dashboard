@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>文物大数据平台</title><link rel="stylesheet" href="style.css"></head><body>
+<div class="app">
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="../logo.png" alt="logo">
+    <span>文物大数据平台</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">概览</div>
+    <a href="index.html" class="nav-item active"><span class="nav-icon">📊</span>Dashboard</a>
+    <div class="nav-group">管理</div>
+    <a href="artifacts.html" class="nav-item "><span class="nav-icon">🏺</span>文物管理</a>
+    <a href="detail.html" class="nav-item "><span class="nav-icon">📄</span>文物详情</a>
+    <div class="nav-group">智能分析</div>
+    <a href="graph.html" class="nav-item "><span class="nav-icon">🔗</span>知识图谱</a>
+    <a href="chat.html" class="nav-item "><span class="nav-icon">💬</span>AI 问答</a>
+  </div>
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="user-av">管</div>
+      <div><div class="user-name">管理员</div><div class="user-role">Admin</div></div>
+    </div>
+  </div>
+</nav>
+<main class="main">
+  <div class="header"><h1>Dashboard</h1><div class="header-actions"><button class="btn btn-ghost">导出报告</button><button class="btn btn-brand">+ 添加文物</button></div></div>
+  <div class="content">
+    <div class="stats">
+      <div class="stat"><div class="stat-val">490</div><div class="stat-lbl">文物总数</div><div class="stat-chg up">+12 本周新增</div></div>
+      <div class="stat"><div class="stat-val">195</div><div class="stat-lbl">禁止出境展览文物</div><div class="stat-chg up">覆盖率 100%</div></div>
+      <div class="stat"><div class="stat-val">2,847</div><div class="stat-lbl">知识图谱三元组</div><div class="stat-chg up">+340 本周</div></div>
+      <div class="stat"><div class="stat-val">128</div><div class="stat-lbl">AI 问答次数</div><div class="stat-chg up">+23 今日</div></div>
+    </div>
+    <div class="charts">
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">各朝代文物数量分布</span><button class="btn btn-subtle" style="font-size:12px">查看全部</button></div>
+        <div class="bars">
+          <div class="bar-g"><div class="bar-val">18</div><div class="bar" style="height:36px"></div><div class="bar-lbl">夏</div></div>
+          <div class="bar-g"><div class="bar-val">86</div><div class="bar" style="height:172px"></div><div class="bar-lbl">商</div></div>
+          <div class="bar-g"><div class="bar-val">72</div><div class="bar" style="height:144px"></div><div class="bar-lbl">西周</div></div>
+          <div class="bar-g"><div class="bar-val">45</div><div class="bar" style="height:90px"></div><div class="bar-lbl">东周</div></div>
+          <div class="bar-g"><div class="bar-val">38</div><div class="bar" style="height:76px"></div><div class="bar-lbl">春秋</div></div>
+          <div class="bar-g"><div class="bar-val">52</div><div class="bar" style="height:104px"></div><div class="bar-lbl">战国</div></div>
+          <div class="bar-g"><div class="bar-val">34</div><div class="bar" style="height:68px"></div><div class="bar-lbl">秦汉</div></div>
+          <div class="bar-g"><div class="bar-val">28</div><div class="bar" style="height:56px"></div><div class="bar-lbl">唐</div></div>
+          <div class="bar-g"><div class="bar-val">42</div><div class="bar" style="height:84px"></div><div class="bar-lbl">宋</div></div>
+          <div class="bar-g"><div class="bar-val">31</div><div class="bar" style="height:62px"></div><div class="bar-lbl">元明清</div></div>
+        </div>
+      </div>
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">文物类别占比</span></div>
+        <div class="donut"></div>
+        <div class="legend">
+          <div class="leg"><div class="leg-dot" style="background:var(--c-bronze)"></div>青铜器<span style="margin-left:auto;color:var(--text-primary)">36%</span></div>
+          <div class="leg"><div class="leg-dot" style="background:var(--c-jade)"></div>玉器<span style="margin-left:auto;color:var(--text-primary)">19%</span></div>
+          <div class="leg"><div class="leg-dot" style="background:var(--c-ceramic)"></div>陶瓷<span style="margin-left:auto;color:var(--text-primary)">17%</span></div>
+          <div class="leg"><div class="leg-dot" style="background:var(--accent-bg)"></div>金银器<span style="margin-left:auto;color:var(--text-primary)">14%</span></div>
+          <div class="leg"><div class="leg-dot" style="background:var(--accent-muted)"></div>其他<span style="margin-left:auto;color:var(--text-primary)">14%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Word Cloud -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="chart-head">
+        <span class="chart-title">文物关键词云</span>
+        <span style="font-size:12px;color:var(--text-muted)">基于 490 件文物描述生成</span>
+      </div>
+      <div class="wordcloud">
+        <span class="wc" style="font-size:28px;color:var(--purple)">纹饰</span>
+        <span class="wc" style="font-size:26px;color:var(--c-bronze)">青铜器</span>
+        <span class="wc" style="font-size:24px;color:var(--text-heading)">出土</span>
+        <span class="wc" style="font-size:13px;color:var(--text-body)">爵</span>
+        <span class="wc" style="font-size:22px;color:var(--c-jade)">铸造</span>
+        <span class="wc" style="font-size:20px;color:var(--c-bronze)">饕餮纹</span>
+        <span class="wc" style="font-size:22px;color:var(--text-heading)">造型</span>
+        <span class="wc" style="font-size:12px;color:var(--c-gold)">竹简</span>
+        <span class="wc" style="font-size:18px;color:var(--c-jade)">铭文</span>
+        <span class="wc" style="font-size:20px;color:var(--c-gold)">商代</span>
+        <span class="wc" style="font-size:16px;color:var(--c-ceramic)">云雷纹</span>
+        <span class="wc" style="font-size:14px;color:var(--c-blue)">凤鸟纹</span>
+        <span class="wc" style="font-size:22px;color:var(--text-heading)">装饰</span>
+        <span class="wc" style="font-size:18px;color:var(--c-jade)">玉器</span>
+        <span class="wc" style="font-size:16px;color:var(--purple)">礼器</span>
+        <span class="wc" style="font-size:20px;color:var(--c-ceramic)">瓷器</span>
+        <span class="wc" style="font-size:13px;color:var(--text-body)">觚</span>
+        <span class="wc" style="font-size:15px;color:var(--c-blue)">甲骨文</span>
+        <span class="wc" style="font-size:16px;color:var(--c-gold)">祭祀</span>
+        <span class="wc" style="font-size:14px;color:var(--c-jade)">编钟</span>
+        <span class="wc" style="font-size:18px;color:var(--c-ceramic)">青花</span>
+        <span class="wc" style="font-size:14px;color:var(--c-bronze)">龙纹</span>
+        <span class="wc" style="font-size:13px;color:var(--text-body)">簋</span>
+        <span class="wc" style="font-size:15px;color:var(--c-red)">金银器</span>
+        <span class="wc" style="font-size:16px;color:var(--text-heading)">兽面纹</span>
+        <span class="wc" style="font-size:14px;color:var(--c-bronze)">鼎</span>
+        <span class="wc" style="font-size:12px;color:var(--c-blue)">壁画</span>
+        <span class="wc" style="font-size:13px;color:var(--c-gold)">尊</span>
+        <span class="wc" style="font-size:13px;color:var(--text-body)">壶</span>
+        <span class="wc" style="font-size:12px;color:var(--c-ceramic)">虎纹</span>
+        <span class="wc" style="font-size:13px;color:var(--purple)">扉棱</span>
+        <span class="wc" style="font-size:11px;color:var(--text-muted)">石刻</span>
+        <span class="wc" style="font-size:15px;color:var(--c-ceramic)">陶器</span>
+        <span class="wc" style="font-size:12px;color:var(--c-jade)">佛像</span>
+        <span class="wc" style="font-size:11px;color:var(--text-body)">象牙</span>
+        <span class="wc" style="font-size:12px;color:var(--c-gold)">蕉叶纹</span>
+        <span class="wc" style="font-size:11px;color:var(--text-muted)">弦纹</span>
+        <span class="wc" style="font-size:12px;color:var(--c-blue)">圈足</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="chart-head"><span class="chart-title">最近活动</span></div>
+      <table>
+        <thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th></tr></thead>
+        <tbody>
+          <tr><td>2026-04-13 14:23</td><td><span class="badge badge-purple">AI问答</span></td><td>查询"商代青铜器纹饰特征"</td><td>管理员</td></tr>
+          <tr><td>2026-04-13 11:05</td><td><span class="badge badge-blue">数据导入</span></td><td>导入 Wikipedia 文物数据 490 条</td><td>系统</td></tr>
+          <tr><td>2026-04-12 16:30</td><td><span class="badge badge-jade">图谱更新</span></td><td>构建知识图谱 — 新增 340 条语义关联</td><td>系统</td></tr>
+          <tr><td>2026-04-12 09:15</td><td><span class="badge badge-amber">图像修复</span></td><td>修复文物照片 "四羊方尊_正面照.jpg"</td><td>管理员</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+</div></body></html>

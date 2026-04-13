@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>知识图谱 — 文物大数据平台</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+/* Force graph controls */
+.graph-controls {
+  position: absolute;
+  top: 56px; left: 16px;
+  width: 220px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 14px 16px;
+  z-index: 12;
+  box-shadow: var(--shadow-md);
+}
+.ctrl-title {
+  font-size: 11px; font-weight: 400; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;
+}
+.ctrl-group { margin-bottom: 10px; }
+.ctrl-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px;
+}
+.ctrl-label { font-size: 12px; color: var(--text-body); }
+.ctrl-val {
+  font-size: 11px; color: var(--text-heading);
+  font-family: var(--mono); font-weight: 400;
+}
+.ctrl-group input[type="range"] {
+  width: 100%; accent-color: var(--purple); height: 4px;
+}
+.ctrl-btns { display: flex; gap: 6px; margin-top: 12px; }
+#graph-svg { width: 100%; height: 100%; cursor: grab; }
+#graph-svg:active { cursor: grabbing; }
+
+/* Info panel detail rows */
+.info-row {
+  display: flex; justify-content: space-between;
+  padding: 3px 0; font-size: 12px; color: var(--text-body);
+}
+.info-row span:last-child { color: var(--text-heading); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="../logo.png" alt="logo">
+    <span>文物大数据平台</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">概览</div>
+    <a href="index.html" class="nav-item"><span class="nav-icon">📊</span>Dashboard</a>
+    <div class="nav-group">管理</div>
+    <a href="artifacts.html" class="nav-item"><span class="nav-icon">🏺</span>文物管理</a>
+    <a href="detail.html" class="nav-item"><span class="nav-icon">📄</span>文物详情</a>
+    <div class="nav-group">智能分析</div>
+    <a href="graph.html" class="nav-item active"><span class="nav-icon">🔗</span>知识图谱</a>
+    <a href="chat.html" class="nav-item"><span class="nav-icon">💬</span>AI 问答</a>
+  </div>
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="user-av">管</div>
+      <div><div class="user-name">管理员</div><div class="user-role">Admin</div></div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main -->
+<main class="main">
+  <div class="header">
+    <h1>知识图谱</h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost">导出</button>
+      <button class="btn btn-brand">重建索引</button>
+    </div>
+  </div>
+  <div class="content" style="padding:16px">
+
+    <div class="graph-wrap">
+      <!-- Toolbar -->
+      <div class="graph-tb">
+        <button class="btn btn-subtle" style="font-size:12px">按类别</button>
+        <button class="btn btn-subtle" style="font-size:12px">按年代</button>
+        <button class="btn btn-subtle" style="font-size:12px" onclick="resetZoom()">重置视图</button>
+      </div>
+
+      <!-- Info panel -->
+      <div class="graph-info" id="graphInfo">
+        <div class="graph-info-title" id="infoTitle">后母戊鼎</div>
+        <div class="graph-info-meta" id="infoMeta">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <span class="badge badge-purple">青铜器</span>
+            <span class="badge badge-jade">国宝</span>
+          </div>
+          <div style="color:var(--text-tertiary);font-size:12px;line-height:1.6">
+            商后期 · 河南 · 国家博物馆<br>
+            饕餮纹 · 扉棱 · 柱足<br>
+            关联节点: 6 · 三元组: 28
+          </div>
+        </div>
+      </div>
+
+      <!-- Force controls -->
+      <div class="graph-controls">
+        <div class="ctrl-title">力导向参数</div>
+        <div class="ctrl-group">
+          <div class="ctrl-header">
+            <span class="ctrl-label">斥力强度</span>
+            <span class="ctrl-val" id="chargeVal">-500</span>
+          </div>
+          <input type="range" id="chargeSlider" min="-1200" max="-100" value="-500" step="50">
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-header">
+            <span class="ctrl-label">连接距离</span>
+            <span class="ctrl-val" id="distVal">130</span>
+          </div>
+          <input type="range" id="distSlider" min="60" max="260" value="130" step="10">
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-header">
+            <span class="ctrl-label">碰撞间距</span>
+            <span class="ctrl-val" id="collVal">10</span>
+          </div>
+          <input type="range" id="collSlider" min="2" max="30" value="10" step="2">
+        </div>
+        <div class="ctrl-btns">
+          <button class="btn btn-subtle" style="font-size:12px;flex:1" onclick="resetParams()">重置参数</button>
+          <button class="btn btn-brand" style="font-size:12px;flex:1;padding:6px" onclick="reheat()">重新模拟</button>
+        </div>
+      </div>
+
+      <!-- SVG canvas -->
+      <svg id="graph-svg"></svg>
+
+      <!-- Legend -->
+      <div class="graph-legend">
+        <div class="leg"><div class="leg-dot" style="background:#533afd"></div>文物</div>
+        <div class="leg"><div class="leg-dot" style="background:#c45100"></div>朝代</div>
+        <div class="leg"><div class="leg-dot" style="background:#2874ad"></div>地点</div>
+        <div class="leg"><div class="leg-dot" style="background:#9a6324"></div>纹饰</div>
+        <div class="leg"><div class="leg-dot" style="background:#d32f2f"></div>材质</div>
+        <div class="leg"><div class="leg-dot" style="background:#3d8b37"></div>类别</div>
+        <div class="leg"><div class="leg-dot" style="background:#64748d"></div>机构</div>
+      </div>
+
+      <!-- Stats -->
+      <div class="graph-stat">2,847 三元组 · 25 节点 · 29 关系 · 7 类别</div>
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+<script>
+/* ── Graph Data ── */
+const graphData = {
+  nodes: [
+    { id: "后母戊鼎", group: "artifact", r: 34 },
+    { id: "四羊方尊", group: "artifact", r: 28 },
+    { id: "大盂鼎", group: "artifact", r: 28 },
+    { id: "妇好鸮尊", group: "artifact", r: 28 },
+    { id: "毛公鼎", group: "artifact", r: 28 },
+    { id: "曾侯乙编钟", group: "artifact", r: 28 },
+    { id: "三星堆面具", group: "artifact", r: 28 },
+    { id: "商代", group: "era", r: 22 },
+    { id: "商晚期", group: "era", r: 20 },
+    { id: "西周", group: "era", r: 22 },
+    { id: "战国", group: "era", r: 20 },
+    { id: "河南安阳", group: "location", r: 20 },
+    { id: "陕西宝鸡", group: "location", r: 20 },
+    { id: "四川广汉", group: "location", r: 20 },
+    { id: "湖北随州", group: "location", r: 20 },
+    { id: "饕餮纹", group: "pattern", r: 18 },
+    { id: "云雷纹", group: "pattern", r: 18 },
+    { id: "凤鸟纹", group: "pattern", r: 18 },
+    { id: "青铜", group: "material", r: 20 },
+    { id: "玉石", group: "material", r: 18 },
+    { id: "青铜器", group: "category", r: 22 },
+    { id: "玉器", group: "category", r: 20 },
+    { id: "国家博物馆", group: "institution", r: 22 },
+    { id: "台北故宫", group: "institution", r: 20 },
+  ],
+  links: [
+    { source: "后母戊鼎", target: "商代", relation: "BELONGS_TO_ERA" },
+    { source: "后母戊鼎", target: "河南安阳", relation: "EXCAVATED_AT" },
+    { source: "后母戊鼎", target: "青铜", relation: "MADE_OF" },
+    { source: "后母戊鼎", target: "饕餮纹", relation: "HAS_PATTERN" },
+    { source: "后母戊鼎", target: "青铜器", relation: "HAS_CATEGORY" },
+    { source: "后母戊鼎", target: "国家博物馆", relation: "HOUSED_IN" },
+    { source: "四羊方尊", target: "商代", relation: "BELONGS_TO_ERA" },
+    { source: "四羊方尊", target: "青铜器", relation: "HAS_CATEGORY" },
+    { source: "四羊方尊", target: "青铜", relation: "MADE_OF" },
+    { source: "四羊方尊", target: "国家博物馆", relation: "HOUSED_IN" },
+    { source: "大盂鼎", target: "西周", relation: "BELONGS_TO_ERA" },
+    { source: "大盂鼎", target: "陕西宝鸡", relation: "EXCAVATED_AT" },
+    { source: "大盂鼎", target: "青铜", relation: "MADE_OF" },
+    { source: "大盂鼎", target: "青铜器", relation: "HAS_CATEGORY" },
+    { source: "妇好鸮尊", target: "商晚期", relation: "BELONGS_TO_ERA" },
+    { source: "妇好鸮尊", target: "河南安阳", relation: "EXCAVATED_AT" },
+    { source: "妇好鸮尊", target: "青铜", relation: "MADE_OF" },
+    { source: "毛公鼎", target: "西周", relation: "BELONGS_TO_ERA" },
+    { source: "毛公鼎", target: "青铜器", relation: "HAS_CATEGORY" },
+    { source: "毛公鼎", target: "台北故宫", relation: "HOUSED_IN" },
+    { source: "曾侯乙编钟", target: "战国", relation: "BELONGS_TO_ERA" },
+    { source: "曾侯乙编钟", target: "湖北随州", relation: "EXCAVATED_AT" },
+    { source: "三星堆面具", target: "商代", relation: "BELONGS_TO_ERA" },
+    { source: "三星堆面具", target: "四川广汉", relation: "EXCAVATED_AT" },
+    { source: "饕餮纹", target: "青铜器", relation: "DECORATES" },
+    { source: "云雷纹", target: "青铜器", relation: "DECORATES" },
+    { source: "凤鸟纹", target: "玉器", relation: "DECORATES" },
+    { source: "商晚期", target: "商代", relation: "SUB_ERA" },
+  ]
+};
+
+const colorMap = {
+  artifact: "#533afd",
+  era: "#c45100",
+  location: "#2874ad",
+  pattern: "#9a6324",
+  material: "#d32f2f",
+  category: "#3d8b37",
+  institution: "#64748d"
+};
+
+const groupNames = {
+  artifact: "文物", era: "朝代", location: "地点",
+  pattern: "纹饰", material: "材质", category: "类别", institution: "机构"
+};
+
+/* ── Setup SVG ── */
+const container = document.querySelector('.graph-wrap');
+const W = container.clientWidth;
+const H = container.clientHeight;
+
+const svg = d3.select('#graph-svg').attr('width', W).attr('height', H);
+
+// Arrow marker
+svg.append('defs').append('marker')
+  .attr('id', 'arrowhead')
+  .attr('viewBox', '0 -5 10 10')
+  .attr('refX', 6).attr('refY', 0)
+  .attr('markerWidth', 7).attr('markerHeight', 7)
+  .attr('orient', 'auto')
+  .append('path')
+  .attr('d', 'M0,-4L8,0L0,4')
+  .attr('fill', '#94a3b8');
+
+// Zoom
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.25, 4])
+  .on('zoom', e => g.attr('transform', e.transform));
+svg.call(zoomBehavior);
+
+const g = svg.append('g');
+
+/* ── Render ── */
+const link = g.append('g')
+  .attr('stroke', '#d4dee9').attr('stroke-width', 1.2)
+  .selectAll('line').data(graphData.links).join('line')
+  .attr('marker-end', 'url(#arrowhead)');
+
+const linkLabel = g.append('g')
+  .selectAll('text').data(graphData.links).join('text')
+  .text(d => d.relation)
+  .attr('font-size', 8)
+  .attr('fill', '#94a3b8')
+  .attr('text-anchor', 'middle')
+  .attr('paint-order', 'stroke')
+  .attr('stroke', '#ffffff')
+  .attr('stroke-width', 3)
+  .attr('stroke-linecap', 'round')
+  .attr('stroke-linejoin', 'round')
+  .style('pointer-events', 'none');
+
+const node = g.append('g')
+  .selectAll('g').data(graphData.nodes).join('g')
+  .attr('cursor', 'pointer')
+  .on('click', (e, d) => updateInfo(d))
+  .call(d3.drag()
+    .on('start', dragStart)
+    .on('drag', dragging)
+    .on('end', dragEnd));
+
+node.append('circle')
+  .attr('r', d => d.r)
+  .attr('fill', d => colorMap[d.group])
+  .attr('stroke', '#fff').attr('stroke-width', 2);
+
+node.append('text')
+  .text(d => d.id)
+  .attr('text-anchor', 'middle').attr('dy', '0.35em')
+  .attr('font-size', d => d.r > 30 ? 12 : d.r > 24 ? 10 : 9)
+  .attr('fill', '#fff').attr('font-weight', 400)
+  .style('pointer-events', 'none')
+  .attr('font-family', "'Inter',sans-serif");
+
+/* ── Simulation ── */
+let chargeStr = -500, linkDist = 130, collPad = 10;
+
+const sim = d3.forceSimulation(graphData.nodes)
+  .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(linkDist))
+  .force('charge', d3.forceManyBody().strength(chargeStr))
+  .force('center', d3.forceCenter(W / 2, H / 2))
+  .force('collision', d3.forceCollide().radius(d => d.r + collPad))
+  .on('tick', ticked);
+
+function ticked() {
+  link.each(function(d) {
+    const dx = d.target.x - d.source.x;
+    const dy = d.target.y - d.source.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const off = d.target.r + 8;
+    d3.select(this)
+      .attr('x1', d.source.x).attr('y1', d.source.y)
+      .attr('x2', d.target.x - (dx / dist) * off)
+      .attr('y2', d.target.y - (dy / dist) * off);
+  });
+  linkLabel
+    .attr('x', d => (d.source.x + d.target.x) / 2)
+    .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+  node.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+/* ── Drag ── */
+function dragStart(e, d) {
+  if (!e.active) sim.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragging(e, d) { d.fx = e.x; d.fy = e.y; }
+function dragEnd(e, d) {
+  if (!e.active) sim.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+/* ── Info panel ── */
+function updateInfo(d) {
+  document.getElementById('infoTitle').textContent = d.id;
+  const rels = graphData.links.filter(l => {
+    const s = typeof l.source === 'object' ? l.source.id : l.source;
+    const t = typeof l.target === 'object' ? l.target.id : l.target;
+    return s === d.id || t === d.id;
+  });
+  const c = colorMap[d.group];
+  document.getElementById('infoMeta').innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <span class="badge" style="background:${c}18;color:${c};border-color:${c}40">${groupNames[d.group]}</span>
+    </div>
+    <div class="info-row"><span>关联关系</span><span>${rels.length} 条</span></div>
+    ${rels.map(l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      const other = s === d.id ? t : s;
+      return `<div class="info-row"><span style="color:var(--text-muted)">${l.relation}</span><span>${other}</span></div>`;
+    }).join('')}
+  `;
+}
+
+/* ── Controls ── */
+document.getElementById('chargeSlider').addEventListener('input', function() {
+  chargeStr = +this.value;
+  document.getElementById('chargeVal').textContent = chargeStr;
+  sim.force('charge').strength(chargeStr);
+  sim.alpha(0.5).restart();
+});
+document.getElementById('distSlider').addEventListener('input', function() {
+  linkDist = +this.value;
+  document.getElementById('distVal').textContent = linkDist;
+  sim.force('link').distance(linkDist);
+  sim.alpha(0.5).restart();
+});
+document.getElementById('collSlider').addEventListener('input', function() {
+  collPad = +this.value;
+  document.getElementById('collVal').textContent = collPad;
+  sim.force('collision').radius(d => d.r + collPad);
+  sim.alpha(0.5).restart();
+});
+
+function resetParams() {
+  chargeStr = -500; linkDist = 130; collPad = 10;
+  document.getElementById('chargeSlider').value = -500;
+  document.getElementById('distSlider').value = 130;
+  document.getElementById('collSlider').value = 10;
+  document.getElementById('chargeVal').textContent = -500;
+  document.getElementById('distVal').textContent = 130;
+  document.getElementById('collVal').textContent = 10;
+  sim.force('charge').strength(-500);
+  sim.force('link').distance(130);
+  sim.force('collision').radius(d => d.r + 10);
+  sim.alpha(0.8).restart();
+}
+function reheat() {
+  graphData.nodes.forEach(d => { d.fx = null; d.fy = null; });
+  sim.alpha(1).restart();
+}
+function resetZoom() {
+  svg.transition().duration(500).call(zoomBehavior.transform, d3.zoomIdentity);
+}
+</script>
+</body>
+</html>

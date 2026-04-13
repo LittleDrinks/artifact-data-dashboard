@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AI 问答 — 文物大数据平台</title>
+<link rel="stylesheet" href="style.css">
+<style>
+/* ── Chat inline elements ── */
+.thinking-block {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.thinking-toggle {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; cursor: pointer;
+  font-size: 12px; color: var(--text-muted);
+  background: var(--bg-panel);
+  transition: background 0.12s;
+  user-select: none;
+}
+.thinking-toggle:hover { background: var(--bg-hover); }
+.thinking-toggle .arrow {
+  display: inline-block; font-size: 10px;
+  transition: transform 0.2s;
+}
+.thinking-toggle.open .arrow { transform: rotate(90deg); }
+.thinking-toggle .think-label {
+  font-weight: 400; color: var(--text-body);
+}
+.thinking-toggle .think-duration {
+  margin-left: auto; font-size: 11px; font-family: var(--mono);
+  color: var(--text-muted);
+}
+.thinking-content {
+  display: none; padding: 10px 12px;
+  font-size: 12px; color: var(--text-body); line-height: 1.7;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.thinking-block.expanded .thinking-content { display: block; }
+.thinking-block.expanded .thinking-toggle { background: var(--bg-hover); }
+
+/* Tool call indicator */
+.tool-call-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; margin-bottom: 12px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 12px; color: var(--text-body);
+  cursor: pointer; transition: all 0.12s;
+}
+.tool-call-bar:hover {
+  border-color: var(--purple-light); background: var(--purple-bg);
+}
+.tool-call-bar .tool-icon {
+  width: 18px; height: 18px; border-radius: 3px;
+  background: var(--purple); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+}
+.tool-call-bar .tool-name {
+  font-weight: 400; color: var(--text-heading);
+}
+.tool-call-bar .tool-query {
+  color: var(--text-muted); font-size: 11px;
+  max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tool-call-bar .tool-status {
+  margin-left: auto; font-size: 11px;
+  display: flex; align-items: center; gap: 4px;
+}
+.tool-call-bar .tool-status .done-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--green);
+}
+
+/* Streaming tool call (in-progress) */
+.tool-call-bar.streaming .tool-status .spinner {
+  width: 12px; height: 12px; border: 1.5px solid var(--border-solid);
+  border-top-color: var(--purple); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* RAG panel connection highlight */
+.rag-panel { transition: border-color 0.2s; }
+.rag-panel.highlight { border-color: var(--purple-light); }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <img src="../logo.png" alt="logo">
+    <span>文物大数据平台</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">概览</div>
+    <a href="index.html" class="nav-item"><span class="nav-icon">📊</span>Dashboard</a>
+    <div class="nav-group">管理</div>
+    <a href="artifacts.html" class="nav-item"><span class="nav-icon">🏺</span>文物管理</a>
+    <a href="detail.html" class="nav-item"><span class="nav-icon">📄</span>文物详情</a>
+    <div class="nav-group">智能分析</div>
+    <a href="graph.html" class="nav-item"><span class="nav-icon">🔗</span>知识图谱</a>
+    <a href="chat.html" class="nav-item active"><span class="nav-icon">💬</span>AI 问答</a>
+  </div>
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="user-av">管</div>
+      <div><div class="user-name">管理员</div><div class="user-role">Admin</div></div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main -->
+<main class="main">
+  <div class="header">
+    <h1>AI 智能问答</h1>
+    <div class="header-actions">
+      <button class="btn btn-ghost">历史记录</button>
+    </div>
+  </div>
+
+  <div style="display:flex;flex:1;height:calc(100vh - var(--header-h))">
+    <!-- Chat area -->
+    <div class="chat-layout" style="flex:1">
+      <div class="chat-msgs">
+
+        <!-- User message 1 -->
+        <div class="chat-msg user">
+          <div class="chat-av">管</div>
+          <div class="chat-bubble">
+            商代青铜器上的饕餮纹有什么文化含义？
+          </div>
+        </div>
+
+        <!-- Assistant message 1 — with thinking + tool call -->
+        <div class="chat-msg assistant">
+          <div class="chat-av">AI</div>
+          <div class="chat-bubble">
+
+            <!-- Thinking block (collapsible) -->
+            <div class="thinking-block expanded">
+              <div class="thinking-toggle open" onclick="toggleThinking(this)">
+                <span class="arrow">▶</span>
+                <span class="think-label">Thinking</span>
+                <span class="think-duration">1.2s</span>
+              </div>
+              <div class="thinking-content">
+                用户询问商代青铜器上的饕餮纹文化含义。需要从知识库中检索相关文物、纹饰及历史文献资料。<br><br>
+                检索策略：<br>
+                1. 关键词: 饕餮纹、商代、青铜器、纹饰、宗教、祭祀<br>
+                2. 语义扩展: 兽面纹、后母戊鼎、四羊方尊、礼器<br>
+                3. 知识图谱关联: 商代→青铜器→饕餮纹→礼器<br><br>
+                综合检索结果，从宗教祭祀、权力象征、纹饰演变三个维度组织回答。
+              </div>
+            </div>
+
+            <!-- Tool call indicator -->
+            <div class="tool-call-bar" onclick="scrollToToolResults()">
+              <div class="tool-icon">🔍</div>
+              <span class="tool-name">知识检索</span>
+              <span class="tool-query">"商代青铜器 饕餮纹 文化含义"</span>
+              <div class="tool-status">
+                <div class="done-dot"></div>
+                <span style="color:var(--green-text)">6 条结果 · 0.23s</span>
+              </div>
+            </div>
+
+            <!-- Actual answer -->
+            商代青铜器上的饕餮纹（也称兽面纹）是中国青铜时代最具代表性的装饰纹样，其文化含义可从以下几个层面理解：
+
+            <br><br><strong style="color:var(--text-primary)">1. 宗教与祭祀功能</strong><br>
+            饕餮纹多见于祭祀礼器（如后母戊鼎、四羊方尊），其庄严威慑的形象被认为具有沟通天地、驱邪镇魔的功能。商代人崇尚鬼神，饕餮纹的狰狞面容旨在营造神圣不可侵犯的氛围。
+
+            <br><br><strong style="color:var(--text-primary)">2. 权力与等级象征</strong><br>
+            饕餮纹的使用有严格的等级区分。纹饰越复杂、器形越大的青铜器，往往属于地位越高的贵族。后母戊鼎作为最重的青铜器，其饕餮纹的精致程度也代表了最高级别的工艺。
+
+            <br><br><strong style="color:var(--text-primary)">3. 纹饰演变</strong><br>
+            从二里岗期到殷墟期，饕餮纹经历了从简单到复杂、从抽象到具象的演变。早期仅有双眼轮廓，后期发展出完整的角、眉、鼻、口等细节。
+
+            <div class="sources">
+              <div class="sources-title">参考来源</div>
+              <div class="source-item"><div class="source-dot"></div>[1] 后母戊鼎 — 维基百科</div>
+              <div class="source-item"><div class="source-dot"></div>[2] 四羊方尊 — 维基百科</div>
+              <div class="source-item"><div class="source-dot"></div>[3] 商代青铜器纹饰研究 — 知识图谱</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- User message 2 -->
+        <div class="chat-msg user">
+          <div class="chat-av">管</div>
+          <div class="chat-bubble">
+            和后母戊鼎同时出土的还有哪些文物？
+          </div>
+        </div>
+
+        <!-- Assistant message 2 (streaming — thinking + tool call in progress) -->
+        <div class="chat-msg assistant">
+          <div class="chat-av">AI</div>
+          <div class="chat-bubble">
+
+            <!-- Thinking block (in-progress) -->
+            <div class="thinking-block expanded">
+              <div class="thinking-toggle open" onclick="toggleThinking(this)">
+                <span class="arrow">▶</span>
+                <span class="think-label">Thinking</span>
+                <span class="think-duration" style="color:var(--purple)">
+                  <span class="spinner" style="display:inline-block;width:10px;height:10px;border:1.5px solid var(--border-solid);border-top-color:var(--purple);border-radius:50%;vertical-align:middle;animation:spin 0.8s linear infinite"></span>
+                  思考中…
+                </span>
+              </div>
+              <div class="thinking-content">
+                用户询问后母戊鼎同区域出土的文物。需要检索殷墟遗址的考古发现记录…<span class="cursor"></span>
+              </div>
+            </div>
+
+            <!-- Tool call indicator (streaming) -->
+            <div class="tool-call-bar streaming">
+              <div class="tool-icon">🔍</div>
+              <span class="tool-name">知识检索</span>
+              <span class="tool-query">"后母戊鼎 殷墟 同出…</span>
+              <div class="tool-status">
+                <div class="spinner"></div>
+                <span style="color:var(--purple)">检索中</span>
+              </div>
+            </div>
+
+            后母戊鼎于1939年在河南省安阳市武官村出土，属于殷墟遗址范围。与其同时期或同区域出土的重要文物包括：<span class="cursor"></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Input -->
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <textarea rows="1" placeholder="输入关于文物的问题…"></textarea>
+          <button class="btn btn-brand" style="padding:6px 12px">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RAG Knowledge Panel (right side — detailed results) -->
+    <div class="rag-panel" id="ragPanel">
+
+      <div class="rag-title">知识检索详情</div>
+
+      <!-- Thinking detail -->
+      <div class="rag-section expanded">
+        <div class="rag-label thinking open" onclick="toggleRagSection(this)">
+          <span class="rag-arrow">▶</span>
+          <span class="rag-dot"></span>Thinking
+        </div>
+        <div class="rag-body">
+          <div style="border-left:3px solid var(--ruby);padding:10px 12px;background:var(--bg-panel);font-size:12px;color:var(--text-body);line-height:1.7;border-radius:0 var(--r-sm) var(--r-sm) 0">
+            用户询问商代青铜器上的饕餮纹文化含义。需要从知识库中检索相关文物、纹饰及历史文献资料。<br><br>
+            检索策略：<br>
+            1. 关键词: 饕餮纹、商代、青铜器、纹饰、宗教、祭祀<br>
+            2. 语义扩展: 兽面纹、后母戊鼎、四羊方尊、礼器<br>
+            3. 知识图谱关联: 商代→青铜器→饕餮纹→礼器<br><br>
+            综合检索结果，从宗教祭祀、权力象征、纹饰演变三个维度组织回答。
+          </div>
+        </div>
+      </div>
+
+      <!-- Tool Calling detail -->
+      <div class="rag-section expanded">
+        <div class="rag-label toolcall open" onclick="toggleRagSection(this)">
+          <span class="rag-arrow">▶</span>
+          <span class="rag-dot"></span>Tool Calling
+        </div>
+        <div class="rag-body">
+          <div class="rag-search" style="margin-bottom:8px">
+            <div class="rag-search-bar">
+              <span>🔍</span>
+              <span>检索: "商代青铜器 饕餮纹 文化含义"</span>
+            </div>
+            <div class="rag-search-meta">找到 <strong>6</strong> 条相关结果 · 耗时 0.23s</div>
+          </div>
+          <div class="rag-results">
+            <div class="rag-result">
+              <div class="rag-result-title">后母戊鼎</div>
+              <div class="rag-result-snippet">鼎身四面以饕餮纹为主要装饰，四面交接处各饰一扉棱，鼎足上部亦饰有兽面纹…</div>
+              <div class="rag-result-meta">相似度: 0.94 · 知识图谱</div>
+            </div>
+            <div class="rag-result">
+              <div class="rag-result-title">四羊方尊</div>
+              <div class="rag-result-snippet">颈部饰有夔龙纹和饕餮纹，肩部四角各铸一卷角羊头，纹饰精美…</div>
+              <div class="rag-result-meta">相似度: 0.87 · 知识图谱</div>
+            </div>
+            <div class="rag-result">
+              <div class="rag-result-title">商代青铜器纹饰研究</div>
+              <div class="rag-result-snippet">饕餮纹是商周青铜器上最常见的装饰母题，多见于祭祀礼器，其狰狞面容…</div>
+              <div class="rag-result-meta">相似度: 0.82 · Wikipedia</div>
+            </div>
+            <div class="rag-result">
+              <div class="rag-result-title">兽面纹铜觥</div>
+              <div class="rag-result-snippet">盖面饰有精美的饕餮纹，以云雷纹为地纹，通体纹饰繁缛精细…</div>
+              <div class="rag-result-meta">相似度: 0.76 · 文物数据库</div>
+            </div>
+            <div class="rag-result">
+              <div class="rag-result-title">殷墟青铜文化</div>
+              <div class="rag-result-snippet">殷墟出土的青铜器代表了商代青铜铸造工艺的巅峰，饕餮纹作为核心纹饰…</div>
+              <div class="rag-result-meta">相似度: 0.71 · 学术文献</div>
+            </div>
+            <div class="rag-result">
+              <div class="rag-result-title">妇好墓青铜器群</div>
+              <div class="rag-result-snippet">妇好墓出土青铜器多有饕餮纹装饰，器形包括鼎、尊、觚、爵等礼器组合…</div>
+              <div class="rag-result-meta">相似度: 0.68 · 考古报告</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Citations detail -->
+      <div class="rag-section expanded">
+        <div class="rag-label cite open" onclick="toggleRagSection(this)">
+          <span class="rag-arrow">▶</span>
+          <span class="rag-dot"></span>引用结果
+        </div>
+        <div class="rag-body">
+          <div class="rag-citations">
+            <div class="rag-cite-item"><div class="source-dot"></div>[1] 后母戊鼎 — 维基百科</div>
+            <div class="rag-cite-item"><div class="source-dot"></div>[2] 四羊方尊 — 维基百科</div>
+            <div class="rag-cite-item"><div class="source-dot"></div>[3] 商代青铜器纹饰研究 — 知识图谱</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</main>
+
+</div>
+
+<script>
+function toggleThinking(el) {
+  const block = el.closest('.thinking-block');
+  block.classList.toggle('expanded');
+  el.classList.toggle('open');
+}
+
+function toggleRagSection(el) {
+  const section = el.closest('.rag-section');
+  section.classList.toggle('expanded');
+  el.classList.toggle('open');
+}
+
+function scrollToToolResults() {
+  const panel = document.getElementById('ragPanel');
+  panel.classList.add('highlight');
+  setTimeout(() => panel.classList.remove('highlight'), 1500);
+}
+</script>
+</body>
+</html>
