@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 class ChatSessionCreate(BaseModel):
     """Schema for creating a chat session."""
     title: Optional[str] = Field(None, max_length=255, description="会话标题")
-    mode_used: str = Field("tool_calling", pattern=r"^(tool_calling|pre_retrieve)$")
 
 
 class ChatSessionResponse(BaseModel):
@@ -44,6 +43,6 @@ class ChatMessageResponse(BaseModel):
 
 class ChatAskRequest(BaseModel):
     """Schema for sending a chat question."""
-    session_id: int = Field(..., description="会话ID")
+    session_id: Optional[int] = Field(None, description="会话ID，为空则创建新会话")
     question: str = Field(..., min_length=1, description="用户问题")
     mode: str = Field("tool_calling", pattern=r"^(tool_calling|pre_retrieve)$")

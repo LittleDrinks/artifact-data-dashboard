@@ -6,6 +6,18 @@
 
 *最后更新：2026-04-14*
 
+### [2026-04-14] POST SSE 不能用 EventSource，必须用 fetch + ReadableStream
+- **现象**：POST `/api/chat/ask` 需要发送 JSON body（question、session_id），但浏览器原生 `EventSource` 只支持 GET 请求，无法发送 body 和自定义 header
+- **原因**：EventSource API 规范仅支持 GET 请求，不接受 method、headers、body 参数
+- **解决**：使用 `fetch()` 发起 POST 请求，通过 `response.body.getReader()` 获取 ReadableStream，手动解析 `data: {...}\n\n` 格式的 SSE 事件
+- **教训**：需要 POST body 的 SSE 流式接口，必须用 fetch + ReadableStream 手动解析，不能用 EventSource
+
+### [2026-04-14] SSE 流式响应需要禁用 Nginx/代理缓冲
+- **现象**：SSE 事件在开发环境中延迟到达或一次性全部到达，无法实现流式效果
+- **原因**：反向代理（Nginx）或 ASGI 服务器可能对响应进行缓冲
+- **解决**：在 StreamingResponse 的 headers 中添加 `Cache-Control: no-cache`、`Connection: keep-alive`、`X-Accel-Buffering: no`
+- **教训**：SSE 流式接口必须设置正确的响应头来禁用各级缓冲
+
 ### [2026-04-14] 默认 Python 3.9 无法创建兼容的虚拟环境
 - **现象**：`python -m venv .venv` 创建了 Python 3.9 的虚拟环境，安装 SQLAlchemy 时 greenlet 编译失败（需要 MSVC 14.0+），且项目使用了 `X | None` 语法（3.10+）
 - **原因**：系统中 `python` 命令指向 Python 3.9.13，而 miniforge 安装了 Python 3.12.12
