@@ -1,24 +1,52 @@
-"""Statistics service - dashboard overview, era/category stats, word cloud."""
+"""Statistics service - dashboard overview, era/category/location stats, word cloud."""
 
-from sqlalchemy import func
+from collections import Counter
+from typing import List
+
+import jieba
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
-from app.schemas.stats import OverviewStats, EraStat, CategoryStat, WordCloudItem
+from app.schemas.stats import (
+    OverviewStats,
+    EraStat,
+    CategoryStat,
+    LocationStat,
+    WordCloudItem,
+)
+
+# 中文停用词表（常见虚词、代词、介词等）
+STOP_WORDS = set(
+    "的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 自己 "
+    "这 他 她 它 们 那 里 为 以 对 中 与 从 来 而 个 大 小 多 少 年 月 日 时 分 秒 "
+    "可 这个 那个 这些 那些 可以 因为 所以 如果 但是 然而 或者 以及 其他 还有 "
+    "之 其 于 等 被 把 将 向 给 让 用 通过 根据 按照 由于 关于 对于 其中 以及 "
+    "所 该 各 本 此 每 某 任 何 些 什么 怎么 哪 谁 几 多少 怎样".split()
+)
 
 
 def get_overview_stats(db: Session) -> OverviewStats:
-    """Get dashboard overview statistics."""
+    """获取 Dashboard 概览统计。"""
     total = db.query(func.count(Artifact.id)).scalar() or 0
-    total_categories = db.query(func.count(func.distinct(Artifact.category))).filter(
-        Artifact.category.isnot(None), Artifact.category != ""
-    ).scalar() or 0
-    total_eras = db.query(func.count(func.distinct(Artifact.era))).filter(
-        Artifact.era.isnot(None), Artifact.era != ""
-    ).scalar() or 0
-    total_locations = db.query(func.count(func.distinct(Artifact.location))).filter(
-        Artifact.location.isnot(None), Artifact.location != ""
-    ).scalar() or 0
+    total_categories = (
+        db.query(func.count(func.distinct(Artifact.category)))
+        .filter(Artifact.category.isnot(None), Artifact.category != "")
+        .scalar()
+        or 0
+    )
+    total_eras = (
+        db.query(func.count(func.distinct(Artifact.era)))
+        .filter(Artifact.era.isnot(None), Artifact.era != "")
+        .scalar()
+        or 0
+    )
+    total_locations = (
+        db.query(func.count(func.distinct(Artifact.location)))
+        .filter(Artifact.location.isnot(None), Artifact.location != "")
+        .scalar()
+        or 0
+    )
 
     return OverviewStats(
         total_artifacts=total,
@@ -28,8 +56,8 @@ def get_overview_stats(db: Session) -> OverviewStats:
     )
 
 
-def get_era_stats(db: Session) -> list[EraStat]:
-    """Get artifact counts grouped by era."""
+def get_era_stats(db: Session) -> List[EraStat]:
+    """按朝代统计文物数量分布。"""
     results = (
         db.query(Artifact.era, func.count(Artifact.id))
         .filter(Artifact.era.isnot(None), Artifact.era != "")
@@ -40,8 +68,8 @@ def get_era_stats(db: Session) -> list[EraStat]:
     return [EraStat(era=r[0], count=r[1]) for r in results]
 
 
-def get_category_stats(db: Session) -> list[CategoryStat]:
-    """Get artifact counts grouped by category."""
+def get_category_stats(db: Session) -> List[CategoryStat]:
+    """按类别统计文物数量分布。"""
     results = (
         db.query(Artifact.category, func.count(Artifact.id))
         .filter(Artifact.category.isnot(None), Artifact.category != "")
@@ -52,38 +80,63 @@ def get_category_stats(db: Session) -> list[CategoryStat]:
     return [CategoryStat(category=r[0], count=r[1]) for r in results]
 
 
-def get_wordcloud_data(db: Session, limit: int = 100) -> list[WordCloudItem]:
-    """
-    Generate word cloud data from artifact descriptions and tags.
-    Uses simple frequency counting (jieba integration can be added later).
-    """
-    import re
-    from collections import Counter
+def get_location_stats(db: Session) -> List[LocationStat]:
+    """按出土地点统计文物数量分布。"""
+    results = (
+        db.query(Artifact.location, func.count(Artifact.id))
+        .filter(Artifact.location.isnot(None), Artifact.location != "")
+        .group_by(Artifact.location)
+        .order_by(func.count(Artifact.id).desc())
+        .all()
+    )
+    return [LocationStat(location=r[0], count=r[1]) for r in results]
 
-    artifacts = db.query(Artifact.tags, Artifact.description).filter(
-        or_condition := (
-            (Artifact.tags.isnot(None) & (Artifact.tags != ""))
-            | (Artifact.description.isnot(None) & (Artifact.description != ""))
+
+def get_wordcloud_data(db: Session, limit: int = 100) -> List[WordCloudItem]:
+    """
+    使用 jieba 分词提取文物名称和描述中的关键词及其频率。
+    合并名称、描述、标签文本，过滤停用词和短词，返回 Top N。
+    """
+    artifacts = (
+        db.query(Artifact.name, Artifact.description, Artifact.tags)
+        .filter(
+            or_(
+                Artifact.name.isnot(None),
+                Artifact.description.isnot(None),
+                Artifact.tags.isnot(None),
+            )
         )
-    ).all()
+        .all()
+    )
 
     word_counter: Counter = Counter()
 
-    for tags_str, desc_str in artifacts:
-        # Count from tags
+    for name, description, tags_str in artifacts:
+        texts = []
+        if name:
+            texts.append(name)
+        if description:
+            texts.append(description)
         if tags_str:
-            for tag in tags_str.split(","):
+            # 标签按逗号/顿号拆分，直接作为词
+            for tag in tags_str.replace("，", ",").replace("、", ",").split(","):
                 tag = tag.strip()
                 if tag and len(tag) >= 2:
                     word_counter[tag] += 1
 
-        # Count from description - simple character n-gram approach
-        if desc_str:
-            # Extract meaningful terms (2-4 char Chinese words)
-            chinese_words = re.findall(r'[\u4e00-\u9fff]{2,4}', desc_str)
-            for word in chinese_words:
-                if len(word) >= 2:
+        # 合并名称+描述文本做 jieba 分词
+        combined = " ".join(texts)
+        if combined.strip():
+            words = jieba.cut(combined)
+            for word in words:
+                word = word.strip()
+                # 过滤：长度>=2，不在停用词中，不是纯数字/标点
+                if (
+                    len(word) >= 2
+                    and word not in STOP_WORDS
+                    and not word.isdigit()
+                    and any("\u4e00" <= ch <= "\u9fff" for ch in word)
+                ):
                     word_counter[word] += 1
 
-    # Return top N
     return [WordCloudItem(word=w, weight=c) for w, c in word_counter.most_common(limit)]

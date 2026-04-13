@@ -29,3 +29,9 @@ class WordCloudItem(BaseModel):
     """Schema for word cloud data item."""
     word: str
     weight: int
+
+
+class LocationStat(BaseModel):
+    """Schema for location-based statistics."""
+    location: str
+    count: int
