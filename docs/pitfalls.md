@@ -6,6 +6,12 @@
 
 *最后更新：2026-04-14*
 
+### [2026-04-14] 默认 Python 3.9 无法创建兼容的虚拟环境
+- **现象**：`python -m venv .venv` 创建了 Python 3.9 的虚拟环境，安装 SQLAlchemy 时 greenlet 编译失败（需要 MSVC 14.0+），且项目使用了 `X | None` 语法（3.10+）
+- **原因**：系统中 `python` 命令指向 Python 3.9.13，而 miniforge 安装了 Python 3.12.12
+- **解决**：使用 `E:/miniforge3/python.exe -m venv .venv` 创建基于 Python 3.12 的虚拟环境
+- **教训**：Windows 系统可能安装多个 Python 版本，创建虚拟环境前先确认目标 Python 路径和版本
+
 ### [2026-04-14] Python 3.9 不支持 `str | None` 联合类型语法
 - **现象**：SQLAlchemy model 中使用 `Mapped[str | None]` 语法，运行时报 `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'`
 - **原因**：`X | None` 联合类型语法是 Python 3.10+ 才引入的，当前环境是 Python 3.9.13
