@@ -1,0 +1,36 @@
+"""
+FastAPI application entry point.
+Configures CORS, includes routers, and sets up startup/shutdown events.
+"""
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.database import init_db
+from app.routers import health
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# CORS configuration - allow frontend dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register routers
+app.include_router(health.router, prefix="/api", tags=["health"])
+
+
+@app.on_event("startup")
+def on_startup():
+    """Initialize database tables on application startup."""
+    init_db()

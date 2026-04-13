@@ -9,6 +9,11 @@ env/
 .pytest_cache/
 .mypy_cache/
 
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
 # Node / Frontend
 node_modules/
 dist/
