@@ -1,14 +1,34 @@
-"""Chat service - session management and SSE streaming for AI Q&A."""
+"""Chat service - session management and SSE streaming for AI Q&A.
+
+Uses DeepSeek API for LLM-powered responses with RAG context from artifact search.
+SSE three-stage output: thinking -> tool_call -> answer -> done
+"""
 
 import json
 import time
 from typing import Optional
 
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.chat import ChatSession, ChatMessage
 from app.models.artifact import Artifact
 from app.schemas.chat import ChatSessionCreate
+
+# Initialize DeepSeek client
+_client: Optional[OpenAI] = None
+
+
+def _get_client() -> OpenAI:
+    """Lazy-initialize the OpenAI client configured for DeepSeek."""
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            api_key=settings.AI_API_KEY,
+            base_url=settings.AI_API_BASE,
+        )
+    return _client
 
 
 def create_session(db: Session, user_id: int, data: ChatSessionCreate) -> ChatSession:
@@ -35,7 +55,6 @@ def get_user_sessions(
         .limit(page_size)
         .all()
     )
-    # Attach message_count to each session
     for s in sessions:
         s.message_count = len(s.messages)  # type: ignore[attr-defined]
     return sessions, total
@@ -79,7 +98,7 @@ def update_session_title(db: Session, session_id: int, title: str) -> None:
 
 
 def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
-    """Simple keyword search across artifacts table."""
+    """Keyword search across artifacts table."""
     search_term = f"%{query}%"
     results = (
         db.query(Artifact)
@@ -98,7 +117,6 @@ def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
     for a in results:
         snippet = ""
         if a.description:
-            # Extract a short snippet around the keyword
             desc = a.description
             lower_desc = desc.lower()
             lower_query = query.lower()
@@ -127,9 +145,51 @@ def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
     return items
 
 
-def _build_thinking_content(query: str) -> str:
-    """Generate a thinking process description based on the query."""
+def _sse_event(event_type: str, data: dict) -> str:
+    """Format a single SSE event."""
+    payload = {"type": event_type, **data}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _build_system_prompt(query: str, search_results: list[dict]) -> str:
+    """Build system prompt with RAG context from search results."""
+    context_parts = []
+    for i, r in enumerate(search_results, 1):
+        parts = [f"【{i}】{r['name']}"]
+        if r.get("category"):
+            parts.append(f"类别：{r['category']}")
+        if r.get("era"):
+            parts.append(f"年代：{r['era']}")
+        if r.get("location"):
+            parts.append(f"出土地点：{r['location']}")
+        if r.get("snippet"):
+            parts.append(f"简介：{r['snippet']}")
+        context_parts.append(" | ".join(parts))
+
+    context_text = "\n".join(context_parts) if context_parts else "未找到相关文物数据"
+
     return (
+        "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。"
+        "你的职责是基于文物数据库的检索结果，回答用户关于文物的问题。\n\n"
+        "回答要求：\n"
+        "1. 基于下方提供的检索结果回答，如果检索结果不足，可以适当补充你的知识\n"
+        "2. 回答要结构清晰，可以使用编号列表和加粗标题\n"
+        "3. 引用检索结果时，标注来源编号\n"
+        "4. 如果问题与文物无关，礼貌引导用户回到文物话题\n\n"
+        f"用户问题：{query}\n\n"
+        f"【检索结果】\n{context_text}\n"
+    )
+
+
+def stream_chat_response(db: Session, query: str, session_id: int):
+    """
+    Generator that yields SSE events for the three-stage chat flow.
+    Stages: thinking -> tool_call -> answer -> done
+    """
+    start_time = time.time()
+
+    # ── Stage 1: Thinking (simulated, fast) ──
+    thinking_text = (
         f"用户询问：「{query}」。正在分析问题意图，提取关键词...\n\n"
         f"检索策略：\n"
         f"1. 关键词提取：对问题进行分词，提取核心查询词\n"
@@ -138,9 +198,109 @@ def _build_thinking_content(query: str) -> str:
         f"综合检索结果，组织回答内容。"
     )
 
+    yield _sse_event("thinking_start", {})
+    chunk_size = 12
+    for i in range(0, len(thinking_text), chunk_size):
+        chunk = thinking_text[i : i + chunk_size]
+        yield _sse_event("thinking_delta", {"content": chunk})
+        time.sleep(0.02)
+    yield _sse_event("thinking_end", {})
 
-def _build_answer(query: str, results: list[dict]) -> str:
-    """Build a template-based answer from search results."""
+    # ── Stage 2: Tool Call (search artifacts) ──
+    yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
+    time.sleep(0.05)
+
+    search_results = _search_artifacts(db, query, limit=5)
+    elapsed = round(time.time() - start_time, 2)
+
+    yield _sse_event("tool_call_delta", {"content": f"正在检索「{query}」..."})
+    time.sleep(0.03)
+
+    tool_result_data = {
+        "results": search_results,
+        "count": len(search_results),
+        "elapsed": elapsed,
+    }
+    yield _sse_event("tool_call_result", tool_result_data)
+
+    # ── Stage 3: Answer (DeepSeek LLM streaming) ──
+    answer_text = ""
+
+    # Try DeepSeek API; fall back to template if it fails
+    use_llm = bool(settings.AI_API_KEY)
+    if use_llm:
+        try:
+            client = _get_client()
+            system_prompt = _build_system_prompt(query, search_results)
+
+            yield _sse_event("answer_start", {})
+
+            stream = client.chat.completions.create(
+                model=settings.AI_MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": query},
+                ],
+                stream=True,
+                max_tokens=1024,
+                temperature=0.7,
+            )
+
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    answer_text += delta.content
+                    yield _sse_event("answer_delta", {"content": delta.content})
+
+            yield _sse_event("answer_end", {})
+
+        except Exception as e:
+            # LLM failed — fall back to template answer
+            answer_text = _build_template_answer(query, search_results)
+            yield _sse_event("answer_start", {})
+            chunk_size = 6
+            for i in range(0, len(answer_text), chunk_size):
+                yield _sse_event("answer_delta", {"content": answer_text[i : i + chunk_size]})
+                time.sleep(0.01)
+            yield _sse_event("answer_end", {})
+    else:
+        # No API key configured — use template
+        answer_text = _build_template_answer(query, search_results)
+        yield _sse_event("answer_start", {})
+        chunk_size = 6
+        for i in range(0, len(answer_text), chunk_size):
+            yield _sse_event("answer_delta", {"content": answer_text[i : i + chunk_size]})
+            time.sleep(0.01)
+        yield _sse_event("answer_end", {})
+
+    total_elapsed = round(time.time() - start_time, 2)
+
+    # Save messages to database
+    save_message(db, session_id, "user", query)
+    tool_calls_json = json.dumps(tool_result_data, ensure_ascii=False)
+    save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json)
+
+    # Update session title
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session and session.title == "新对话":
+        title = query[:50] + ("..." if len(query) > 50 else "")
+        update_session_title(db, session_id, title)
+
+    # Build citation sources
+    sources = [
+        {"name": r["name"], "source": "文物数据库"}
+        for r in search_results
+    ]
+
+    # ── Stage 4: Done ──
+    yield _sse_event("done", {
+        "elapsed": total_elapsed,
+        "sources": sources,
+    })
+
+
+def _build_template_answer(query: str, results: list[dict]) -> str:
+    """Build a template-based answer from search results (fallback)."""
     if not results:
         return (
             f"很抱歉，在文物数据库中未找到与「{query}」直接相关的文物信息。\n\n"
@@ -165,83 +325,3 @@ def _build_answer(query: str, results: list[dict]) -> str:
 
     lines.append("以上信息来源于文物数据库，如需了解更多详情，可在文物管理页面查看。")
     return "\n".join(lines)
-
-
-def _sse_event(event_type: str, data: dict) -> str:
-    """Format a single SSE event."""
-    payload = {"type": event_type, **data}
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-def stream_chat_response(db: Session, query: str, session_id: int):
-    """
-    Generator that yields SSE events for the three-stage chat flow.
-    Stages: thinking -> tool_call -> answer -> done
-    """
-    start_time = time.time()
-
-    # ── Stage 1: Thinking ──
-    yield _sse_event("thinking_start", {})
-    thinking_text = _build_thinking_content(query)
-    # Stream thinking in chunks
-    chunk_size = 12
-    for i in range(0, len(thinking_text), chunk_size):
-        chunk = thinking_text[i : i + chunk_size]
-        yield _sse_event("thinking_delta", {"content": chunk})
-        time.sleep(0.02)  # Small delay for streaming effect
-    yield _sse_event("thinking_end", {})
-
-    # ── Stage 2: Tool Call (search artifacts) ──
-    yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
-    time.sleep(0.05)
-
-    search_results = _search_artifacts(db, query, limit=5)
-    elapsed = round(time.time() - start_time, 2)
-
-    # Stream the search query being typed
-    yield _sse_event("tool_call_delta", {"content": f"正在检索「{query}」..."})
-    time.sleep(0.03)
-
-    tool_result_data = {
-        "results": search_results,
-        "count": len(search_results),
-        "elapsed": elapsed,
-    }
-    yield _sse_event("tool_call_result", tool_result_data)
-
-    # ── Stage 3: Answer ──
-    answer_text = _build_answer(query, search_results)
-    yield _sse_event("answer_start", {})
-
-    # Stream answer in chunks for typing effect
-    chunk_size = 6
-    for i in range(0, len(answer_text), chunk_size):
-        chunk = answer_text[i : i + chunk_size]
-        yield _sse_event("answer_delta", {"content": chunk})
-        time.sleep(0.01)
-
-    total_elapsed = round(time.time() - start_time, 2)
-    yield _sse_event("answer_end", {})
-
-    # Save messages to database
-    save_message(db, session_id, "user", query)
-    tool_calls_json = json.dumps(tool_result_data, ensure_ascii=False)
-    save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json)
-
-    # Update session title with first question if it's still default
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if session and session.title == "新对话":
-        title = query[:50] + ("..." if len(query) > 50 else "")
-        update_session_title(db, session_id, title)
-
-    # Build citation sources from search results
-    sources = [
-        {"name": r["name"], "source": "文物数据库"}
-        for r in search_results
-    ]
-
-    # ── Stage 4: Done ──
-    yield _sse_event("done", {
-        "elapsed": total_elapsed,
-        "sources": sources,
-    })

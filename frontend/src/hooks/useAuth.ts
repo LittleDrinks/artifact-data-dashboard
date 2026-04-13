@@ -37,11 +37,13 @@ export function useAuth() {
     [navigate],
   );
 
-  /** 注册 */
+  /** 注册（注册成功后自动登录） */
   const register = useCallback(
     async (username: string, email: string, password: string) => {
-      const res = await authApi.register({ username, email, password });
-      localStorage.setItem('token', res.access_token);
+      await authApi.register({ username, email, password, confirm_password: password });
+      // 注册成功后自动登录获取 token
+      const loginRes = await authApi.login({ username, password });
+      localStorage.setItem('token', loginRes.access_token);
       const userInfo = await authApi.getMe();
       setUser(userInfo);
       navigate('/');

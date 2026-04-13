@@ -9,6 +9,14 @@ export interface RegisterParams {
   username: string;
   email: string;
   password: string;
+  confirm_password: string;
+}
+
+export interface RegisterResponse {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
 }
 
 export interface AuthResponse {
@@ -35,8 +43,8 @@ export async function login(params: LoginParams): Promise<AuthResponse> {
 }
 
 /** 注册 */
-export async function register(params: RegisterParams): Promise<AuthResponse> {
-  const res = await client.post<AuthResponse>('/auth/register', params);
+export async function register(params: RegisterParams): Promise<RegisterResponse> {
+  const res = await client.post<RegisterResponse>('/auth/register', params);
   return res.data;
 }
 

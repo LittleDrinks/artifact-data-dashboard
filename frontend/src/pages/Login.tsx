@@ -30,6 +30,7 @@ export default function Login() {
     username: string;
     email: string;
     password: string;
+    confirm_password: string;
   }) => {
     setLoading(true);
     try {
@@ -182,11 +183,35 @@ export default function Login() {
                   </Form.Item>
                   <Form.Item
                     name="password"
-                    rules={[{ required: true, message: '请输入密码' }]}
+                    rules={[
+                      { required: true, message: '请输入密码' },
+                      { min: 8, message: '密码至少8个字符' },
+                    ]}
                   >
                     <Input.Password
                       prefix={<LockOutlined />}
                       placeholder="密码"
+                      size="large"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="confirm_password"
+                    dependencies={['password']}
+                    rules={[
+                      { required: true, message: '请确认密码' },
+                      ({ getFieldValue }) => ({
+                        validator(_, value) {
+                          if (!value || getFieldValue('password') === value) {
+                            return Promise.resolve();
+                          }
+                          return Promise.reject(new Error('两次密码不一致'));
+                        },
+                      }),
+                    ]}
+                  >
+                    <Input.Password
+                      prefix={<LockOutlined />}
+                      placeholder="确认密码"
                       size="large"
                     />
                   </Form.Item>
