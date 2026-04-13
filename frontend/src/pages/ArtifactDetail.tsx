@@ -7,7 +7,7 @@ import {
 import {
   ArrowLeftOutlined, EditOutlined, LinkOutlined,
 } from '@ant-design/icons';
-import { getArtifact, updateArtifact, type Artifact, type ArtifactFormData } from '../api/artifacts';
+import { getArtifact, updateArtifact, deleteArtifact, type Artifact, type ArtifactFormData } from '../api/artifacts';
 import { getStatsByCategory, getStatsByEra } from '../api/stats';
 import { useAuth } from '../hooks/useAuth';
 
@@ -24,7 +24,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function ArtifactDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   const [artifact, setArtifact] = useState<Artifact | null>(null);
@@ -153,16 +153,21 @@ export default function ArtifactDetail() {
             type="text"
             icon={<ArrowLeftOutlined />}
             onClick={() => navigate('/artifacts')}
+            style={{ color: 'var(--text-body)' }}
           >
             返回列表
           </Button>
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            文物管理 / <span style={{ color: 'var(--text-body)' }}>{artifact.name}</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            文物管理 / <span style={{ color: 'var(--text-heading)' }}>{artifact.name}</span>
           </span>
         </Space>
         <Space>
-          {isAdmin && (
-            <Button type="primary" icon={<EditOutlined />} onClick={openEdit}>
+          {isAuthenticated && (
+            <Button
+              type="primary"
+              icon={<EditOutlined />}
+              onClick={openEdit}
+            >
               编辑
             </Button>
           )}
@@ -172,6 +177,31 @@ export default function ArtifactDetail() {
           >
             在图谱中查看
           </Button>
+          {isAdmin && (
+            <Button
+              danger
+              onClick={() => {
+                Modal.confirm({
+                  title: '确认删除',
+                  content: `确定要删除「${artifact.name}」吗？此操作不可恢复。`,
+                  okText: '删除',
+                  cancelText: '取消',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    try {
+                      await deleteArtifact(artifact.id);
+                      message.success('删除成功');
+                      navigate('/artifacts');
+                    } catch {
+                      message.error('删除失败');
+                    }
+                  },
+                });
+              }}
+            >
+              删除
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -202,9 +232,12 @@ export default function ArtifactDetail() {
                 justifyContent: 'center',
                 background: 'var(--bg-panel)',
                 color: 'var(--text-muted)',
-                fontSize: 48,
+                fontSize: 14,
+                flexDirection: 'column',
+                gap: 8,
               }}>
-                🏺
+                <span style={{ fontSize: 48 }}>🏺</span>
+                <span>暂无图片</span>
               </div>
             )}
           </Card>
@@ -306,6 +339,8 @@ export default function ArtifactDetail() {
         onOk={handleEdit}
         onCancel={() => setEditOpen(false)}
         confirmLoading={editLoading}
+        okText="保存"
+        cancelText="取消"
         width={560}
         destroyOnClose
       >

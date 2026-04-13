@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Input, Select, Space, Card, Tag, Modal, Form,
-  message, Popconfirm, Tooltip, Row, Col,
+  message, Popconfirm, Tooltip, Row, Col, Empty,
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, EditOutlined,
@@ -28,7 +28,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function Artifacts() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   // 列表数据
@@ -174,11 +174,11 @@ export default function Artifacts() {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      width: 220,
+      width: 240,
       render: (text: string, record: Artifact) => (
         <a
           onClick={() => navigate(`/artifacts/${record.id}`)}
-          style={{ color: 'var(--text-heading)', fontWeight: 500 }}
+          style={{ color: 'var(--text-heading)', fontWeight: 500, cursor: 'pointer' }}
         >
           {text}
         </a>
@@ -206,39 +206,35 @@ export default function Artifacts() {
       title: '出土地点',
       dataIndex: 'location',
       key: 'location',
-      width: 150,
+      width: 160,
       ellipsis: true,
       render: (loc: string | null) => loc || <span style={{ color: 'var(--text-muted)' }}>—</span>,
     },
     {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      render: (date: string) => new Date(date).toLocaleDateString('zh-CN'),
-    },
-    {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 160,
       render: (_: unknown, record: Artifact) => (
         <Space size={4}>
           <Tooltip title="查看详情">
             <Button
-              type="text"
+              type="link"
               size="small"
               icon={<EyeOutlined />}
               onClick={() => navigate(`/artifacts/${record.id}`)}
+              style={{ color: 'var(--purple)' }}
             />
           </Tooltip>
-          <Tooltip title="编辑">
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => openEditModal(record)}
-            />
-          </Tooltip>
+          {isAuthenticated && (
+            <Tooltip title="编辑">
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => openEditModal(record)}
+              />
+            </Tooltip>
+          )}
           {isAdmin && (
             <Popconfirm
               title="确认删除"
@@ -285,21 +281,21 @@ export default function Artifacts() {
               <Select
                 placeholder="全部类别"
                 allowClear
-                style={{ width: 160 }}
+                style={{ width: 170 }}
                 options={categories}
                 onChange={v => handleFilterChange('category', v)}
               />
               <Select
                 placeholder="全部年代"
                 allowClear
-                style={{ width: 140 }}
+                style={{ width: 150 }}
                 options={eras}
                 onChange={v => handleFilterChange('era', v)}
               />
               <Select
                 placeholder="全部地点"
                 allowClear
-                style={{ width: 160 }}
+                style={{ width: 170 }}
                 options={locations}
                 onChange={v => handleFilterChange('location', v)}
               />
@@ -307,11 +303,19 @@ export default function Artifacts() {
           </Col>
           <Col>
             <Space>
-              <Button icon={<ReloadOutlined />} onClick={fetchData}>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={fetchData}
+                style={{ borderColor: 'var(--border)' }}
+              >
                 刷新
               </Button>
-              {isAdmin && (
-                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              {isAuthenticated && (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={openCreateModal}
+                >
                   添加文物
                 </Button>
               )}
@@ -321,8 +325,16 @@ export default function Artifacts() {
       </Card>
 
       {/* 统计摘要 */}
-      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-        共 <span style={{ color: 'var(--text-heading)', fontWeight: 500 }}>{total}</span> 件文物
+      <div style={{
+        fontSize: 13,
+        color: 'var(--text-muted)',
+        marginBottom: 12,
+        display: 'flex',
+        gap: 24,
+      }}>
+        <span>
+          共 <span style={{ color: 'var(--text-heading)', fontWeight: 500 }}>{total}</span> 件文物
+        </span>
       </div>
 
       {/* 数据表格 */}
@@ -330,6 +342,7 @@ export default function Artifacts() {
         style={{
           borderRadius: 'var(--r-card)',
           border: '1px solid var(--border)',
+          overflow: 'hidden',
         }}
         styles={{ body: { padding: 0 } }}
       >
@@ -339,6 +352,7 @@ export default function Artifacts() {
           rowKey="id"
           loading={loading}
           size="middle"
+          locale={{ emptyText: <Empty description="暂无文物数据" /> }}
           pagination={{
             current: params.page,
             pageSize: params.size,
@@ -350,6 +364,16 @@ export default function Artifacts() {
           }}
           onChange={pag => handleTableChange({ current: pag.current, pageSize: pag.pageSize })}
           style={{ minHeight: 400 }}
+          // 行 hover 淡紫色背景
+          onRow={() => ({
+            style: { cursor: 'pointer' },
+            onMouseEnter: (e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(83, 58, 253, 0.04)';
+            },
+            onMouseLeave: (e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+            },
+          })}
         />
       </Card>
 
@@ -360,6 +384,8 @@ export default function Artifacts() {
         onOk={handleSubmit}
         onCancel={() => { setModalOpen(false); form.resetFields(); }}
         confirmLoading={confirmLoading}
+        okText={editingArtifact ? '保存' : '创建'}
+        cancelText="取消"
         width={560}
         destroyOnClose
       >
