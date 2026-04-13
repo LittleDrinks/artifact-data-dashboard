@@ -140,7 +140,7 @@ a { color: var(--purple); text-decoration: none; }
 /* ── Main ── */
 .main {
   flex: 1; margin-left: var(--sidebar-w);
-  display: flex; flex-direction: column; min-height: 100vh;
+  display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 }
 .header {
   height: var(--header-h); background: var(--bg-canvas);
@@ -404,7 +404,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 /* ── Chat ── */
-.chat-layout { display: flex; flex-direction: column; height: calc(100vh - var(--header-h)); }
+.chat-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .chat-msgs { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
 .chat-msg { display: flex; gap: 12px; max-width: 720px; }
 .chat-msg.user { flex-direction: row-reverse; margin-left: auto; }
@@ -474,13 +474,14 @@ tr:last-child td { border-bottom: none; }
 .rag-panel {
   width: 340px; border-left: 1px solid var(--border);
   background: var(--bg-panel); padding: 16px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 12px;
+  min-height: 0;
+}
 }
 .rag-title {
   font-size: 11px; font-weight: 400; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;
 }
-.rag-section { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.rag-section { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; margin-bottom: 12px; }
 .rag-section + .rag-section { margin-top: 0; }
 .rag-label {
   font-size: 12px; font-weight: 400;

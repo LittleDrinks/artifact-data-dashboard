@@ -9,7 +9,7 @@
 | 层级 | 技术 | 版本 |
 |------|------|------|
 | 前端 | Vite + React + TypeScript + Ant Design Pro | React 18, AntD 5 |
-| 后端 | Python FastAPI | 3.12 |
+| 后端 | Python FastAPI | 3.12（最低3.10，需用虚拟环境） |
 | AI | LangChain + LightRAG | LangChain 0.3 |
 | 关系数据库 | SQLite（WAL模式） | - |
 | 图数据库 | Neo4j | 5.x |
@@ -174,9 +174,22 @@ CREATE TABLE attachments (
 4. **数据已有**：data/artifacts_list.json 有 629 条文物数据，data/artifacts_detail/ 有详情，可以直接导入 SQLite
 5. **后端端口 8000，前端端口 5173**
 6. **CORS 允许前端跨域访问后端**
-7. **Windows 环境**：Python open() 加 encoding='utf-8'，路径用 os.path.join
+7. **Python 需要 3.10+**（用了 `X | None` 语法），必须建虚拟环境（`python -m venv .venv`），激活后再安装依赖
+8. **Windows 环境**：Python open() 加 encoding='utf-8'，路径用 os.path.join
 
-## 自主工作模式
+## 踩坑记录
+
+开发过程中遇到的每个坑都要记录到 `docs/pitfalls.md`，格式：
+
+```markdown
+### [日期] 问题简述
+- **现象**：发生了什么
+- **原因**：根本原因
+- **解决**：怎么修的
+- **教训**：一句话总结，给后来人看
+```
+
+每个 agent 遇到非显而易见的问题时（编码错误、依赖冲突、平台兼容性、API 行为异常等），必须追加到这个文件。不要等任务结束再写，遇到就记。
 
 每个 agent 接到一个任务后：
 1. 读 CLAUDE.md 获取项目上下文

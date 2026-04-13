@@ -125,9 +125,9 @@
     </div>
   </div>
 
-  <div style="display:flex;flex:1;height:calc(100vh - var(--header-h))">
+  <div style="display:flex;flex:1;overflow:hidden">
     <!-- Chat area -->
-    <div class="chat-layout" style="flex:1">
+    <div class="chat-layout" style="flex:1;min-width:0">
       <div class="chat-msgs">
 
         <!-- User message 1 -->
@@ -247,7 +247,7 @@
     </div>
 
     <!-- RAG Knowledge Panel (right side — detailed results) -->
-    <div class="rag-panel" id="ragPanel">
+    <div class="rag-panel" id="ragPanel" style="min-height:0;overflow-y:auto">
 
       <div class="rag-title">知识检索详情</div>
 
