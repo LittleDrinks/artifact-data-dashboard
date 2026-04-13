@@ -1,33 +1,35 @@
-"""Graph schemas."""
+"""知识图谱相关 Schema"""
 
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel
 
 
 class GraphNode(BaseModel):
-    """Schema for a graph node."""
+    """图谱节点"""
     id: str
-    label: str
-    type: str
-    properties: dict = {}
+    name: str
+    type: str  # artifact, era, category, location, tag
+    properties: Optional[dict] = None
 
 
-class GraphEdge(BaseModel):
-    """Schema for a graph edge/relationship."""
+class GraphLink(BaseModel):
+    """图谱边/关系"""
     source: str
     target: str
-    type: str
-    properties: dict = {}
+    relation: str  # 属于朝代, 属于类别, 出土于, 包含标签
 
 
-class GraphData(BaseModel):
-    """Schema for full graph data response."""
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
+class GraphDataResponse(BaseModel):
+    """完整图谱数据响应"""
+    nodes: List[GraphNode]
+    links: List[GraphLink]
+    total_nodes: int
+    total_links: int
 
 
-class GraphSearchRequest(BaseModel):
-    """Schema for graph search."""
-    keyword: str
-    depth: int = 1
+class NodeDetailResponse(BaseModel):
+    """节点详情响应（包含直接关系和邻居节点）"""
+    node: GraphNode
+    links: List[GraphLink]
+    neighbors: List[GraphNode]

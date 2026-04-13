@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import health, auth, artifacts, stats
+from app.routers import health, auth, artifacts, stats, graph
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -31,6 +31,7 @@ app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
 
 
 @app.on_event("startup")
