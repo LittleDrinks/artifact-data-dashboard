@@ -1,6 +1,9 @@
 """Authentication router - register, login, get current user."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import time
+from collections import defaultdict
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -11,6 +14,33 @@ from app.services import auth as auth_service
 
 router = APIRouter()
 security = HTTPBearer()
+
+# ── Simple in-memory rate limiter ──
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_MAX = 5  # attempts per window
+
+
+def _check_rate_limit(client_ip: str) -> None:
+    """Raise 429 if client_ip exceeds login rate limit."""
+    now = time.time()
+    # Prune ALL expired keys to prevent memory leak
+    expired_keys = [
+        k for k, v in _login_attempts.items()
+        if not v or now - v[-1] > _RATE_LIMIT_WINDOW
+    ]
+    for k in expired_keys:
+        del _login_attempts[k]
+
+    # Prune old entries for this IP
+    attempts = _login_attempts[client_ip]
+    _login_attempts[client_ip] = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+    if len(_login_attempts[client_ip]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="登录尝试过于频繁，请稍后再试",
+        )
+    _login_attempts[client_ip].append(now)
 
 
 def get_current_user(
@@ -77,8 +107,11 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(data: UserLogin, db: Session = Depends(get_db)):
+def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Authenticate user and return JWT access token."""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     try:
         token_response = auth_service.authenticate_user(db, data)
     except ValueError as e:

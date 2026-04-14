@@ -5,16 +5,21 @@ SSE three-stage output: thinking -> tool_call -> answer -> done
 """
 
 import json
+import logging
 import time
 from typing import Optional
 
+import jieba
 from openai import OpenAI
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.config import settings
 from app.models.chat import ChatSession, ChatMessage
 from app.models.artifact import Artifact
 from app.schemas.chat import ChatSessionCreate
+
+logger = logging.getLogger(__name__)
 
 # Initialize DeepSeek client
 _client: Optional[OpenAI] = None
@@ -62,14 +67,14 @@ def get_user_sessions(
 
 def get_session_messages(
     db: Session, session_id: int, user_id: int
-) -> list[ChatMessage]:
-    """Get all messages for a session, ordered by id."""
+) -> list[ChatMessage] | None:
+    """Get all messages for a session, ordered by id. Returns None if session not found."""
     session = db.query(ChatSession).filter(
         ChatSession.id == session_id,
         ChatSession.user_id == user_id,
     ).first()
     if not session:
-        return []
+        return None
     return session.messages  # type: ignore[return-value]
 
 
@@ -98,17 +103,26 @@ def update_session_title(db: Session, session_id: int, title: str) -> None:
 
 
 def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
-    """Keyword search across artifacts table."""
-    search_term = f"%{query}%"
+    """Keyword search across artifacts table using jieba word segmentation."""
+    # Extract keywords from the query using jieba
+    words = [w.strip() for w in jieba.cut(query) if len(w.strip()) >= 2]
+    if not words:
+        # Fallback to full query
+        words = [query]
+
+    # Build OR filter: match any keyword in any text field
+    conditions = []
+    for word in words:
+        search_term = f"%{word}%"
+        conditions.append(Artifact.name.ilike(search_term))
+        conditions.append(Artifact.description.ilike(search_term))
+        conditions.append(Artifact.tags.ilike(search_term))
+        conditions.append(Artifact.category.ilike(search_term))
+        conditions.append(Artifact.era.ilike(search_term))
+
     results = (
         db.query(Artifact)
-        .filter(
-            (Artifact.name.ilike(search_term))
-            | (Artifact.description.ilike(search_term))
-            | (Artifact.tags.ilike(search_term))
-            | (Artifact.category.ilike(search_term))
-            | (Artifact.era.ilike(search_term))
-        )
+        .filter(or_(*conditions))
         .limit(limit)
         .all()
     )
@@ -188,6 +202,9 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     """
     start_time = time.time()
 
+    # Save user message immediately to prevent data loss on stream interruption
+    save_message(db, session_id, "user", query)
+
     # ── Stage 1: Thinking (simulated, fast) ──
     thinking_text = (
         f"用户询问：「{query}」。正在分析问题意图，提取关键词...\n\n"
@@ -203,7 +220,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     for i in range(0, len(thinking_text), chunk_size):
         chunk = thinking_text[i : i + chunk_size]
         yield _sse_event("thinking_delta", {"content": chunk})
-        time.sleep(0.02)
+        time.sleep(0.005)
     yield _sse_event("thinking_end", {})
 
     # ── Stage 2: Tool Call (search artifacts) ──
@@ -275,8 +292,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
 
     total_elapsed = round(time.time() - start_time, 2)
 
-    # Save messages to database
-    save_message(db, session_id, "user", query)
+    # Save AI reply to database
     tool_calls_json = json.dumps(tool_result_data, ensure_ascii=False)
     save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json)
 

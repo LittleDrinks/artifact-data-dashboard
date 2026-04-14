@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
 from app.schemas.artifact import ArtifactCreate, ArtifactUpdate
+from app.services.stats import clear_stats_cache
 
 
 def get_artifacts(
@@ -75,6 +76,7 @@ def create_artifact(db: Session, data: ArtifactCreate) -> Artifact:
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
+    clear_stats_cache()
     return artifact
 
 
@@ -90,6 +92,7 @@ def update_artifact(db: Session, artifact_id: int, data: ArtifactUpdate) -> Arti
 
     db.commit()
     db.refresh(artifact)
+    clear_stats_cache()
     return artifact
 
 
@@ -101,6 +104,7 @@ def delete_artifact(db: Session, artifact_id: int) -> bool:
 
     db.delete(artifact)
     db.commit()
+    clear_stats_cache()
     return True
 
 

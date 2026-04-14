@@ -154,23 +154,62 @@ def search_graph(
     搜索图谱节点，返回匹配节点及其一跳邻居构成的子图。
 
     搜索范围：节点名称包含关键词。
+    使用 DB-level ILIKE 过滤，避免加载全部文物。
     """
-    # 先构建全量图谱（基于所有文物）
-    all_artifacts = db.query(Artifact).order_by(Artifact.id).all()
-    nodes_dict, links_dict = build_graph_from_artifacts(all_artifacts)
+    # DB-level filtering — only load matching artifacts
+    search_term = f"%{keyword}%"
+    matched_artifacts = (
+        db.query(Artifact)
+        .filter(
+            Artifact.name.ilike(search_term)
+            | Artifact.era.ilike(search_term)
+            | Artifact.category.ilike(search_term)
+            | Artifact.location.ilike(search_term)
+            | Artifact.tags.ilike(search_term)
+        )
+        .all()
+    )
+
+    if not matched_artifacts:
+        return [], []
+
+    # Also load artifacts that share era/category/location/tags with matches
+    eras = {a.era for a in matched_artifacts if a.era}
+    categories = {a.category for a in matched_artifacts if a.category}
+    locations = {a.location for a in matched_artifacts if a.location}
+
+    related_artifacts = (
+        db.query(Artifact)
+        .filter(
+            (Artifact.era.in_(eras) if eras else False)
+            | (Artifact.category.in_(categories) if categories else False)
+            | (Artifact.location.in_(locations) if locations else False)
+        )
+        .all()
+    ) if (eras or categories or locations) else []
+
+    # Merge and deduplicate
+    all_ids = {a.id for a in matched_artifacts}
+    all_arts = list(matched_artifacts)
+    for a in related_artifacts:
+        if a.id not in all_ids:
+            all_ids.add(a.id)
+            all_arts.append(a)
+
+    nodes_dict, links_dict = build_graph_from_artifacts(all_arts)
 
     keyword_lower = keyword.lower()
 
-    # 找到所有匹配的节点
+    # Find matched node IDs by name
     matched_node_ids: Set[str] = set()
     for nid, node in nodes_dict.items():
         if keyword_lower in node.name.lower():
             matched_node_ids.add(nid)
 
     if not matched_node_ids:
-        return [], []
+        return list(nodes_dict.values()), list(links_dict.values())
 
-    # 收集一跳邻居
+    # Collect one-hop neighbors
     result_node_ids: Set[str] = set(matched_node_ids)
     result_link_keys: Set[str] = set()
 
@@ -180,7 +219,6 @@ def search_graph(
             result_node_ids.add(link.target)
             result_link_keys.add(link_key)
 
-    # 构建结果
     result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
     result_links = [links_dict[lk] for lk in result_link_keys if lk in links_dict]
 
@@ -194,18 +232,41 @@ def get_node_detail(
     """
     获取单个节点的详情及其直接关系和邻居。
 
-    Returns:
-        (node, links, neighbors) 或 None（节点不存在时）
+    只加载与目标节点相关的文物，避免全表扫描。
     """
-    all_artifacts = db.query(Artifact).order_by(Artifact.id).all()
-    nodes_dict, links_dict = build_graph_from_artifacts(all_artifacts)
+    # Parse node_id to determine type and value
+    if node_id.startswith("artifact_"):
+        # Direct artifact — load just that one
+        try:
+            art_id = int(node_id.split("_", 1)[1])
+        except (ValueError, IndexError):
+            return None
+        artifacts = db.query(Artifact).filter(Artifact.id == art_id).all()
+    elif node_id.startswith("era_"):
+        era_val = node_id[4:]
+        artifacts = db.query(Artifact).filter(Artifact.era == era_val).all()
+    elif node_id.startswith("cat_"):
+        cat_val = node_id[4:]
+        artifacts = db.query(Artifact).filter(Artifact.category == cat_val).all()
+    elif node_id.startswith("loc_"):
+        loc_val = node_id[4:]
+        artifacts = db.query(Artifact).filter(Artifact.location == loc_val).all()
+    elif node_id.startswith("tag_"):
+        tag_val = node_id[4:]
+        artifacts = (
+            db.query(Artifact).filter(Artifact.tags.ilike(f"%{tag_val}%")).all()
+        )
+    else:
+        return None
+
+    nodes_dict, links_dict = build_graph_from_artifacts(artifacts)
 
     if node_id not in nodes_dict:
         return None
 
     node = nodes_dict[node_id]
 
-    # 收集与该节点直接相关的边
+    # Collect directly related edges and neighbors
     related_links: List[GraphLink] = []
     neighbor_ids: Set[str] = set()
 
@@ -215,7 +276,7 @@ def get_node_detail(
             neighbor_ids.add(link.source)
             neighbor_ids.add(link.target)
 
-    neighbor_ids.discard(node_id)  # 排除自身
+    neighbor_ids.discard(node_id)
     neighbors = [nodes_dict[nid] for nid in neighbor_ids if nid in nodes_dict]
 
     return node, related_links, neighbors

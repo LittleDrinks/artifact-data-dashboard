@@ -360,12 +360,7 @@ export default function Dashboard() {
     getOverview()
       .then(setOverview)
       .catch(() => {
-        setOverview({
-          total_artifacts: 629,
-          total_categories: 0,
-          total_eras: 0,
-          total_locations: 0,
-        });
+        // overview stays null, cards show 0 via nullish coalescing
       })
       .finally(() => setLoading(false));
   }, []);

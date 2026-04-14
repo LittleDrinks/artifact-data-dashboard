@@ -53,15 +53,18 @@ class Settings(BaseSettings):
         extra = "ignore"
 
     def model_post_init(self, __context) -> None:
-        """Set computed defaults after initialization."""
+        """Set computed defaults and validate critical settings."""
         if not self.DATABASE_URL:
-            # Default to SQLite file in backend/data directory
             db_dir = Path(__file__).parent.parent / "data"
             db_dir.mkdir(exist_ok=True)
             self.DATABASE_URL = f"sqlite:///{db_dir / 'app.db'}"
 
         if not self.DATA_DIR:
             self.DATA_DIR = str(Path(__file__).parent.parent.parent / "data")
+
+        if self.JWT_SECRET_KEY == "your-secret-key-change-in-production":
+            import secrets
+            self.JWT_SECRET_KEY = secrets.token_urlsafe(32)
 
 
 settings = Settings()

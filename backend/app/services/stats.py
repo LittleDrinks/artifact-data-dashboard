@@ -1,7 +1,8 @@
 """Statistics service - dashboard overview, era/category/location stats, word cloud."""
 
+import time
 from collections import Counter
-from typing import List
+from typing import List, Optional
 
 import jieba
 from sqlalchemy import func, or_
@@ -25,9 +26,34 @@ STOP_WORDS = set(
     "所 该 各 本 此 每 某 任 何 些 什么 怎么 哪 谁 几 多少 怎样".split()
 )
 
+# ── TTL Cache (60s) ──
+_cache: dict = {}
+_CACHE_TTL = 60  # seconds
+
+
+def _get_cached(key: str):
+    """Return cached value if still fresh, else None."""
+    entry = _cache.get(key)
+    if entry and time.time() - entry["ts"] < _CACHE_TTL:
+        return entry["value"]
+    return None
+
+
+def _set_cached(key: str, value) -> None:
+    _cache[key] = {"value": value, "ts": time.time()}
+
+
+def clear_stats_cache() -> None:
+    """Clear all cached stats entries. Call after artifact mutations."""
+    _cache.clear()
+
 
 def get_overview_stats(db: Session) -> OverviewStats:
     """获取 Dashboard 概览统计。"""
+    cached = _get_cached("overview")
+    if cached is not None:
+        return cached
+
     total = db.query(func.count(Artifact.id)).scalar() or 0
     total_categories = (
         db.query(func.count(func.distinct(Artifact.category)))
@@ -48,16 +74,22 @@ def get_overview_stats(db: Session) -> OverviewStats:
         or 0
     )
 
-    return OverviewStats(
+    result = OverviewStats(
         total_artifacts=total,
         total_categories=total_categories,
         total_eras=total_eras,
         total_locations=total_locations,
     )
+    _set_cached("overview", result)
+    return result
 
 
 def get_era_stats(db: Session) -> List[EraStat]:
     """按朝代统计文物数量分布。"""
+    cached = _get_cached("era")
+    if cached is not None:
+        return cached
+
     results = (
         db.query(Artifact.era, func.count(Artifact.id))
         .filter(Artifact.era.isnot(None), Artifact.era != "")
@@ -65,11 +97,17 @@ def get_era_stats(db: Session) -> List[EraStat]:
         .order_by(func.count(Artifact.id).desc())
         .all()
     )
-    return [EraStat(era=r[0], count=r[1]) for r in results]
+    value = [EraStat(era=r[0], count=r[1]) for r in results]
+    _set_cached("era", value)
+    return value
 
 
 def get_category_stats(db: Session) -> List[CategoryStat]:
     """按类别统计文物数量分布。"""
+    cached = _get_cached("category")
+    if cached is not None:
+        return cached
+
     results = (
         db.query(Artifact.category, func.count(Artifact.id))
         .filter(Artifact.category.isnot(None), Artifact.category != "")
@@ -77,11 +115,17 @@ def get_category_stats(db: Session) -> List[CategoryStat]:
         .order_by(func.count(Artifact.id).desc())
         .all()
     )
-    return [CategoryStat(category=r[0], count=r[1]) for r in results]
+    value = [CategoryStat(category=r[0], count=r[1]) for r in results]
+    _set_cached("category", value)
+    return value
 
 
 def get_location_stats(db: Session) -> List[LocationStat]:
     """按出土地点统计文物数量分布。"""
+    cached = _get_cached("location")
+    if cached is not None:
+        return cached
+
     results = (
         db.query(Artifact.location, func.count(Artifact.id))
         .filter(Artifact.location.isnot(None), Artifact.location != "")
@@ -89,7 +133,9 @@ def get_location_stats(db: Session) -> List[LocationStat]:
         .order_by(func.count(Artifact.id).desc())
         .all()
     )
-    return [LocationStat(location=r[0], count=r[1]) for r in results]
+    value = [LocationStat(location=r[0], count=r[1]) for r in results]
+    _set_cached("location", value)
+    return value
 
 
 def get_wordcloud_data(db: Session, limit: int = 100) -> List[WordCloudItem]:
@@ -97,6 +143,11 @@ def get_wordcloud_data(db: Session, limit: int = 100) -> List[WordCloudItem]:
     使用 jieba 分词提取文物名称和描述中的关键词及其频率。
     合并名称、描述、标签文本，过滤停用词和短词，返回 Top N。
     """
+    cache_key = f"wordcloud_{limit}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     artifacts = (
         db.query(Artifact.name, Artifact.description, Artifact.tags)
         .filter(
@@ -139,4 +190,6 @@ def get_wordcloud_data(db: Session, limit: int = 100) -> List[WordCloudItem]:
                 ):
                     word_counter[word] += 1
 
-    return [WordCloudItem(word=w, weight=c) for w, c in word_counter.most_common(limit)]
+    result = [WordCloudItem(word=w, weight=c) for w, c in word_counter.most_common(limit)]
+    _set_cached(cache_key, result)
+    return result

@@ -33,11 +33,9 @@ export interface UserInfo {
 
 /** 登录 */
 export async function login(params: LoginParams): Promise<AuthResponse> {
-  const form = new URLSearchParams();
-  form.append('username', params.username);
-  form.append('password', params.password);
-  const res = await client.post<AuthResponse>('/auth/login', form, {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const res = await client.post<AuthResponse>('/auth/login', {
+    username: params.username,
+    password: params.password,
   });
   return res.data;
 }

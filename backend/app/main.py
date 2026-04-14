@@ -3,8 +3,9 @@ FastAPI application entry point.
 Configures CORS, includes routers, and sets up startup/shutdown events.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import init_db
@@ -33,6 +34,15 @@ app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"]
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler for unhandled exceptions — return 500, not traceback."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 @app.on_event("startup")
