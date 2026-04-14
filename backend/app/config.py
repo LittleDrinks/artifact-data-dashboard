@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     AI_API_BASE: str = "https://api.deepseek.com"
     AI_MODEL_NAME: str = "deepseek-chat"
 
+    # LightRAG
+    LIGHTRAG_DIR: str = ""
+    LIGHTRAG_LLM_MODEL: str = "qwen2.5:7b"
+    LIGHTRAG_EMBEDDING_MODEL: str = "bge-m3"
+
     # Data paths
     DATA_DIR: str = ""
 
@@ -61,6 +66,9 @@ class Settings(BaseSettings):
 
         if not self.DATA_DIR:
             self.DATA_DIR = str(Path(__file__).parent.parent.parent / "data")
+
+        if not self.LIGHTRAG_DIR:
+            self.LIGHTRAG_DIR = str(Path(__file__).parent.parent / "data" / "lightrag")
 
         if self.JWT_SECRET_KEY == "your-secret-key-change-in-production":
             import secrets

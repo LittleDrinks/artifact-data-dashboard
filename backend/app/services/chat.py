@@ -1,11 +1,15 @@
 """Chat service - session management and SSE streaming for AI Q&A.
 
-Uses DeepSeek API for LLM-powered responses with RAG context from artifact search.
+Uses DeepSeek API for LLM-powered responses with RAG context from:
+1. Keyword search across the SQLite artifacts table (always available)
+2. LightRAG knowledge-graph query (hybrid mode, graceful fallback)
 SSE three-stage output: thinking -> tool_call -> answer -> done
 """
 
+import asyncio
 import json
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -23,6 +27,30 @@ logger = logging.getLogger(__name__)
 
 # Initialize DeepSeek client
 _client: Optional[OpenAI] = None
+
+
+def _run_async(coro):
+    """Run an async coroutine from synchronous context.
+
+    Uses a background thread with its own event loop to avoid conflicts
+    with any running event loop (e.g. inside FastAPI's StreamingResponse).
+    """
+    result = None
+    exc = None
+
+    def _target():
+        nonlocal result, exc
+        try:
+            result = asyncio.run(coro)
+        except Exception as e:
+            exc = e
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=120)  # 2 minute timeout for LightRAG queries
+    if exc is not None:
+        raise exc
+    return result
 
 
 def _get_client() -> OpenAI:
@@ -189,8 +217,8 @@ def _sse_event(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _build_system_prompt(query: str, search_results: list[dict]) -> str:
-    """Build system prompt with RAG context from search results."""
+def _build_system_prompt(query: str, search_results: list[dict], lightrag_context: str = "") -> str:
+    """Build system prompt with RAG context from search results and LightRAG."""
     context_parts = []
     for i, r in enumerate(search_results, 1):
         parts = [f"【{i}】{r['name']}"]
@@ -206,11 +234,19 @@ def _build_system_prompt(query: str, search_results: list[dict]) -> str:
 
     context_text = "\n".join(context_parts) if context_parts else "未找到相关文物数据"
 
+    # Append LightRAG knowledge-graph context if available
+    if lightrag_context:
+        context_text += (
+            "\n\n【知识图谱检索结果（LightRAG）】\n"
+            "以下是通过文物知识图谱得到的补充信息，可用于丰富回答：\n"
+            f"{lightrag_context}"
+        )
+
     return (
         "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。"
-        "你的职责是基于文物数据库的检索结果，回答用户关于文物的问题。\n\n"
+        "你的职责是基于文物数据库的检索结果和知识图谱信息，回答用户关于文物的问题。\n\n"
         "回答要求：\n"
-        "1. 基于下方提供的检索结果回答，如果检索结果不足，可以适当补充你的知识\n"
+        "1. 综合使用数据库检索结果和知识图谱信息回答，如果两者都不充分，可以适当补充你的知识\n"
         "2. 回答要结构清晰，可以使用编号列表和加粗标题\n"
         "3. 引用检索结果时，标注来源编号\n"
         "4. 如果问题与文物无关，礼貌引导用户回到文物话题\n\n"
@@ -235,7 +271,8 @@ def stream_chat_response(db: Session, query: str, session_id: int):
         f"检索策略：\n"
         f"1. 关键词提取：对问题进行分词，提取核心查询词\n"
         f"2. 数据库检索：在文物数据库中搜索相关名称、描述、标签\n"
-        f"3. 结果排序：根据关键词匹配度排序检索结果\n\n"
+        f"3. 知识图谱检索：通过LightRAG知识图谱进行语义检索\n"
+        f"4. 结果融合：综合数据库和知识图谱结果，组织回答内容\n\n"
         f"综合检索结果，组织回答内容。"
     )
 
@@ -247,11 +284,37 @@ def stream_chat_response(db: Session, query: str, session_id: int):
         time.sleep(0.005)
     yield _sse_event("thinking_end", {})
 
-    # ── Stage 2: Tool Call (search artifacts) ──
+    # ── Stage 2: Tool Call (search artifacts + LightRAG) ──
     yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
     time.sleep(0.05)
 
+    # Keyword search (always available)
     search_results = _search_artifacts(db, query, limit=5)
+
+    # LightRAG knowledge-graph query (graceful fallback)
+    lightrag_context = ""
+    lightrag_used = False
+    try:
+        from app.ai.lightrag_service import get_lightrag_service
+
+        lightrag_svc = get_lightrag_service()
+        if lightrag_svc is not None:
+            lightrag_context = _run_async(lightrag_svc.aquery(query))
+            if lightrag_context:
+                lightrag_used = True
+                logger.info("LightRAG context retrieved for query: %s", query[:60])
+    except Exception:
+        logger.warning(
+            "LightRAG query failed — falling back to keyword search only. Query: %s",
+            query[:60],
+            exc_info=True,
+        )
+
+    if lightrag_used:
+        logger.info("Chat response will use LightRAG + keyword search context")
+    else:
+        logger.info("Chat response using keyword search only (LightRAG unavailable or no results)")
+
     elapsed = round(time.time() - start_time, 2)
 
     yield _sse_event("tool_call_delta", {"content": f"正在检索「{query}」..."})
@@ -261,6 +324,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
         "results": search_results,
         "count": len(search_results),
         "elapsed": elapsed,
+        "lightrag_used": lightrag_used,
     }
     yield _sse_event("tool_call_result", tool_result_data)
 
@@ -272,7 +336,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     if use_llm:
         try:
             client = _get_client()
-            system_prompt = _build_system_prompt(query, search_results)
+            system_prompt = _build_system_prompt(query, search_results, lightrag_context)
 
             yield _sse_event("answer_start", {})
 
