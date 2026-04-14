@@ -104,16 +104,26 @@ def update_session_title(db: Session, session_id: int, title: str) -> None:
 
 def delete_sessions(db: Session, user_id: int, session_ids: list[int]) -> int:
     """Delete sessions by IDs (only if they belong to the user). Returns count deleted."""
-    count = (
-        db.query(ChatSession)
-        .filter(
-            ChatSession.id.in_(session_ids),
-            ChatSession.user_id == user_id,
-        )
-        .delete(synchronize_session="fetch")
+    from sqlalchemy import text
+    if not session_ids:
+        return 0
+    placeholders = ",".join(f":id{i}" for i in range(len(session_ids)))
+    params = {f"id{i}": sid for i, sid in enumerate(session_ids)}
+    params["uid"] = user_id
+    # Delete messages first, then sessions
+    db.execute(
+        text(
+            f"DELETE FROM chat_messages WHERE session_id IN "
+            f"(SELECT id FROM chat_sessions WHERE id IN ({placeholders}) AND user_id = :uid)"
+        ),
+        params,
+    )
+    result = db.execute(
+        text(f"DELETE FROM chat_sessions WHERE id IN ({placeholders}) AND user_id = :uid"),
+        params,
     )
     db.commit()
-    return count
+    return result.rowcount
 
 
 def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
