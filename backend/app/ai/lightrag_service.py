@@ -3,10 +3,14 @@
 Uses Ollama for both LLM (qwen2.5:7b) and embedding (bge-m3).
 The working directory stores persistent index files so the graph only needs
 to be built once (via scripts/build_lightrag_index.py).
+
+IMPORTANT: LightRAG v1.4+ requires ``await rag.initialize_storages()`` before
+any insert or query.  This service handles that transparently.
 """
 
+import asyncio
 import logging
-import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +20,26 @@ logger = logging.getLogger(__name__)
 
 # Module-level singleton
 _instance: Optional["LightRAGService"] = None
+
+
+def _run_async(coro):
+    """Run an async coroutine in a background thread with its own event loop."""
+    result = None
+    exc = None
+
+    def _target():
+        nonlocal result, exc
+        try:
+            result = asyncio.run(coro)
+        except Exception as e:
+            exc = e
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join(timeout=300)  # 5 min timeout for heavy operations
+    if exc is not None:
+        raise exc
+    return result
 
 
 class LightRAGService:
@@ -43,7 +67,23 @@ class LightRAGService:
             llm_model_func=ollama_model_complete,
             llm_model_name=llm_model,
             embedding_func=ollama_embed,
+            # Local Ollama with bge-m3 is slower than cloud APIs;
+            # increase timeouts to avoid worker timeouts during index build.
+            default_embedding_timeout=300,   # 5 min per embedding batch
+            default_llm_timeout=300,         # 5 min per LLM call
         )
+
+        # LightRAG v1.4+ requires explicit storage initialization
+        self._initialized = False
+        _run_async(self._initialize_storages())
+
+    async def _initialize_storages(self) -> None:
+        """Initialize LightRAG storages (required before insert/query in v1.4+)."""
+        if self._initialized:
+            return
+        await self._rag.initialize_storages()
+        self._initialized = True
+        logger.info("LightRAG storages initialized successfully")
 
     # ── public helpers ──────────────────────────────────────────────
 
@@ -55,6 +95,9 @@ class LightRAGService:
         from lightrag.lightrag import QueryParam
 
         try:
+            if not self._initialized:
+                await self._initialize_storages()
+
             result = await self._rag.aquery(
                 question,
                 param=QueryParam(mode="hybrid", only_need_context=False),
@@ -73,6 +116,9 @@ class LightRAGService:
 
     async def ainsert(self, texts: list[str]) -> None:
         """Insert a list of text documents into the knowledge graph."""
+        if not self._initialized:
+            await self._initialize_storages()
+
         for text in texts:
             if not text.strip():
                 continue
