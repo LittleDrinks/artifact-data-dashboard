@@ -1,0 +1,126 @@
+{
+  "summary": {
+    "total_files": 757,
+    "valid_files": 757,
+    "invalid_files": 0,
+    "duplicate_count": 8
+  },
+  "field_fill_rates": {
+    "era": {
+      "filled": 281,
+      "empty": 476,
+      "rate": 37.1
+    },
+    "location": {
+      "filled": 84,
+      "empty": 673,
+      "rate": 11.1
+    },
+    "museum": {
+      "filled": 103,
+      "empty": 654,
+      "rate": 13.6
+    },
+    "material": {
+      "filled": 19,
+      "empty": 738,
+      "rate": 2.5
+    },
+    "dimensions": {
+      "filled": 55,
+      "empty": 702,
+      "rate": 7.3
+    },
+    "summary": {
+      "filled": 548,
+      "empty": 209,
+      "rate": 72.4
+    },
+    "full_text": {
+      "filled": 549,
+      "empty": 208,
+      "rate": 72.5
+    },
+    "infobox": {
+      "filled": 431,
+      "empty": 326,
+      "rate": 56.9
+    },
+    "image_url": {
+      "filled": 0,
+      "empty": 757,
+      "rate": 0.0
+    }
+  },
+  "issue_counts": {
+    "疑似非文物": 285,
+    "年代异常": 35
+  },
+  "duplicates": [
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E4%BA%94%E7%89%9B%E5%9C%96",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\五牛图.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\五牛圖.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E4%BC%AF%E9%81%A0%E5%B8%96",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\伯远帖.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\伯遠帖.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E5%BC%B5%E5%A5%BD%E5%A5%BD%E8%A9%A9",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\张好好诗.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\張好好詩.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E6%99%AF%E9%9B%B2%E9%90%98",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\景云钟.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\景雲鐘.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E6%B8%85%E6%98%8E%E4%B8%8A%E6%B2%B3%E5%9C%96",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\清明上河图.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\清明上河圖.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E7%AB%B9%E6%9E%97%E4%B8%83%E8%B3%A2%E8%88%87%E6%A6%AE%E5%95%9F%E6%9C%9F",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\竹林七賢與榮啟期.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\竹林七贤与荣启期.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E8%B6%99%E4%BD%B6%E8%8D%89%E6%9B%B8%E5%8D%83%E5%AD%97%E6%96%87",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\赵佶草书千字文.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\趙佶草書千字文.json"
+      ]
+    },
+    {
+      "type": "url",
+      "value": "https://zh.wikipedia.org/wiki/%E9%91%84%E5%AE%A2%E9%8A%85%E9%BC%8E",
+      "files": [
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\鑄客銅鼎.json",
+        "E:\\shared\\workplace\\ADD_new\\data\\artifacts_detail\\铸客铜鼎.json"
+      ]
+    }
+  ],
+  "invalid_files": []
+}
