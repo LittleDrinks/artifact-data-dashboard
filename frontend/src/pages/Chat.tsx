@@ -473,7 +473,7 @@ export default function Chat() {
   };
 
   return (
-    <div style={{ display: 'flex', flex: '1 1 0%', minHeight: 0, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flex: '1 1 0%', maxHeight: 'calc(100vh - 56px - 64px)', minHeight: 0, overflow: 'hidden' }}>
       {/* ── Chat Area ── */}
       <div
         style={{
