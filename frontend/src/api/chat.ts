@@ -72,6 +72,12 @@ export async function getChatMessages(sessionId: number): Promise<ChatMessageInf
   return res.data;
 }
 
+/** 批量删除会话 */
+export async function deleteChatSessions(ids: number[]): Promise<{ deleted: number }> {
+  const res = await client.delete('/chat/sessions', { params: { ids: ids.join(',') } });
+  return res.data;
+}
+
 /**
  * 发送聊天消息（SSE 流式）。
  * 因为 POST SSE 不能用 EventSource，使用 fetch + ReadableStream。

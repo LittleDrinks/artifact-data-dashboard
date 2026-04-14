@@ -68,6 +68,29 @@ def get_messages(
     return messages
 
 
+@router.delete("/sessions")
+def delete_sessions(
+    ids: str = Query(..., description="逗号分隔的会话ID列表"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量删除会话"""
+    try:
+        session_ids = [int(i.strip()) for i in ids.split(",") if i.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ids 格式错误，应为逗号分隔的数字",
+        )
+    if not session_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ids 不能为空",
+        )
+    count = chat_service.delete_sessions(db, current_user.id, session_ids)
+    return {"deleted": count}
+
+
 @router.post("/ask")
 def ask_question(
     data: ChatAskRequest,

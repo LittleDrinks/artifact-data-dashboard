@@ -102,6 +102,20 @@ def update_session_title(db: Session, session_id: int, title: str) -> None:
         db.commit()
 
 
+def delete_sessions(db: Session, user_id: int, session_ids: list[int]) -> int:
+    """Delete sessions by IDs (only if they belong to the user). Returns count deleted."""
+    count = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id.in_(session_ids),
+            ChatSession.user_id == user_id,
+        )
+        .delete(synchronize_session="fetch")
+    )
+    db.commit()
+    return count
+
+
 def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
     """Keyword search across artifacts table using jieba word segmentation."""
     # Extract keywords from the query using jieba

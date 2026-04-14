@@ -6,6 +6,7 @@ import {
   Empty,
   message,
   Drawer,
+  Popconfirm,
 } from 'antd';
 import {
   SendOutlined,
@@ -17,11 +18,13 @@ import {
   LoadingOutlined,
   MenuFoldOutlined,
   CheckCircleFilled,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
   getChatMessages,
   sendChatMessage,
+  deleteChatSessions,
   type ChatSessionInfo,
   type ChatMessageInfo,
   type SSEEventData,
@@ -62,6 +65,7 @@ export default function Chat() {
   const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Messages
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -166,11 +170,30 @@ export default function Chat() {
   const handleSelectSession = useCallback(
     (session: ChatSessionInfo) => {
       setActiveSessionId(session.id);
+      setSelectedIds(new Set());
       setHistoryVisible(false);
       loadSessionMessages(session.id);
     },
     [loadSessionMessages],
   );
+
+  // ── Delete selected sessions ──
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      const ids = Array.from(selectedIds);
+      await deleteChatSessions(ids);
+      message.success(`已删除 ${ids.length} 条会话`);
+      if (ids.includes(activeSessionId!)) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+      setSelectedIds(new Set());
+      loadSessions();
+    } catch {
+      message.error('删除失败');
+    }
+  }, [selectedIds, activeSessionId, loadSessions]);
 
   // ── New session ──
   const handleNewSession = useCallback(() => {
@@ -951,14 +974,65 @@ export default function Chat() {
       <Drawer
         title="历史记录"
         placement="left"
-        onClose={() => setHistoryVisible(false)}
+        onClose={() => { setHistoryVisible(false); setSelectedIds(new Set()); }}
         open={historyVisible}
         width={300}
         styles={{
-          body: { padding: 0 },
+          body: { padding: 0, display: 'flex', flexDirection: 'column' },
         }}
       >
-        <div style={{ padding: '8px 0' }}>
+        {/* Batch actions bar */}
+        {sessions.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 16px',
+              borderBottom: '1px solid #e5edf5',
+              fontSize: 12,
+            }}
+          >
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: '#64748d' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={selectedIds.size === sessions.length && sessions.length > 0}
+                onChange={() => {
+                  if (selectedIds.size === sessions.length) {
+                    setSelectedIds(new Set());
+                  } else {
+                    setSelectedIds(new Set(sessions.map((s) => s.id)));
+                  }
+                }}
+                style={{ accentColor: '#533afd' }}
+              />
+              全选
+            </label>
+            {selectedIds.size > 0 && (
+              <Popconfirm
+                title={`确定删除 ${selectedIds.size} 条会话？`}
+                onConfirm={handleDeleteSelected}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                >
+                  删除 ({selectedIds.size})
+                </Button>
+              </Popconfirm>
+            )}
+          </div>
+        )}
+
+        <div style={{ padding: '8px 0', flex: 1, overflowY: 'auto' }}>
           {sessions.length === 0 ? (
             <Empty
               description="暂无历史记录"
@@ -966,43 +1040,71 @@ export default function Chat() {
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           ) : (
-            sessions.map((s) => (
-              <div
-                key={s.id}
-                onClick={() => handleSelectSession(s)}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: 13,
-                  color: s.id === activeSessionId ? '#533afd' : '#64748d',
-                  cursor: 'pointer',
-                  background:
-                    s.id === activeSessionId ? 'rgba(83,58,253,0.05)' : 'transparent',
-                  transition: 'all 0.12s',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  borderLeft:
-                    s.id === activeSessionId
-                      ? '3px solid #533afd'
-                      : '3px solid transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (s.id !== activeSessionId) {
-                    (e.target as HTMLElement).style.background = '#f0f4f8';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (s.id !== activeSessionId) {
-                    (e.target as HTMLElement).style.background = 'transparent';
-                  }
-                }}
-              >
-                {s.title || '新对话'}
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
-                  {new Date(s.created_at).toLocaleString('zh-CN')}
+            sessions.map((s) => {
+              const checked = selectedIds.has(s.id);
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    if (selectedIds.size === 0) {
+                      handleSelectSession(s);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    color: s.id === activeSessionId ? '#533afd' : '#64748d',
+                    cursor: selectedIds.size > 0 ? 'default' : 'pointer',
+                    background: checked
+                      ? 'rgba(83,58,253,0.05)'
+                      : s.id === activeSessionId
+                        ? 'rgba(83,58,253,0.05)'
+                        : 'transparent',
+                    borderLeft:
+                      s.id === activeSessionId
+                        ? '3px solid #533afd'
+                        : '3px solid transparent',
+                    transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!checked && s.id !== activeSessionId) {
+                      (e.currentTarget as HTMLElement).style.background = '#f0f4f8';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!checked && s.id !== activeSessionId) {
+                      (e.currentTarget as HTMLElement).style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(s.id)) next.delete(s.id);
+                        else next.add(s.id);
+                        return next;
+                      });
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ accentColor: '#533afd', marginTop: 3, flexShrink: 0 }}
+                  />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.title || '新对话'}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                      {new Date(s.created_at).toLocaleString('zh-CN')}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </Drawer>
