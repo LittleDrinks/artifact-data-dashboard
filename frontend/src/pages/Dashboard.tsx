@@ -18,6 +18,7 @@ import type {
   CategoryStat,
   WordCloudItem,
 } from '../api/stats';
+import { PIE_COLORS, WORD_CLOUD_COLORS } from '../constants/colors';
 import {
   BarChart,
   Bar,
@@ -30,35 +31,6 @@ import {
   Cell,
   type PieLabelRenderProps,
 } from 'recharts';
-
-/* ── constants ── */
-const PIE_COLORS = [
-  '#533afd',
-  '#2874ad',
-  '#3d8b37',
-  '#9a6324',
-  '#c45100',
-  '#d32f2f',
-  '#7c5e10',
-  '#6366f1',
-  '#0ea5e9',
-  '#f59e0b',
-  '#10b981',
-  '#ec4899',
-];
-
-const WORD_CLOUD_COLORS = [
-  '#533afd',
-  '#9a6324',
-  '#3d8b37',
-  '#c45100',
-  '#2874ad',
-  '#d32f2f',
-  '#7c5e10',
-  '#061b31',
-  '#64748d',
-  '#6366f1',
-];
 
 /* ── sub-components ── */
 

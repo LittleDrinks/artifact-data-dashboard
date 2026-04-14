@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Form, Input, Button, Card, message, Tabs } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
@@ -47,10 +47,12 @@ export default function Login() {
   };
 
   // 如果已登录，跳转首页
-  const token = localStorage.getItem('token');
-  if (token) {
-    navigate('/', { replace: true });
-  }
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      navigate('/', { replace: true });
+    }
+  }, [navigate]);
 
   return (
     <div

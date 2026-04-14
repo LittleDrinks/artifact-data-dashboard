@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Table, Button, Input, Select, Space, Card, Tag, Modal, Form,
-  message, Popconfirm, Tooltip, Row, Col, Empty,
+  message, Popconfirm, Tooltip, Row, Col, Empty, Skeleton,
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, EditOutlined,
@@ -15,16 +15,7 @@ import {
 } from '../api/artifacts';
 import { getStatsByCategory, getStatsByEra, getStatsByLocation } from '../api/stats';
 import { useAuth } from '../hooks/useAuth';
-
-/** 类别对应的颜色 */
-const CATEGORY_COLORS: Record<string, string> = {
-  '青铜器': '#9a6324',
-  '玉器': '#3d8b37',
-  '陶瓷': '#c45100',
-  '金银器': '#7c5e10',
-  '书画': '#2874ad',
-  '兵器': '#d32f2f',
-};
+import { CATEGORY_COLORS } from '../constants/colors';
 
 export default function Artifacts() {
   const navigate = useNavigate();
@@ -149,8 +140,8 @@ export default function Artifacts() {
       setModalOpen(false);
       form.resetFields();
       fetchData();
-    } catch (err: any) {
-      if (err?.errorFields) return; // 表单验证失败
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'errorFields' in err) return; // 表单验证失败
       message.error(editingArtifact ? '更新失败' : '创建失败');
     } finally {
       setConfirmLoading(false);
@@ -169,7 +160,7 @@ export default function Artifacts() {
   };
 
   /** 表格列定义 */
-  const columns: ColumnsType<Artifact> = [
+  const columns: ColumnsType<Artifact> = useMemo(() => [
     {
       title: '名称',
       dataIndex: 'name',
@@ -252,7 +243,7 @@ export default function Artifacts() {
         </Space>
       ),
     },
-  ];
+  ], [navigate, isAdmin, isAuthenticated]);
 
   return (
     <div>
@@ -338,6 +329,27 @@ export default function Artifacts() {
       </div>
 
       {/* 数据表格 */}
+      {loading ? (
+        <Card
+          style={{
+            borderRadius: 'var(--r-card)',
+            border: '1px solid var(--border)',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: '16px 24px' }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton
+                key={i}
+                active
+                title={{ width: '60%' }}
+                paragraph={{ rows: 1, width: ['40%'] }}
+                style={{ marginBottom: i < 4 ? 16 : 0 }}
+              />
+            ))}
+          </div>
+        </Card>
+      ) : (
       <Card
         style={{
           borderRadius: 'var(--r-card)',
@@ -350,7 +362,7 @@ export default function Artifacts() {
           columns={columns}
           dataSource={data}
           rowKey="id"
-          loading={loading}
+          loading={false}
           size="middle"
           locale={{ emptyText: <Empty description="暂无文物数据" /> }}
           pagination={{
@@ -376,6 +388,7 @@ export default function Artifacts() {
           })}
         />
       </Card>
+      )}
 
       {/* 新建 / 编辑弹窗 */}
       <Modal

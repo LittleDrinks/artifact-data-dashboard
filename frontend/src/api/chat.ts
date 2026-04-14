@@ -117,26 +117,25 @@ export async function sendChatMessage(
     buffer += decoder.decode(value, { stream: true });
 
     // Parse SSE format: "data: {...}\n\n"
+    // Only process complete lines (ending with \n); keep the tail in buffer
     const lines = buffer.split('\n');
-    buffer = '';
+    // Last element is either an incomplete line (no trailing \n) or empty string (trailing \n)
+    buffer = lines.pop() ?? '';
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
       if (line.startsWith('data: ')) {
         const jsonStr = line.slice(6);
+        // Skip SSE keep-alive empty data lines (data: )
+        if (jsonStr === '') continue;
         try {
           const event: SSEEventData = JSON.parse(jsonStr);
           onEvent?.(event);
         } catch {
-          // Incomplete JSON, buffer it
-          buffer = line + '\n';
+          // Incomplete JSON — unlikely for complete lines, but safe to ignore
         }
-      } else if (line === '' && i > 0) {
-        // Empty line = event delimiter, ignore
-      } else if (line !== '') {
-        // Might be continuation, buffer it
-        buffer += lines[i] + '\n';
       }
+      // All other lines (empty delimiters, comments) are ignored
     }
   }
 }

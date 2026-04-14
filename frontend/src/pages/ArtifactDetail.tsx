@@ -10,16 +10,7 @@ import {
 import { getArtifact, updateArtifact, deleteArtifact, type Artifact, type ArtifactFormData } from '../api/artifacts';
 import { getStatsByCategory, getStatsByEra } from '../api/stats';
 import { useAuth } from '../hooks/useAuth';
-
-/** 类别对应的颜色 */
-const CATEGORY_COLORS: Record<string, string> = {
-  '青铜器': '#9a6324',
-  '玉器': '#3d8b37',
-  '陶瓷': '#c45100',
-  '金银器': '#7c5e10',
-  '书画': '#2874ad',
-  '兵器': '#d32f2f',
-};
+import { CATEGORY_COLORS } from '../constants/colors';
 
 export default function ArtifactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -101,8 +92,8 @@ export default function ArtifactDetail() {
       setArtifact(updated);
       message.success('更新成功');
       setEditOpen(false);
-    } catch (err: any) {
-      if (err?.errorFields) return;
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'errorFields' in err) return;
       message.error('更新失败');
     } finally {
       setEditLoading(false);

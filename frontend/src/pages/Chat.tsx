@@ -281,8 +281,9 @@ export default function Chat() {
             break;
         }
       });
-    } catch (err: any) {
-      message.error(err.message || '发送失败');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '发送失败';
+      message.error(msg);
       // Remove the empty assistant message
       setMessages((prev) => prev.filter((m) => m.id !== assistantId));
       setLoading(false);
@@ -291,7 +292,7 @@ export default function Chat() {
 
   // ── Keyboard shortcut ──
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !loading) {
       e.preventDefault();
       handleSend();
     }
