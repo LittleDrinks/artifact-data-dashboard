@@ -21,6 +21,7 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import * as d3 from 'd3';
 import {
   getFullGraph,
@@ -85,6 +86,7 @@ export default function Graph() {
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const [searchParams] = useSearchParams();
 
   /* ── State ── */
   const [loading, setLoading] = useState(true);
@@ -150,9 +152,20 @@ export default function Graph() {
 
   /* ── Initial load ── */
   useEffect(() => {
-    fetchGraph(nodeLimit);
+    const searchParam = searchParams.get('search');
+    if (searchParam) {
+      setSearchKeyword(searchParam);
+      setActiveSearchKeyword(searchParam);
+      setLoading(true);
+      searchGraph(searchParam)
+        .then(setGraphData)
+        .catch(() => message.error('搜索失败'))
+        .finally(() => setLoading(false));
+    } else {
+      fetchGraph(nodeLimit);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   /* ── D3 render effect ── */
   useEffect(() => {

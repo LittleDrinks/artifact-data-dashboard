@@ -164,7 +164,7 @@ export default function ArtifactDetail() {
           )}
           <Button
             icon={<LinkOutlined />}
-            onClick={() => navigate('/graph')}
+            onClick={() => navigate('/graph?search=' + encodeURIComponent(artifact.name))}
           >
             在图谱中查看
           </Button>
