@@ -77,7 +77,9 @@ export default function Chat() {
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<any>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -94,9 +96,17 @@ export default function Chat() {
   }, [loadSessions]);
 
   // ── Auto-scroll ──
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    setIsAtBottom(atBottom);
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (isAtBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isAtBottom]);
 
   // ── Load session messages ──
   const loadSessionMessages = useCallback(async (sessionId: number) => {
@@ -482,6 +492,8 @@ export default function Chat() {
 
         {/* Messages */}
         <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
           style={{
             flex: 1,
             overflowY: 'auto',

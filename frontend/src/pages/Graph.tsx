@@ -91,6 +91,7 @@ export default function Graph() {
   const [graphData, setGraphData] = useState<GraphDataResponse | null>(null);
   const [nodeLimit, setNodeLimit] = useState(100);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [activeSearchKeyword, setActiveSearchKeyword] = useState('');
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -118,10 +119,12 @@ export default function Graph() {
 
   const handleSearch = useCallback(async () => {
     if (!searchKeyword.trim()) {
+      setActiveSearchKeyword('');
       fetchGraph(nodeLimit);
       return;
     }
     setLoading(true);
+    setActiveSearchKeyword(searchKeyword.trim());
     try {
       const data = await searchGraph(searchKeyword.trim());
       setGraphData(data);
@@ -300,8 +303,33 @@ export default function Graph() {
       .append('circle')
       .attr('r', (d) => d.r)
       .attr('fill', (d) => resolveColor(d.type))
-      .attr('stroke', '#fff')
-      .attr('stroke-width', 2);
+      .attr('stroke', (d) => {
+        if (!activeSearchKeyword) return '#fff';
+        const kw = activeSearchKeyword.toLowerCase();
+        const match = d.name.toLowerCase().includes(kw) ||
+          (d.properties && Object.values(d.properties).some(
+            (v) => v != null && String(v).toLowerCase().includes(kw)
+          ));
+        return match ? '#533afd' : '#fff';
+      })
+      .attr('stroke-width', (d) => {
+        if (!activeSearchKeyword) return 2;
+        const kw = activeSearchKeyword.toLowerCase();
+        const match = d.name.toLowerCase().includes(kw) ||
+          (d.properties && Object.values(d.properties).some(
+            (v) => v != null && String(v).toLowerCase().includes(kw)
+          ));
+        return match ? 3 : 2;
+      })
+      .attr('opacity', (d) => {
+        if (!activeSearchKeyword) return 1;
+        const kw = activeSearchKeyword.toLowerCase();
+        const match = d.name.toLowerCase().includes(kw) ||
+          (d.properties && Object.values(d.properties).some(
+            (v) => v != null && String(v).toLowerCase().includes(kw)
+          ));
+        return match ? 1 : 0.3;
+      });
 
     // Node labels
     nodeSel
@@ -312,6 +340,15 @@ export default function Graph() {
       .attr('font-size', 10)
       .attr('fill', '#061b31')
       .attr('font-weight', 400)
+      .attr('opacity', (d) => {
+        if (!activeSearchKeyword) return 1;
+        const kw = activeSearchKeyword.toLowerCase();
+        const match = d.name.toLowerCase().includes(kw) ||
+          (d.properties && Object.values(d.properties).some(
+            (v) => v != null && String(v).toLowerCase().includes(kw)
+          ));
+        return match ? 1 : 0.3;
+      })
       .style('pointer-events', 'none')
       .style('user-select', 'none');
 
@@ -357,7 +394,7 @@ export default function Graph() {
       simulation.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData]);
+  }, [graphData, activeSearchKeyword]);
 
   /* ── Update force params without re-rendering the whole graph ── */
   useEffect(() => {
@@ -481,7 +518,7 @@ export default function Graph() {
               border: '1px solid var(--border)',
             }}
           >
-            {graphData.total_nodes} 节点 · {graphData.total_links} 关系
+            {graphData.total_nodes} 个文物 · {graphData.total_links} 关系
           </div>
         )}
 
@@ -540,7 +577,7 @@ export default function Graph() {
           title={
             <span style={{ fontWeight: 510, fontSize: 14 }}>
               <SearchOutlined style={{ marginRight: 6 }} />
-              搜索节点
+              搜索文物
             </span>
           }
           style={{
@@ -550,7 +587,7 @@ export default function Graph() {
           }}
         >
           <Input.Search
-            placeholder="输入关键词搜索节点..."
+            placeholder="输入关键词搜索文物..."
             value={searchKeyword}
             onChange={(e) => setSearchKeyword(e.target.value)}
             onSearch={handleSearch}
@@ -563,6 +600,7 @@ export default function Graph() {
             style={{ marginTop: 8, padding: 0 }}
             onClick={() => {
               setSearchKeyword('');
+              setActiveSearchKeyword('');
               fetchGraph(nodeLimit);
             }}
           >
@@ -701,7 +739,7 @@ export default function Graph() {
           title={
             <span style={{ fontWeight: 510, fontSize: 14 }}>
               <InfoCircleOutlined style={{ marginRight: 6 }} />
-              节点详情
+              文物详情
             </span>
           }
           style={{
@@ -763,7 +801,7 @@ export default function Graph() {
                   marginBottom: 8,
                 }}
               >
-                关联节点 ({selectedNode.neighbors.length})
+                关联文物 ({selectedNode.neighbors.length})
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {selectedNode.neighbors.map((neighbor) => (
@@ -839,7 +877,7 @@ export default function Graph() {
           ) : (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="点击节点查看详情"
+              description="点击文物查看详情"
               style={{ padding: '12px 0' }}
             />
           )}

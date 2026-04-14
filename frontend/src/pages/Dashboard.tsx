@@ -1,4 +1,4 @@
-import { Card, Row, Col, Statistic, Spin } from 'antd';
+import { Card, Row, Col, Statistic, Spin, Empty, Tooltip as AntTooltip } from 'antd';
 import {
   AppstoreOutlined,
   CalendarOutlined,
@@ -18,7 +18,7 @@ import type {
   CategoryStat,
   WordCloudItem,
 } from '../api/stats';
-import { PIE_COLORS, WORD_CLOUD_COLORS } from '../constants/colors';
+import { PIE_COLORS } from '../constants/colors';
 import {
   BarChart,
   Bar,
@@ -145,6 +145,8 @@ function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
         <div style={{ textAlign: 'center', padding: 40 }}>
           <Spin />
         </div>
+      ) : data.length === 0 ? (
+        <Empty description="暂无年代数据" style={{ padding: '40px 0' }} />
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
@@ -303,6 +305,12 @@ function WordCloud({ data }: { data: WordCloudItem[] }) {
   const minWeight = Math.min(...data.map((d) => d.weight));
   const range = maxWeight - minWeight || 1;
 
+  const GRADIENT_COLORS = [
+    '#533afd', '#6366f1', '#2874ad', '#3d8b37',
+    '#0ea5e9', '#10b981', '#9a6324', '#f59e0b',
+    '#c45100', '#ec4899',
+  ];
+
   return (
     <div
       style={{
@@ -310,36 +318,43 @@ function WordCloud({ data }: { data: WordCloudItem[] }) {
         flexWrap: 'wrap',
         justifyContent: 'center',
         alignItems: 'center',
-        gap: '6px 12px',
-        padding: '16px 0',
-        minHeight: 160,
+        gap: '8px 16px',
+        padding: '20px 0',
+        minHeight: 180,
       }}
     >
       {data.map((item, idx) => {
         const ratio = (item.weight - minWeight) / range;
-        const fontSize = 12 + ratio * 20;
-        const color =
-          WORD_CLOUD_COLORS[idx % WORD_CLOUD_COLORS.length];
+        const fontSize = 13 + ratio * 22;
+        const fontWeight = Math.round(300 + ratio * 400); // 300–700
+        const color = GRADIENT_COLORS[idx % GRADIENT_COLORS.length];
         return (
-          <span
-            key={item.word}
-            style={{
-              fontSize,
-              color,
-              fontWeight: ratio > 0.6 ? 510 : 400,
-              cursor: 'default',
-              transition: 'transform 0.2s',
-              lineHeight: 1.4,
-            }}
-            onMouseEnter={(e) => {
-              (e.target as HTMLElement).style.transform = 'scale(1.15)';
-            }}
-            onMouseLeave={(e) => {
-              (e.target as HTMLElement).style.transform = 'scale(1)';
-            }}
-          >
-            {item.word}
-          </span>
+          <AntTooltip key={item.word} title={`词频: ${item.weight}`}>
+            <span
+              style={{
+                fontSize,
+                color,
+                fontWeight,
+                cursor: 'default',
+                transition: 'transform 0.2s, opacity 0.2s',
+                lineHeight: 1.5,
+                padding: '2px 4px',
+                opacity: 0.85,
+              }}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.transform = 'scale(1.18)';
+                el.style.opacity = '1';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLElement;
+                el.style.transform = 'scale(1)';
+                el.style.opacity = '0.85';
+              }}
+            >
+              {item.word}
+            </span>
+          </AntTooltip>
         );
       })}
     </div>
