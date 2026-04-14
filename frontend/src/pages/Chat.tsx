@@ -530,6 +530,7 @@ export default function Chat() {
           onScroll={handleScroll}
           style={{
             flex: 1,
+            minHeight: 0,
             overflowY: 'auto',
             padding: 24,
             display: 'flex',
