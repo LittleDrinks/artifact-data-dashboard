@@ -192,7 +192,7 @@ export default function MainLayout() {
         </Header>
 
         {/* 内容区 */}
-        <Content style={{ padding: 'var(--content-pad)', flex: 1 }}>
+        <Content style={{ padding: 'var(--content-pad)', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </Layout>

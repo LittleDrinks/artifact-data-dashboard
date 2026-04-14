@@ -1,3 +1,4 @@
+import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Input,
@@ -112,16 +113,37 @@ export default function Chat() {
   const loadSessionMessages = useCallback(async (sessionId: number) => {
     try {
       const msgs: ChatMessageInfo[] = await getChatMessages(sessionId);
-      const displayMsgs: DisplayMessage[] = msgs.map((m) => ({
-        id: generateId(),
-        role: m.role as 'user' | 'assistant',
-        content: m.content || '',
-        thinking: '',
-        thinkingDone: true,
-        toolCall: null,
-        sources: [],
-        streaming: false,
-      }));
+      const displayMsgs: DisplayMessage[] = msgs.map((m) => {
+        // Parse tool_calls JSON if available
+        let toolCall: DisplayMessage['toolCall'] = null;
+        if (m.tool_calls) {
+          try {
+            const tcData = JSON.parse(m.tool_calls);
+            if (tcData.results && tcData.count) {
+              toolCall = {
+                tool: 'search_artifacts',
+                query: '', // Query is not stored in tool_calls
+                results: tcData.results as SearchResultItem[],
+                count: tcData.count,
+                elapsed: tcData.elapsed || 0,
+                done: true,
+              };
+            }
+          } catch {
+            // Invalid JSON, ignore
+          }
+        }
+        return {
+          id: generateId(),
+          role: m.role as 'user' | 'assistant',
+          content: m.content || '',
+          thinking: '', // Thinking text is not stored in DB
+          thinkingDone: true,
+          toolCall,
+          sources: toolCall?.results?.map((r) => ({ name: r.name, source: '文物数据库' })) || [],
+          streaming: false,
+        };
+      });
       setMessages(displayMsgs);
     } catch {
       setMessages([]);
@@ -622,8 +644,29 @@ export default function Chat() {
                 )}
 
                 {/* Content */}
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
+                <div>
+                  {msg.role === 'assistant' ? (
+                    <ReactMarkdown
+                      components={{
+                        // Style for markdown elements
+                        p: ({ children }) => <p style={{ margin: 0, lineHeight: 1.7 }}>{children}</p>,
+                        strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
+                        em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
+                        ul: ({ children }) => <ul style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ul>,
+                        ol: ({ children }) => <ol style={{ margin: '8px 0', paddingLeft: 20 }}>{children}</ol>,
+                        li: ({ children }) => <li style={{ margin: '4px 0' }}>{children}</li>,
+                        code: ({ children }) => (
+                          <code style={{ background: '#f0f4f8', padding: '2px 6px', borderRadius: 4, fontSize: 13 }}>
+                            {children}
+                          </code>
+                        ),
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                  )}
                   {msg.streaming && (
                     <span
                       style={{

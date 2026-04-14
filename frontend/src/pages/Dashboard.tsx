@@ -124,9 +124,49 @@ function StatCards({
   );
 }
 
+/* ── Era Order for historical sorting ── */
+
+const ERA_ORDER: readonly string[] = [
+  '新石器时代',
+  '夏',
+  '商',
+  '西周',
+  '东周',
+  '春秋',
+  '战国',
+  '秦',
+  '西汉',
+  '东汉',
+  '三国',
+  '晋',
+  '南北朝',
+  '隋',
+  '唐',
+  '五代',
+  '北宋',
+  '南宋',
+  '元',
+  '明',
+  '清',
+  '民国',
+];
+
 /* ── Bar Chart: era distribution ── */
 
 function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
+  // Sort era data by historical order
+  const sortedData = useMemo(() => {
+    return [...data].sort((a, b) => {
+      const aIdx = ERA_ORDER.indexOf(a.era);
+      const bIdx = ERA_ORDER.indexOf(b.era);
+      // Unknown eras go to the end
+      if (aIdx === -1 && bIdx === -1) return 0;
+      if (aIdx === -1) return 1;
+      if (bIdx === -1) return -1;
+      return aIdx - bIdx;
+    });
+  }, [data]);
+
   return (
     <Card
       title={
@@ -145,11 +185,11 @@ function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
         <div style={{ textAlign: 'center', padding: 40 }}>
           <Spin />
         </div>
-      ) : data.length === 0 ? (
+      ) : sortedData.length === 0 ? (
         <Empty description="暂无年代数据" style={{ padding: '40px 0' }} />
       ) : (
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+          <BarChart data={sortedData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
             <XAxis
               dataKey="era"
               tick={{ fontSize: 12, fill: '#64748d' }}
@@ -263,9 +303,13 @@ function CategoryPieChart({
                 paddingAngle={2}
                 dataKey="value"
                 label={(props: PieLabelRenderProps) => {
-                  const name = (props.name as string) ?? '';
                   const percent = ((props.percent as number) ?? 0) * 100;
-                  return `${name} ${percent.toFixed(0)}%`;
+                  // Only show label if percentage >= 5%
+                  if (percent >= 5) {
+                    const name = (props.name as string) ?? '';
+                    return `${name} ${percent.toFixed(0)}%`;
+                  }
+                  return '';
                 }}
                 labelLine={{ stroke: '#94a3b8' }}
               >
