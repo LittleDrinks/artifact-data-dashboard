@@ -36,6 +36,13 @@
 
 ## 3. 功能模块详细需求
 
+> **模块详细规格见 `docs/specs/` 目录：**
+> - [`specs/data-pipeline.md`](specs/data-pipeline.md) — 数据管道：采集、清洗、索引构建
+> - [`specs/knowledge-graph.md`](specs/knowledge-graph.md) — 知识图谱：可视化、图谱查询
+> - [`specs/ai-qa.md`](specs/ai-qa.md) — AI 问答：LangChain Agent、SSE 流式、System Prompt
+
+---
+
 ### 3.1 用户认证与账户管理
 
 #### 3.1.1 登录与注册
