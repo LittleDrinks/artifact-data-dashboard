@@ -56,5 +56,22 @@ logs/
 # Docker
 *.pid
 
-# Claude Code
+# Claude Code / AI tools
 .claude/
+.playwright-mcp/
+
+# Test artifacts
+test-screenshots/
+
+# Third-party / non-project content
+awesome-design-md/
+
+# Backend runtime
+backend/data/
+backend/scripts/
+backend/.env
+
+# Analysis temp files
+data_analysis_raw.txt
+data_examples.txt
+data_quality_details.txt
