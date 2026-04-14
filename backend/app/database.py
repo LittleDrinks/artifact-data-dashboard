@@ -50,6 +50,27 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _ensure_admin_user():
+    """Create a default admin user if one does not already exist."""
+    from app.models.user import User
+    from app.services.auth import hash_password
+
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == "admin").first()
+        if not admin:
+            admin = User(
+                username="admin",
+                email="admin@heritage.cn",
+                password_hash=hash_password("admin123"),
+                role="admin",
+            )
+            db.add(admin)
+            db.commit()
+    finally:
+        db.close()
+
+
 def init_db():
     """Create all tables in the database."""
     # Import all models so they are registered with Base.metadata
@@ -70,3 +91,6 @@ def init_db():
         for idx_sql in indexes:
             conn.execute(text(idx_sql))
         conn.commit()
+
+    # Ensure admin user exists
+    _ensure_admin_user()
