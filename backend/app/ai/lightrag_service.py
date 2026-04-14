@@ -1,8 +1,10 @@
 """LightRAG service — singleton wrapper for building and querying the artifact knowledge graph.
 
-Uses Ollama for both LLM (qwen2.5:7b) and embedding (bge-m3).
-The working directory stores persistent index files so the graph only needs
-to be built once (via scripts/build_lightrag_index.py).
+Supports two LLM backends:
+  - Ollama (qwen2.5:7b) — default, fully local, faster
+  - GLM-4.7 API (mydamoxing.cn) — fallback when Ollama runs out of VRAM
+
+Embedding always uses Ollama bge-m3 (~1.2 GB VRAM, stable).
 
 IMPORTANT: LightRAG v1.4+ requires ``await rag.initialize_storages()`` before
 any insert or query.  This service handles that transparently.
@@ -11,6 +13,7 @@ any insert or query.  This service handles that transparently.
 import asyncio
 import logging
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -42,12 +45,42 @@ def _run_async(coro):
     return result
 
 
+def make_deepseek_llm_func():
+    """Create an async LLM completion function using GLM API (OpenAI-compatible) for LightRAG."""
+    from lightrag.llm.openai import openai_complete_if_cache
+
+    api_key = settings.LIGHTRAG_API_KEY
+    base_url = settings.LIGHTRAG_API_BASE
+    model = settings.LIGHTRAG_MODEL_NAME
+
+    async def deepseek_complete(
+        prompt,
+        system_prompt=None,
+        history_messages=None,
+        enable_cot=False,
+        keyword_extraction=False,
+        **kwargs,
+    ):
+        return await openai_complete_if_cache(
+            model=model,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            history_messages=history_messages or [],
+            enable_cot=enable_cot,
+            keyword_extraction=keyword_extraction,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+    return deepseek_complete
+
+
 class LightRAGService:
     """Thin wrapper around lightrag.LightRAG tailored to this project."""
 
-    def __init__(self) -> None:
+    def __init__(self, use_deepseek_llm: bool = False) -> None:
         from lightrag import LightRAG
-        from lightrag.llm.ollama import ollama_model_complete, ollama_embed
+        from lightrag.llm.ollama import ollama_embed, ollama_model_complete
 
         working_dir = settings.LIGHTRAG_DIR
         Path(working_dir).mkdir(parents=True, exist_ok=True)
@@ -55,17 +88,30 @@ class LightRAGService:
         embed_model = settings.LIGHTRAG_EMBEDDING_MODEL
         llm_model = settings.LIGHTRAG_LLM_MODEL
 
-        logger.info(
-            "Initializing LightRAG — working_dir=%s, llm=%s, embed=%s",
-            working_dir,
-            llm_model,
-            embed_model,
-        )
+        if use_deepseek_llm:
+            llm_func = make_deepseek_llm_func()
+            # DeepSeek model name for logging
+            llm_name = f"deepseek:{settings.AI_MODEL_NAME}"
+            logger.info(
+                "Initializing LightRAG — working_dir=%s, llm=%s (DeepSeek API), embed=%s (Ollama)",
+                working_dir,
+                llm_name,
+                embed_model,
+            )
+        else:
+            llm_func = ollama_model_complete
+            llm_name = llm_model
+            logger.info(
+                "Initializing LightRAG — working_dir=%s, llm=%s (Ollama), embed=%s (Ollama)",
+                working_dir,
+                llm_name,
+                embed_model,
+            )
 
         self._rag = LightRAG(
             working_dir=working_dir,
-            llm_model_func=ollama_model_complete,
-            llm_model_name=llm_model,
+            llm_model_func=llm_func,
+            llm_model_name=llm_name if use_deepseek_llm else llm_model,
             embedding_func=ollama_embed,
             # Local Ollama with bge-m3 is slower than cloud APIs;
             # increase timeouts to avoid worker timeouts during index build.

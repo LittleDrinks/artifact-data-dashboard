@@ -39,12 +39,17 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
-    # AI / LLM
+    # AI / LLM — Chat Q&A (DeepSeek)
     AI_API_KEY: str = ""
     AI_API_BASE: str = "https://api.deepseek.com"
-    AI_MODEL_NAME: str = "deepseek-chat"
+    AI_MODEL_NAME: str = "deepseek-reasoner"
 
-    # LightRAG
+    # AI / LLM — LightRAG index build & query (GLM via mydamoxing)
+    LIGHTRAG_API_KEY: str = ""
+    LIGHTRAG_API_BASE: str = "https://mydamoxing.cn/v1"
+    LIGHTRAG_MODEL_NAME: str = "glm-4.7"
+
+    # LightRAG — models
     LIGHTRAG_DIR: str = ""
     LIGHTRAG_LLM_MODEL: str = "qwen2.5:7b"
     LIGHTRAG_EMBEDDING_MODEL: str = "bge-m3"

@@ -1,9 +1,11 @@
 """Chat service - session management and SSE streaming for AI Q&A.
 
-Uses DeepSeek API for LLM-powered responses with RAG context from:
+Uses DeepSeek-Reasoner for LLM-powered responses with native thinking (reasoning_content).
+RAG context from:
 1. Keyword search across the SQLite artifacts table (always available)
 2. LightRAG knowledge-graph query (hybrid mode, graceful fallback)
-SSE three-stage output: thinking -> tool_call -> answer -> done
+
+SSE stages: thinking (real LLM reasoning) -> tool_call -> answer -> done
 """
 
 import asyncio
@@ -257,37 +259,17 @@ def _build_system_prompt(query: str, search_results: list[dict], lightrag_contex
 
 def stream_chat_response(db: Session, query: str, session_id: int):
     """
-    Generator that yields SSE events for the three-stage chat flow.
-    Stages: thinking -> tool_call -> answer -> done
+    Generator that yields SSE events for the chat flow.
+    Uses DeepSeek-Reasoner for native thinking (reasoning_content) + answer.
+
+    Stages: tool_call (retrieval) → thinking (real LLM reasoning) → answer → done
     """
     start_time = time.time()
 
     # Save user message immediately to prevent data loss on stream interruption
     save_message(db, session_id, "user", query)
 
-    # ── Stage 1: Thinking (simulated, fast) ──
-    thinking_text = (
-        f"用户询问：「{query}」。正在分析问题意图，提取关键词...\n\n"
-        f"检索策略：\n"
-        f"1. 关键词提取：对问题进行分词，提取核心查询词\n"
-        f"2. 数据库检索：在文物数据库中搜索相关名称、描述、标签\n"
-        f"3. 知识图谱检索：通过LightRAG知识图谱进行语义检索\n"
-        f"4. 结果融合：综合数据库和知识图谱结果，组织回答内容\n\n"
-        f"综合检索结果，组织回答内容。"
-    )
-
-    yield _sse_event("thinking_start", {})
-    chunk_size = 12
-    for i in range(0, len(thinking_text), chunk_size):
-        chunk = thinking_text[i : i + chunk_size]
-        yield _sse_event("thinking_delta", {"content": chunk})
-        time.sleep(0.005)
-    yield _sse_event("thinking_end", {})
-
-    # ── Stage 2: Tool Call (search artifacts + LightRAG) ──
-    yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
-    time.sleep(0.05)
-
+    # ── Stage 1: Retrieval (do this FIRST, so we have context for LLM) ──
     # Keyword search (always available)
     search_results = _search_artifacts(db, query, limit=5)
 
@@ -315,10 +297,11 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     else:
         logger.info("Chat response using keyword search only (LightRAG unavailable or no results)")
 
-    elapsed = round(time.time() - start_time, 2)
+    # ── Stage 2: Tool call event (show retrieval results to user) ──
+    yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
+    time.sleep(0.05)
 
-    yield _sse_event("tool_call_delta", {"content": f"正在检索「{query}」..."})
-    time.sleep(0.03)
+    elapsed = round(time.time() - start_time, 2)
 
     tool_result_data = {
         "results": search_results,
@@ -328,18 +311,17 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     }
     yield _sse_event("tool_call_result", tool_result_data)
 
-    # ── Stage 3: Answer (DeepSeek LLM streaming) ──
+    # ── Stage 3: DeepSeek-Reasoner with native thinking + answer ──
     answer_text = ""
+    thinking_text = ""
 
-    # Try DeepSeek API; fall back to template if it fails
     use_llm = bool(settings.AI_API_KEY)
     if use_llm:
         try:
             client = _get_client()
             system_prompt = _build_system_prompt(query, search_results, lightrag_context)
 
-            yield _sse_event("answer_start", {})
-
+            # DeepSeek-Reasoner: stream both reasoning_content and content
             stream = client.chat.completions.create(
                 model=settings.AI_MODEL_NAME,
                 messages=[
@@ -347,20 +329,47 @@ def stream_chat_response(db: Session, query: str, session_id: int):
                     {"role": "user", "content": query},
                 ],
                 stream=True,
-                max_tokens=1024,
-                temperature=0.7,
+                max_tokens=4096,
             )
+
+            # Phase A: Emit real thinking from reasoning_content
+            yield _sse_event("thinking_start", {})
+            in_thinking = True
 
             for chunk in stream:
                 delta = chunk.choices[0].delta
-                if delta.content:
-                    answer_text += delta.content
-                    yield _sse_event("answer_delta", {"content": delta.content})
+
+                # DeepSeek-Reasoner sends reasoning_content before content
+                reasoning = getattr(delta, "reasoning_content", None)
+                content = delta.content
+
+                # Still in thinking phase — emit reasoning tokens
+                if reasoning:
+                    thinking_text += reasoning
+                    yield _sse_event("thinking_delta", {"content": reasoning})
+
+                # Content starts — close thinking, start answer
+                if content and in_thinking:
+                    in_thinking = False
+                    yield _sse_event("thinking_end", {})
+                    yield _sse_event("answer_start", {})
+
+                if content:
+                    answer_text += content
+                    yield _sse_event("answer_delta", {"content": content})
+
+            # Edge case: model returned only reasoning, no content
+            if in_thinking:
+                yield _sse_event("thinking_end", {})
+                yield _sse_event("answer_start", {})
 
             yield _sse_event("answer_end", {})
 
         except Exception as e:
             # LLM failed — fall back to template answer
+            logger.error("DeepSeek API call failed: %s", str(e)[:300])
+            # Close thinking if it was opened
+            yield _sse_event("thinking_end", {})
             answer_text = _build_template_answer(query, search_results)
             yield _sse_event("answer_start", {})
             chunk_size = 6
@@ -371,6 +380,8 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     else:
         # No API key configured — use template
         answer_text = _build_template_answer(query, search_results)
+        yield _sse_event("thinking_start", {})
+        yield _sse_event("thinking_end", {})
         yield _sse_event("answer_start", {})
         chunk_size = 6
         for i in range(0, len(answer_text), chunk_size):
