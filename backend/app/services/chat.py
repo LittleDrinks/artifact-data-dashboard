@@ -1,58 +1,59 @@
-"""Chat service - session management and SSE streaming for AI Q&A.
+"""Chat service — ReAct Tool Calling with DeepSeek.
 
-Uses DeepSeek-Reasoner for LLM-powered responses with native thinking (reasoning_content).
-RAG context from:
-1. Keyword search across the SQLite artifacts table (always available)
-2. LightRAG knowledge-graph query (hybrid mode, graceful fallback)
+Replaces the previous pre-retrieval approach (jieba -> search -> system prompt -> LLM)
+with a proper ReAct loop where the LLM decides which tools to call.
 
-SSE stages: thinking (real LLM reasoning) -> tool_call -> answer -> done
+SSE event flow per round:
+  thinking_start -> thinking_delta... -> thinking_end
+  tool_call_start -> tool_call_result          (for each tool call in the round)
+
+Only the final round emits:
+  answer_start -> answer_delta... -> answer_end
+
+Finish:
+  done
 """
 
-import asyncio
 import json
 import logging
-import threading
 import time
 from typing import Optional
 
-import jieba
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 
 from app.config import settings
 from app.models.chat import ChatSession, ChatMessage
-from app.models.artifact import Artifact
 from app.schemas.chat import ChatSessionCreate
+from app.ai.tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger(__name__)
 
-# Initialize DeepSeek client
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+MAX_REACT_ROUNDS = 5
+
+SYSTEM_PROMPT = (
+    "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。\n"
+    "你可以使用以下工具来获取文物数据：\n"
+    "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库\n"
+    "2. **get_artifact_detail** — 获取指定文物的完整信息\n\n"
+    "回答规则：\n"
+    "- 用户询问文物相关信息时，务必先调用工具查询数据库，不要凭记忆编造\n"
+    "- 综合工具返回的数据回答，用编号列表和加粗标题组织内容\n"
+    "- 引用数据时标注来源（如「数据库检索结果 #1」）\n"
+    "- 如果工具返回为空，如实告知未找到，并建议用户调整搜索条件\n"
+    "- 如果问题与文物无关，可以正常闲聊，但礼貌引导用户回到文物话题\n"
+    "- 回答要结构清晰、准确、专业\n"
+)
+
+# ---------------------------------------------------------------------------
+# OpenAI client (lazy singleton)
+# ---------------------------------------------------------------------------
+
 _client: Optional[OpenAI] = None
-
-
-def _run_async(coro):
-    """Run an async coroutine from synchronous context.
-
-    Uses a background thread with its own event loop to avoid conflicts
-    with any running event loop (e.g. inside FastAPI's StreamingResponse).
-    """
-    result = None
-    exc = None
-
-    def _target():
-        nonlocal result, exc
-        try:
-            result = asyncio.run(coro)
-        except Exception as e:
-            exc = e
-
-    t = threading.Thread(target=_target)
-    t.start()
-    t.join(timeout=120)  # 2 minute timeout for LightRAG queries
-    if exc is not None:
-        raise exc
-    return result
 
 
 def _get_client() -> OpenAI:
@@ -65,6 +66,10 @@ def _get_client() -> OpenAI:
         )
     return _client
 
+
+# ---------------------------------------------------------------------------
+# Session / message helpers
+# ---------------------------------------------------------------------------
 
 def create_session(db: Session, user_id: int, data: ChatSessionCreate) -> ChatSession:
     """Create a new chat session."""
@@ -156,62 +161,36 @@ def delete_sessions(db: Session, user_id: int, session_ids: list[int]) -> int:
     return result.rowcount
 
 
-def _search_artifacts(db: Session, query: str, limit: int = 5) -> list[dict]:
-    """Keyword search across artifacts table using jieba word segmentation."""
-    # Extract keywords from the query using jieba
-    words = [w.strip() for w in jieba.cut(query) if len(w.strip()) >= 2]
-    if not words:
-        # Fallback to full query
-        words = [query]
+# ---------------------------------------------------------------------------
+# History loader
+# ---------------------------------------------------------------------------
 
-    # Build OR filter: match any keyword in any text field
-    conditions = []
-    for word in words:
-        search_term = f"%{word}%"
-        conditions.append(Artifact.name.ilike(search_term))
-        conditions.append(Artifact.description.ilike(search_term))
-        conditions.append(Artifact.tags.ilike(search_term))
-        conditions.append(Artifact.category.ilike(search_term))
-        conditions.append(Artifact.era.ilike(search_term))
+def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
+    """Load recent chat history as OpenAI-compatible message dicts.
 
-    results = (
-        db.query(Artifact)
-        .filter(or_(*conditions))
+    Only returns user/assistant messages (no system).
+    """
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.id.desc())
         .limit(limit)
         .all()
     )
+    messages.reverse()  # chronological order
 
-    items = []
-    for a in results:
-        snippet = ""
-        if a.description:
-            desc = a.description
-            lower_desc = desc.lower()
-            lower_query = query.lower()
-            pos = lower_desc.find(lower_query)
-            if pos >= 0:
-                start = max(0, pos - 30)
-                end = min(len(desc), pos + len(query) + 60)
-                snippet = desc[start:end]
-                if start > 0:
-                    snippet = "..." + snippet
-                if end < len(desc):
-                    snippet = snippet + "..."
-            else:
-                snippet = desc[:120] + ("..." if len(desc) > 120 else "")
-        else:
-            snippet = "暂无描述"
+    result: list[dict] = []
+    for m in messages:
+        if m.role == "user":
+            result.append({"role": "user", "content": m.content})
+        elif m.role == "assistant":
+            result.append({"role": "assistant", "content": m.content or ""})
+    return result
 
-        items.append({
-            "id": a.id,
-            "name": a.name,
-            "snippet": snippet,
-            "category": a.category,
-            "era": a.era,
-            "location": a.location,
-        })
-    return items
 
+# ---------------------------------------------------------------------------
+# SSE helper
+# ---------------------------------------------------------------------------
 
 def _sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event."""
@@ -219,158 +198,48 @@ def _sse_event(event_type: str, data: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _build_system_prompt(query: str, search_results: list[dict], lightrag_context: str = "") -> str:
-    """Build system prompt with RAG context from search results and LightRAG."""
-    context_parts = []
-    for i, r in enumerate(search_results, 1):
-        parts = [f"【{i}】{r['name']}"]
-        if r.get("category"):
-            parts.append(f"类别：{r['category']}")
-        if r.get("era"):
-            parts.append(f"年代：{r['era']}")
-        if r.get("location"):
-            parts.append(f"出土地点：{r['location']}")
-        if r.get("snippet"):
-            parts.append(f"简介：{r['snippet']}")
-        context_parts.append(" | ".join(parts))
-
-    context_text = "\n".join(context_parts) if context_parts else "未找到相关文物数据"
-
-    # Append LightRAG knowledge-graph context if available
-    if lightrag_context:
-        context_text += (
-            "\n\n【知识图谱检索结果（LightRAG）】\n"
-            "以下是通过文物知识图谱得到的补充信息，可用于丰富回答：\n"
-            f"{lightrag_context}"
-        )
-
-    return (
-        "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。"
-        "你的职责是基于文物数据库的检索结果和知识图谱信息，回答用户关于文物的问题。\n\n"
-        "回答要求：\n"
-        "1. 综合使用数据库检索结果和知识图谱信息回答，如果两者都不充分，可以适当补充你的知识\n"
-        "2. 回答要结构清晰，可以使用编号列表和加粗标题\n"
-        "3. 引用检索结果时，标注来源编号\n"
-        "4. 如果问题与文物无关，礼貌引导用户回到文物话题\n\n"
-        f"用户问题：{query}\n\n"
-        f"【检索结果】\n{context_text}\n"
-    )
-
+# ---------------------------------------------------------------------------
+# Main streaming generator
+# ---------------------------------------------------------------------------
 
 def stream_chat_response(db: Session, query: str, session_id: int):
-    """
-    Generator that yields SSE events for the chat flow.
-    Uses DeepSeek-Reasoner for native thinking (reasoning_content) + answer.
+    """Generator that yields SSE events for the chat flow (ReAct Tool Calling).
 
-    Stages: tool_call (retrieval) → thinking (real LLM reasoning) → answer → done
+    Uses ``yield from`` to delegate to ``_react_gen`` which handles the
+    actual ReAct loop.
     """
     start_time = time.time()
 
-    # Save user message immediately to prevent data loss on stream interruption
+    # Save user message
     save_message(db, session_id, "user", query)
 
-    # ── Stage 1: Retrieval (do this FIRST, so we have context for LLM) ──
-    # Keyword search (always available)
-    search_results = _search_artifacts(db, query, limit=5)
+    # Build initial message list
+    history = load_history(db, session_id, limit=10)
+    # The last history entry is the current user query we just saved.
+    # Remove it to avoid duplication (we append it explicitly below).
+    if history and history[-1]["role"] == "user" and history[-1]["content"] == query:
+        history = history[:-1]
 
-    # LightRAG knowledge-graph query (graceful fallback)
-    lightrag_context = ""
-    lightrag_used = False
-    try:
-        from app.ai.lightrag_service import get_lightrag_service
+    messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+    ] + history + [
+        {"role": "user", "content": query},
+    ]
 
-        lightrag_svc = get_lightrag_service()
-        if lightrag_svc is not None:
-            lightrag_context = _run_async(lightrag_svc.aquery(query))
-            if lightrag_context:
-                lightrag_used = True
-                logger.info("LightRAG context retrieved for query: %s", query[:60])
-    except Exception:
-        logger.warning(
-            "LightRAG query failed — falling back to keyword search only. Query: %s",
-            query[:60],
-            exc_info=True,
-        )
-
-    if lightrag_used:
-        logger.info("Chat response will use LightRAG + keyword search context")
-    else:
-        logger.info("Chat response using keyword search only (LightRAG unavailable or no results)")
-
-    # ── Stage 2: Tool call event (show retrieval results to user) ──
-    yield _sse_event("tool_call_start", {"tool": "search_artifacts", "query": query})
-    time.sleep(0.05)
-
-    elapsed = round(time.time() - start_time, 2)
-
-    tool_result_data = {
-        "results": search_results,
-        "count": len(search_results),
-        "elapsed": elapsed,
-        "lightrag_used": lightrag_used,
-    }
-    yield _sse_event("tool_call_result", tool_result_data)
-
-    # ── Stage 3: DeepSeek-Reasoner with native thinking + answer ──
+    all_tool_calls_log: list[dict] = []
     answer_text = ""
-    thinking_text = ""
+    sources: list[dict] = []
 
     use_llm = bool(settings.AI_API_KEY)
+
     if use_llm:
         try:
-            client = _get_client()
-            system_prompt = _build_system_prompt(query, search_results, lightrag_context)
-
-            # DeepSeek-Reasoner: stream both reasoning_content and content
-            stream = client.chat.completions.create(
-                model=settings.AI_MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query},
-                ],
-                stream=True,
-                max_tokens=4096,
-            )
-
-            # Phase A: Emit real thinking from reasoning_content
+            answer_text = yield from _react_gen(db, messages, all_tool_calls_log)
+        except Exception as exc:
+            logger.error("ReAct loop failed: %s", str(exc)[:300], exc_info=True)
             yield _sse_event("thinking_start", {})
-            in_thinking = True
-
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-
-                # DeepSeek-Reasoner sends reasoning_content before content
-                reasoning = getattr(delta, "reasoning_content", None)
-                content = delta.content
-
-                # Still in thinking phase — emit reasoning tokens
-                if reasoning:
-                    thinking_text += reasoning
-                    yield _sse_event("thinking_delta", {"content": reasoning})
-
-                # Content starts — close thinking, start answer
-                if content and in_thinking:
-                    in_thinking = False
-                    yield _sse_event("thinking_end", {})
-                    yield _sse_event("answer_start", {})
-
-                if content:
-                    answer_text += content
-                    yield _sse_event("answer_delta", {"content": content})
-
-            # Edge case: model returned only reasoning, no content
-            if in_thinking:
-                yield _sse_event("thinking_end", {})
-                yield _sse_event("answer_start", {})
-
-            yield _sse_event("answer_end", {})
-
-        except Exception as e:
-            # LLM failed — fall back to template answer
-            logger.error("DeepSeek API call failed: %s", str(e)[:300])
-            # Close thinking if it was opened
             yield _sse_event("thinking_end", {})
-            answer_text = _build_template_answer(query, search_results)
+            answer_text = "抱歉，AI 服务暂时出现异常，请稍后重试。"
             yield _sse_event("answer_start", {})
             chunk_size = 6
             for i in range(0, len(answer_text), chunk_size):
@@ -378,65 +247,204 @@ def stream_chat_response(db: Session, query: str, session_id: int):
                 time.sleep(0.01)
             yield _sse_event("answer_end", {})
     else:
-        # No API key configured — use template
-        answer_text = _build_template_answer(query, search_results)
         yield _sse_event("thinking_start", {})
         yield _sse_event("thinking_end", {})
+        answer_text = "AI 服务未配置（缺少 AI_API_KEY），请联系管理员。"
         yield _sse_event("answer_start", {})
-        chunk_size = 6
-        for i in range(0, len(answer_text), chunk_size):
-            yield _sse_event("answer_delta", {"content": answer_text[i : i + chunk_size]})
-            time.sleep(0.01)
+        yield _sse_event("answer_delta", {"content": answer_text})
         yield _sse_event("answer_end", {})
 
     total_elapsed = round(time.time() - start_time, 2)
 
-    # Save AI reply to database
-    tool_calls_json = json.dumps(tool_result_data, ensure_ascii=False)
+    # Save AI reply
+    tool_calls_json = (
+        json.dumps(all_tool_calls_log, ensure_ascii=False)
+        if all_tool_calls_log
+        else None
+    )
     save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json)
 
-    # Update session title
+    # Update session title if still the default
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if session and session.title == "新对话":
         title = query[:50] + ("..." if len(query) > 50 else "")
         update_session_title(db, session_id, title)
 
-    # Build citation sources
-    sources = [
-        {"name": r["name"], "source": "文物数据库"}
-        for r in search_results
-    ]
+    # Build citation sources from tool call results
+    for tc_log in all_tool_calls_log:
+        if tc_log.get("tool") == "search_artifacts":
+            for r in tc_log.get("result", {}).get("results", []):
+                sources.append({"name": r["name"], "source": "文物数据库"})
+        elif tc_log.get("tool") == "get_artifact_detail":
+            detail = tc_log.get("result", {})
+            if "error" not in detail:
+                sources.append({"name": detail.get("name", ""), "source": "文物数据库"})
 
-    # ── Stage 4: Done ──
     yield _sse_event("done", {
         "elapsed": total_elapsed,
         "sources": sources,
     })
 
 
-def _build_template_answer(query: str, results: list[dict]) -> str:
-    """Build a template-based answer from search results (fallback)."""
-    if not results:
-        return (
-            f"很抱歉，在文物数据库中未找到与「{query}」直接相关的文物信息。\n\n"
-            f"建议您可以：\n"
-            f"1. 尝试使用不同的关键词搜索\n"
-            f"2. 缩小查询范围，例如指定朝代或类别\n"
-            f"3. 浏览文物管理页面查看完整数据"
+# ---------------------------------------------------------------------------
+# ReAct loop generator
+# ---------------------------------------------------------------------------
+
+def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
+    """ReAct loop generator. Yields SSE event strings, returns final answer text.
+
+    Up to MAX_REACT_ROUNDS iterations:
+    - If the LLM requests tool calls -> execute them, append results, continue.
+    - If the LLM produces content without tool calls -> final answer, return.
+    """
+    client = _get_client()
+
+    for _round in range(MAX_REACT_ROUNDS):
+        thinking_text = ""
+        content_text = ""
+        tc_buffers: dict[int, dict] = {}
+        in_thinking = False
+        in_answer = False
+
+        stream = client.chat.completions.create(
+            model=settings.AI_MODEL_NAME,
+            messages=messages,
+            tools=TOOL_DEFINITIONS,
+            stream=True,
+            max_tokens=4096,
         )
 
-    lines = [f"根据数据库检索，找到了与「{query}」相关的以下文物信息：\n"]
-    for i, r in enumerate(results, 1):
-        lines.append(f"**{i}. {r['name']}**")
-        if r.get("era"):
-            lines.append(f"   年代：{r['era']}")
-        if r.get("category"):
-            lines.append(f"   类别：{r['category']}")
-        if r.get("location"):
-            lines.append(f"   出土地点：{r['location']}")
-        if r.get("snippet"):
-            lines.append(f"   简介：{r['snippet']}")
-        lines.append("")
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
 
-    lines.append("以上信息来源于文物数据库，如需了解更多详情，可在文物管理页面查看。")
-    return "\n".join(lines)
+            # --- reasoning_content (thinking, for deepseek-reasoner) ---
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                if not in_thinking:
+                    in_thinking = True
+                    yield _sse_event("thinking_start", {})
+                thinking_text += reasoning
+                yield _sse_event("thinking_delta", {"content": reasoning})
+
+            # --- tool_calls (accumulated across chunks) ---
+            tc_deltas = getattr(delta, "tool_calls", None)
+            if tc_deltas:
+                for tc_delta in tc_deltas:
+                    idx = tc_delta.index
+                    if idx not in tc_buffers:
+                        tc_buffers[idx] = {"name": "", "arguments": ""}
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tc_buffers[idx]["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tc_buffers[idx]["arguments"] += tc_delta.function.arguments
+
+            # --- regular content ---
+            content = delta.content
+            if content:
+                if in_thinking:
+                    in_thinking = False
+                    yield _sse_event("thinking_end", {})
+                if not in_answer:
+                    in_answer = True
+                    yield _sse_event("answer_start", {})
+                content_text += content
+                yield _sse_event("answer_delta", {"content": content})
+
+        # Close thinking phase if still open
+        if in_thinking:
+            in_thinking = False
+            yield _sse_event("thinking_end", {})
+
+        # --- Tool calls requested ---
+        if tc_buffers:
+            # Build the assistant message with tool_calls for conversation history
+            assistant_tc_list = []
+            for idx in sorted(tc_buffers.keys()):
+                buf = tc_buffers[idx]
+                assistant_tc_list.append({
+                    "id": f"call_{idx}",
+                    "type": "function",
+                    "function": {
+                        "name": buf["name"],
+                        "arguments": buf["arguments"],
+                    },
+                })
+
+            # Append assistant message (with tool_calls) to conversation
+            messages.append({
+                "role": "assistant",
+                "content": content_text or None,
+                "tool_calls": assistant_tc_list,
+            })
+
+            # Execute each tool call and emit SSE events
+            for tc in assistant_tc_list:
+                fn_name = tc["function"]["name"]
+                fn_args_str = tc["function"]["arguments"]
+
+                try:
+                    fn_args = json.loads(fn_args_str) if fn_args_str else {}
+                except json.JSONDecodeError:
+                    fn_args = {}
+                    logger.warning(
+                        "Failed to parse tool call arguments: %s",
+                        fn_args_str[:200],
+                    )
+
+                # Emit tool_call_start
+                yield _sse_event("tool_call_start", {
+                    "tool": fn_name,
+                    "query": fn_args.get("keyword", fn_args_str[:100]),
+                })
+
+                # Execute tool
+                result = execute_tool(fn_name, fn_args, db)
+
+                # Log for DB storage
+                tool_calls_log.append({
+                    "tool": fn_name,
+                    "args": fn_args,
+                    "result": result,
+                })
+
+                # Emit tool_call_result
+                yield _sse_event("tool_call_result", {
+                    "results": result.get("results", []),
+                    "count": result.get("count", 0),
+                    "elapsed": round(time.time(), 2),
+                })
+
+                # Append tool result to conversation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+
+            # Continue to next round
+            continue
+
+        else:
+            # No tool calls — this is the final answer
+            if in_answer:
+                yield _sse_event("answer_end", {})
+            elif content_text:
+                # Content accumulated but answer_start never sent (edge case)
+                yield _sse_event("answer_start", {})
+                yield _sse_event("answer_delta", {"content": content_text})
+                yield _sse_event("answer_end", {})
+            else:
+                # Empty response — emit minimal answer events
+                yield _sse_event("answer_start", {})
+                yield _sse_event("answer_end", {})
+
+            return content_text
+
+    # Exhausted all rounds without a final answer — close any open answer phase
+    if in_answer:
+        yield _sse_event("answer_end", {})
+
+    return content_text
