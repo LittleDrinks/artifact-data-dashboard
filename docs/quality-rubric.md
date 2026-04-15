@@ -23,8 +23,9 @@
 ### A1. SSE 流中途断开不泄漏资源
 
 - **判定方式**：用户在 SSE 流式响应进行中关闭页面/切换会话时，后端 generator 应能被 GC 正常回收，不留僵尸连接。
-- **Pass**：后端 `stream_chat_response` generator 退出后无残留线程或未关闭的 HTTP 连接；前端 `AbortController` 在组件卸载时调用 `abort()`。
-- **Fail**：后端日志出现 "Connection reset" 堆栈未被捕获，或数据库连接数持续增长。
+- **Pass**：后端 `stream_chat_response` generator 退出后无残留线程或未关闭的 HTTP 连接；前端在组件卸载或切换会话时通过 `AbortController` 主动取消 fetch 请求，后端收到取消信号后停止 LLM 调用。
+- **Fail**：前端没有 abort 机制（当前状态：`Chat.tsx` 和 `chat.ts` 未使用 `AbortController`，用户关闭页面后后端仍继续执行 LLM 推理并浪费资源），或后端日志出现 "Connection reset" 堆栈未被捕获，或数据库连接数持续增长。
+- **当前状态：❌ Fail** — 前端 `sendChatMessage` 使用 `fetch + ReadableStream` 但未传入 `AbortController` signal，无法取消请求。建议在 `Chat` 组件中添加 `useRef<AbortController>` 并在 `handleSend` 中传入 signal，同时在组件卸载和切换会话时调用 `abort()`。
 
 ### A2. 连续发送消息不会产生竞态
 
@@ -46,7 +47,18 @@
 
 ### A5. `done` 事件是 SSE 流的最终事件
 
-- **判定方式**：完整的 SSE 事件流必须以 `done` 结束，`done` 后不再有 `thinking_delta`/`answer_delta` 等增量事件。
+- **判定方式**：完整的 SSE 事件流必须以 `done` 结束，`done` 后不再有增量事件。
+- **完整 SSE 事件类型**：后端 `stream_chat_response` generator 产生以下 7 种事件（按时序排列）：
+  1. `thinking_start` — AI 开始推理思考
+  2. `thinking_delta` — 推理内容增量（可能多次）
+  3. `thinking_end` — 推理阶段结束
+  4. `tool_call_start` — 工具调用开始（含 `tool`, `query` 字段）
+  5. `tool_call_result` — 工具调用返回结果（含 `results`, `count`, `elapsed` 字段）
+  6. `answer_start` — 最终回答开始
+  7. `answer_delta` — 回答内容增量（可能多次）
+  8. `answer_end` — 回答结束
+  9. `done` — 流结束（含 `elapsed`, `sources` 字段，**始终是最后一个事件**）
+  - 注：每轮 ReAct 循环会重复 1-5，最后一轮跳过工具调用直接进入 6-9。
 - **Pass**：后端 generator 中 `yield _sse_event("done", ...)` 是最后一个 yield；前端收到 `done` 后将 `loading` 设为 `false`。
 - **Fail**：`done` 之后仍有增量内容导致前端状态异常。
 
@@ -125,7 +137,7 @@
 ### D1. 主色调遵循设计系统
 
 - **判定方式**：检查页面中主要品牌色。
-- **Pass**：主按钮、链接、活跃态颜色为 `#533afd`（CSS 变量 `--purple`）；非使用 `#3b82f6`（蓝色）或其他品牌色。
+- **Pass**：主按钮、链接、活跃态颜色为 `#533afd`（CSS 变量 `--purple`）；不应使用 `#3b82f6`（蓝色）或其他品牌色。
 - **Fail**：使用了非设计系统规定的品牌色。
 
 ### D2. 用户/AI 消息气泡方向和样式正确
@@ -192,11 +204,14 @@
 
 | 标准 | 测试文件 | 测试函数 |
 |------|---------|---------|
+| A1 | `test_quality.py` | ⚠️ 未覆盖（需前端实现 AbortController 后补充） |
 | A2 | `test_quality.py` | `test_rapid_send_blocked_by_loading` |
 | A3 | `test_quality.py` | `test_session_switch_clears_messages` |
 | A4 | `test_quality.py` | `test_network_error_shows_friendly_msg` |
 | A5 | `test_quality.py` | `test_done_event_ends_streaming` |
 | B1 | `test_quality.py` | `test_message_pair_persisted` |
+| B2 | — | ⚠️ 未覆盖（需测试会话标题自动生成逻辑） |
+| B3 | — | ⚠️ 未覆盖（需测试删除会话时关联消息同步删除） |
 | B4 | `test_quality.py` | `test_cross_user_session_access_denied` |
 | B5 | `test_quality.py` | `test_sessions_ordered_by_time` |
 | C1 | `test_quality.py` | `test_send_shows_loading_state` |
@@ -210,14 +225,18 @@
 | D4 | `test_quality.py` | `test_rag_panel_toggle` |
 | D5 | `test_quality.py` | `test_input_within_viewport` |
 | E1 | `test_quality.py` | `test_unauthenticated_returns_401` |
+| E2 | — | ⚠️ 未覆盖（需测试无效 JSON body 返回 422） |
 | E3 | `test_quality.py` | `test_nonexistent_session_returns_404` |
+| E4 | — | ⚠️ 未覆盖（需测试 CORS 预检请求响应头） |
 | E5 | `test_quality.py` | `test_invalid_ids_returns_400` |
 
 ---
 
 ## 评审流程
 
-1. 运行 `cd tests && python -m pytest test_quality.py -v` 执行全部质量标准测试
-2. 每条失败的测试对应上述标准的具体 fail 条件
-3. 修复后重新运行直到全部 pass
-4. CI 环境应将此测试套件纳入合并门槛
+1. 确保前端和后端开发服务器已启动（`localhost:5173` 和 `localhost:8000`）
+2. 运行 `cd tests && python -m pytest test_quality.py -v` 执行全部质量标准测试
+   - 如遇到 asyncio 相关问题，尝试 `python -m pytest test_quality.py -v --tb=short`
+3. 每条失败的测试对应上述标准的具体 fail 条件
+4. 修复后重新运行直到全部 pass
+5. CI 环境应将此测试套件纳入合并门槛
