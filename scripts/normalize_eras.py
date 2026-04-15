@@ -160,12 +160,12 @@ def normalize_era(era: str) -> str | None:
     return None  # unmapped
 
 
-def call_glm_with_retry(client, prompt: str, max_retries: int = 3) -> str | None:
-    """Call GLM-4.7 with exponential backoff retry. Uses streaming for reliability."""
+def call_glm_with_retry(client, prompt: str, max_retries: int = 3, model: str = "glm-4.7") -> str | None:
+    """Call GLM with exponential backoff retry. Uses streaming for reliability."""
     for attempt in range(max_retries):
         try:
             stream = client.chat.completions.create(
-                model=api_model,
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=80,
                 temperature=0.1,
@@ -237,6 +237,31 @@ def classify_era_batch(client, items: list[tuple[int, str, str]]) -> dict[int, s
     return result
 
 
+def _get_glm_client():
+    """Load GLM API credentials from .env and return an OpenAI client."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("  openai not installed", flush=True)
+        return None
+
+    env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
+    api_key = api_base = None
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("LIGHTRAG_API_KEY="):
+                api_key = line.split("=", 1)[1]
+            elif line.startswith("LIGHTRAG_API_BASE="):
+                api_base = line.split("=", 1)[1]
+
+    if not api_key:
+        print("  No LIGHTRAG_API_KEY found in .env", flush=True)
+        return None
+
+    return OpenAI(api_key=api_key, base_url=api_base, timeout=120.0)
+
+
 def main():
     db_path = os.path.abspath(DB_PATH)
     if not os.path.exists(db_path):
@@ -280,60 +305,38 @@ def main():
             print(f"    {len(ids):3d}x  {era}")
 
     # ── Phase 2: GLM for unmapped eras ────────────────────────────────
-    if unmapped_eras:
+    glm_client = _get_glm_client()
+    if unmapped_eras and glm_client:
         print("\n=== Phase 2: GLM classification for unmapped eras ===")
-        try:
-            from openai import OpenAI
-        except ImportError:
-            print("  openai not installed, skipping GLM phase")
-            unmapped_eras = {}
+        client = glm_client
 
-        if unmapped_eras:
-            # Load GLM API key from .env (LightRAG section)
-            env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
-            api_key = None
-            with open(env_path, encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("LIGHTRAG_API_KEY="):
-                        api_key = line.strip().split("=", 1)[1]
-                    elif line.startswith("LIGHTRAG_API_BASE="):
-                        api_base = line.strip().split("=", 1)[1]
-                    elif line.startswith("LIGHTRAG_MODEL_NAME="):
-                        api_model = line.strip().split("=", 1)[1]
+        # Build items for classification
+        items = []
+        cursor.execute("SELECT id, name FROM artifacts WHERE id IN ({})".format(
+            ",".join(str(aid) for ids in unmapped_eras.values() for aid in ids)
+        ))
+        name_map = {aid: name for aid, name in cursor.fetchall()}
 
-            if not api_key:
-                print("  No GLM API key found (LIGHTRAG_API_KEY), skipping GLM phase")
-            else:
-                api_model = api_model if 'api_model' in dir() else "glm-4.7"
-                client = OpenAI(api_key=api_key, base_url=api_base, timeout=120.0)
+        for era, ids in unmapped_eras.items():
+            for aid in ids:
+                name = name_map.get(aid, "")
+                items.append((aid, name, era))
 
-                # Build items for classification
-                items = []
-                cursor.execute("SELECT id, name FROM artifacts WHERE id IN ({})".format(
-                    ",".join(str(aid) for ids in unmapped_eras.values() for aid in ids)
-                ))
-                name_map = {aid: name for aid, name in cursor.fetchall()}
+        # Process in batches of 10
+        glm_updated = 0
+        batch_size = 10
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i+batch_size]
+            print(f"  Batch {i//batch_size+1}/{(len(items)-1)//batch_size+1}: {len(batch)} items...", flush=True)
+            result = classify_era_batch(client, batch)
+            for aid, era in result.items():
+                cursor.execute("UPDATE artifacts SET era = ? WHERE id = ?", (era, aid))
+                glm_updated += 1
+            conn.commit()
+            if i + batch_size < len(items):
+                time.sleep(1)
 
-                for era, ids in unmapped_eras.items():
-                    for aid in ids:
-                        name = name_map.get(aid, "")
-                        items.append((aid, name, era))
-
-                # Process in batches of 10
-                glm_updated = 0
-                batch_size = 10
-                for i in range(0, len(items), batch_size):
-                    batch = items[i:i+batch_size]
-                    print(f"  Batch {i//batch_size+1}/{(len(items)-1)//batch_size+1}: {len(batch)} items...", flush=True)
-                    result = classify_era_batch(client, batch)
-                    for aid, era in result.items():
-                        cursor.execute("UPDATE artifacts SET era = ? WHERE id = ?", (era, aid))
-                        glm_updated += 1
-                    conn.commit()
-                    if i + batch_size < len(items):
-                        time.sleep(1)
-
-                print(f"  GLM classified: {glm_updated}/{len(items)}")
+        print(f"  GLM classified: {glm_updated}/{len(items)}")
 
     # ── Phase 3: Fill NULL eras from description via GLM ─────────────
     print("\n=== Phase 3: Fill NULL eras from description ===")
@@ -345,28 +348,12 @@ def main():
     null_era_rows = cursor.fetchall()
     print(f"Artifacts with no era but has description: {len(null_era_rows)}", flush=True)
 
-    if null_era_rows:
-        try:
-            from openai import OpenAI
-        except ImportError:
-            print("  Skipping: openai not installed", flush=True)
-            null_era_rows = []
+    if null_era_rows and not glm_client:
+        print("  Skipping: no GLM client available", flush=True)
+        null_era_rows = []
 
     if null_era_rows:
-        # Load GLM API credentials (LightRAG section)
-        env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
-        _api_key = _api_base = None
-        with open(env_path, encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("LIGHTRAG_API_KEY="):
-                    _api_key = line.strip().split("=", 1)[1]
-                elif line.startswith("LIGHTRAG_API_BASE="):
-                    _api_base = line.strip().split("=", 1)[1]
-        if not _api_key:
-            print("  Skipping: no API key", flush=True)
-            null_era_rows = []
-        else:
-            client = OpenAI(api_key=_api_key, base_url=_api_base, timeout=120.0)
+        client = glm_client
 
     if null_era_rows:
         items = []
