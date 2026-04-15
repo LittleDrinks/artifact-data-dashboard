@@ -311,6 +311,53 @@ def _make_glm_llm_func():
     return glm_complete_with_retry
 
 
+def _make_ollama_llm_func(model_name: str = "qwen2.5:7b"):
+    """Create an async LLM completion function using local Ollama with retry logic."""
+    from lightrag.llm.openai import openai_complete_if_cache
+
+    async def ollama_complete_with_retry(
+        prompt,
+        system_prompt=None,
+        history_messages=None,
+        enable_cot=False,
+        keyword_extraction=False,
+        **kwargs,
+    ):
+        for attempt in range(LLM_MAX_RETRIES):
+            try:
+                return await openai_complete_if_cache(
+                    model=model_name,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    history_messages=history_messages or [],
+                    enable_cot=enable_cot,
+                    keyword_extraction=keyword_extraction,
+                    base_url="http://localhost:11434/v1",
+                    api_key="ollama",
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < LLM_MAX_RETRIES - 1:
+                    delay = min(LLM_RETRY_BASE_DELAY * (2 ** attempt), 60)
+                    logger.warning(
+                        "Ollama LLM call failed (attempt %d/%d): %s — retrying in %ds",
+                        attempt + 1,
+                        LLM_MAX_RETRIES,
+                        error_msg[:200],
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        "Ollama LLM call failed after %d attempts: %s",
+                        LLM_MAX_RETRIES,
+                        error_msg[:300],
+                    )
+                    raise
+
+    return ollama_complete_with_retry
+
+
 # ── Custom embedding function (bypasses ollama Python client NaN issues) ──
 
 
@@ -388,7 +435,7 @@ async def _monitor_progress(total_docs: int) -> None:
 # ── Main build logic ─────────────────────────────────────────────────
 
 
-async def _build() -> None:
+async def _build(local_llm: bool = False, model_override: str | None = None) -> None:
     from lightrag import LightRAG
     from app.config import settings
 
@@ -417,8 +464,9 @@ async def _build() -> None:
         )
         return
 
-    # Step 3: Unload local LLM models to free VRAM
-    _unload_ollama_llm_models()
+    # Step 3: Unload local LLM models to free VRAM (skip if using local LLM)
+    if not local_llm:
+        _unload_ollama_llm_models()
 
     # Step 4: Resume or clear existing index
     existing_status = _check_index_status()
@@ -465,7 +513,18 @@ async def _build() -> None:
     working_dir = settings.LIGHTRAG_DIR
     os.makedirs(working_dir, exist_ok=True)
 
-    llm_func = _make_glm_llm_func()
+    # Step 5: Create LightRAG instance
+    working_dir = settings.LIGHTRAG_DIR
+    os.makedirs(working_dir, exist_ok=True)
+
+    if local_llm:
+        # Use local Ollama LLM
+        model_name = model_override or "qwen2.5:7b"
+        llm_func = _make_ollama_llm_func(model_name)
+        logger.info("Using local Ollama LLM: %s", model_name)
+    else:
+        llm_func = _make_glm_llm_func()
+
     embed_func = _make_robust_embed_func()
 
     # Neo4j connection settings
@@ -473,19 +532,21 @@ async def _build() -> None:
     neo4j_user = settings.NEO4J_USER
     neo4j_password = settings.NEO4J_PASSWORD
 
+    llm_label = model_name if local_llm else f"GLM-4.7 API"
     logger.info(
-        "Creating LightRAG — working_dir=%s, Neo4j=%s, llm=GLM-4.7 API (4 parallel), embed=nomic-embed-text (Ollama)",
+        "Creating LightRAG — working_dir=%s, Neo4j=%s, llm=%s, embed=nomic-embed-text (Ollama)",
         working_dir,
         neo4j_uri,
+        llm_label,
     )
 
     rag = LightRAG(
         working_dir=working_dir,
         llm_model_func=llm_func,
-        llm_model_name=f"glm:{settings.LIGHTRAG_MODEL_NAME}",
+        llm_model_name=model_name if local_llm else f"glm:{settings.LIGHTRAG_MODEL_NAME}",
         embedding_func=embed_func,
-        max_parallel_insert=4,
-        embedding_func_max_async=8,
+        max_parallel_insert=1 if local_llm else 4,
+        embedding_func_max_async=2 if local_llm else 8,
         # Increase timeouts for large-scale indexing
         default_embedding_timeout=300,
         default_llm_timeout=300,
@@ -582,13 +643,17 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Build LightRAG knowledge-graph index")
     parser.add_argument("--clear", action="store_true", help="Clear existing index and rebuild from scratch")
+    parser.add_argument("--local-llm", action="store_true",
+                        help="Use local Ollama LLM (qwen2.5:7b) instead of cloud GLM API")
+    parser.add_argument("--model", type=str, default=None,
+                        help="Override LLM model name (e.g. qwen2.5:7b, deepseek-r1:14b)")
     args = parser.parse_args()
 
     if args.clear:
         _clear_index()
         logger.info("Index cleared via --clear flag.")
 
-    asyncio.run(_build())
+    asyncio.run(_build(local_llm=args.local_llm, model_override=args.model))
 
 
 if __name__ == "__main__":
