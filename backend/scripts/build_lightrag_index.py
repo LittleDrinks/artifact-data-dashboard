@@ -41,7 +41,14 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 # Set parallel insert BEFORE importing lightrag so it picks up the env var
-os.environ["MAX_PARALLEL_INSERT"] = "8"
+os.environ["MAX_PARALLEL_INSERT"] = "4"
+
+# Load .env from backend directory explicitly (pydantic-settings uses a relative
+# path which resolves against CWD — wrong when running from the repo root).
+_env_file = os.path.join(_backend_dir, ".env")
+if os.path.isfile(_env_file):
+    from dotenv import load_dotenv
+    load_dotenv(_env_file, override=False)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,9 +134,9 @@ def _check_ollama_health() -> bool:
             data = json.loads(resp.read())
             models = [m["name"] for m in data.get("models", [])]
             logger.info("Ollama running — available models: %s", ", ".join(models[:5]))
-            has_embed = any("bge-m3" in m for m in models)
+            has_embed = any("nomic-embed-text" in m or "bge-m3" in m for m in models)
             if not has_embed:
-                logger.error("bge-m3 embedding model not found in Ollama!")
+                logger.error("nomic-embed-text or bge-m3 embedding model not found in Ollama!")
                 return False
             return True
     except Exception as e:
@@ -143,29 +150,86 @@ def _unload_ollama_llm_models() -> None:
     import urllib.error
 
     # Known local LLM models that consume VRAM
-    llm_models = ["qwen2.5:7b", "deepseek-r1:7b", "deepseek-r1:8b", "zephyr:latest", "zephyr:7b"]
+    llm_models = [
+        "qwen3-vl:4b", "qwen2.5:7b",
+        "deepseek-r1:7b", "deepseek-r1:8b", "deepseek-r1:14b",
+        "zephyr:latest", "zephyr:7b", "glm-5:cloud",
+    ]
     for model in llm_models:
         try:
-            data = json.dumps({"name": model}).encode("utf-8")
+            # Use keep_alive: 0 to force immediate unload
+            data = json.dumps({"name": model, "keep_alive": 0}).encode("utf-8")
             req = urllib.request.Request(
                 "http://localhost:11434/api/generate",
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                pass
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()  # drain response
         except Exception:
             pass  # Model not loaded or already stopped
     logger.info("Unloaded local LLM models from Ollama to free VRAM")
 
+    # Verify bge-m3 embedding works after unloading
+    try:
+        data = json.dumps({"model": "nomic-embed-text", "prompt": "test"}).encode("utf-8")
+        req = urllib.request.Request(
+            "http://localhost:11434/api/embeddings",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            emb = result.get("embedding", [])
+            if len(emb) > 0:
+                logger.info("bge-m3 embedding verified — dim=%d", len(emb))
+            else:
+                logger.error("bge-m3 embedding returned empty vector!")
+    except Exception as e:
+        logger.error("bge-m3 embedding verification failed: %s", e)
+
 
 def _clear_index() -> None:
-    """Remove all index files so we start fresh."""
+    """Remove all index files so we start fresh.
+
+    On Windows, shutil.rmtree with ignore_errors=True can silently fail
+    due to file locks. We retry with explicit file deletion as fallback.
+    """
     if not os.path.isdir(LIGHTRAG_DIR):
         return
     logger.info("Clearing existing index at %s", LIGHTRAG_DIR)
+
+    # First attempt: shutil.rmtree
     shutil.rmtree(LIGHTRAG_DIR, ignore_errors=True)
+
+    # Fallback: if directory still exists, delete files individually
+    if os.path.isdir(LIGHTRAG_DIR):
+        logger.warning("rmtree did not fully remove directory, deleting files individually")
+        for fname in os.listdir(LIGHTRAG_DIR):
+            fpath = os.path.join(LIGHTRAG_DIR, fname)
+            try:
+                if os.path.isfile(fpath):
+                    os.unlink(fpath)
+            except Exception:
+                logger.warning("Failed to delete %s", fpath)
+        # Try removing the now-empty directory
+        try:
+            os.rmdir(LIGHTRAG_DIR)
+        except Exception:
+            pass
+
+    # Verify: if key files still exist, abort
+    if os.path.isdir(LIGHTRAG_DIR):
+        remaining = os.listdir(LIGHTRAG_DIR)
+        if remaining:
+            logger.error(
+                "Failed to clear index — remaining files: %s. "
+                "Please close any processes using the index and retry.",
+                remaining,
+            )
+            sys.exit(1)
 
 
 def _check_index_status() -> dict:
@@ -247,7 +311,63 @@ def _make_glm_llm_func():
     return glm_complete_with_retry
 
 
-# ── Progress monitor ──────────────────────────────────────────────────
+# ── Custom embedding function (bypasses ollama Python client NaN issues) ──
+
+
+def _make_robust_embed_func():
+    """Create a robust async embedding function using raw HTTP to Ollama.
+
+    Uses nomic-embed-text (768 dim) instead of bge-m3 (1024 dim) because
+    nomic-embed-text is stable under concurrent load while bge-m3 returns
+    intermittent 500/NaN errors.
+    """
+    from lightrag.base import EmbeddingFunc
+    import numpy as np
+    import urllib.request
+
+    async def robust_ollama_embed(
+        texts: list[str],
+        embed_model: str = "nomic-embed-text",
+        **kwargs,
+    ) -> np.ndarray:
+        """Embed texts using Ollama's /api/embed endpoint with retry."""
+        _ = kwargs  # absorb extra kwargs
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                data = json.dumps({"model": embed_model, "input": texts}).encode("utf-8")
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/embed",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    result = json.loads(resp.read())
+                    embeddings = result.get("embeddings", [])
+                    arr = np.array(embeddings, dtype=np.float32)
+                    # Check for NaN
+                    if np.isnan(arr).any():
+                        raise ValueError(f"NaN in embeddings for batch of {len(texts)}")
+                    return arr
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "Embed retry %d/%d: %s", attempt + 1, max_retries, str(e)[:100]
+                    )
+                    await asyncio.sleep(1)
+                else:
+                    raise
+
+    # Wrap with LightRAG's EmbeddingFunc — 768 dim for nomic-embed-text
+    return EmbeddingFunc(
+        embedding_dim=768,
+        max_token_size=8192,
+        func=robust_ollama_embed,
+    )
+
+
+
 
 
 async def _monitor_progress(total_docs: int) -> None:
@@ -270,7 +390,6 @@ async def _monitor_progress(total_docs: int) -> None:
 
 async def _build() -> None:
     from lightrag import LightRAG
-    from lightrag.llm.ollama import ollama_embed
     from app.config import settings
 
     # Step 1: Load artifacts
@@ -301,28 +420,66 @@ async def _build() -> None:
     # Step 3: Unload local LLM models to free VRAM
     _unload_ollama_llm_models()
 
-    # Step 4: Clear existing index (rebuild from scratch after data cleaning)
-    _clear_index()
+    # Step 4: Resume or clear existing index
+    existing_status = _check_index_status()
+    if existing_status["completed"] > 0:
+        logger.info(
+            "Existing index found — %d/%d completed. Resuming (use --clear to rebuild from scratch).",
+            existing_status["completed"],
+            existing_status["total"],
+        )
+        # Filter out already-completed docs so LightRAG only processes remaining ones
+        status_path = os.path.join(LIGHTRAG_DIR, "kv_store_doc_status.json")
+        with open(status_path, encoding="utf-8") as f:
+            doc_status = json.load(f)
+        # Build set of completed doc hashes/content to skip
+        completed_docs = set()
+        full_docs_path = os.path.join(LIGHTRAG_DIR, "kv_store_full_docs.json")
+        if os.path.exists(full_docs_path):
+            with open(full_docs_path, encoding="utf-8") as f:
+                full_docs = json.load(f)
+            for doc_id, doc_info in doc_status.items():
+                if isinstance(doc_info, dict) and doc_info.get("status") in ("completed", "processed"):
+                    # Map doc_id to its content for matching
+                    if doc_id in full_docs:
+                        completed_docs.add(full_docs[doc_id].get("content", ""))
+        # Keep only texts not yet indexed
+        before = len(texts)
+        texts = [t for t in texts if t.strip() not in completed_docs]
+        logger.info("Skipping %d already-indexed documents, %d remaining", before - len(texts), len(texts))
+        if not texts:
+            logger.info("All documents already indexed — nothing to do.")
+            return
+    else:
+        logger.info("No existing index — starting fresh build.")
+
+    # Step 4b: Set OpenAI-compatible env vars so LightRAG's internal code paths
+    # (which create their own OpenAI client via _create_openai_client) can reach
+    # the GLM API.  Without this, entity/relation extraction fails with
+    # KeyError: 'OPENAI_API_KEY'.
+    os.environ["OPENAI_API_KEY"] = settings.LIGHTRAG_API_KEY
+    os.environ["OPENAI_BASE_URL"] = settings.LIGHTRAG_API_BASE
+    logger.info("Set OPENAI_API_KEY and OPENAI_BASE_URL for GLM API compatibility")
 
     # Step 5: Create LightRAG instance with GLM API LLM + parallel insert
     working_dir = settings.LIGHTRAG_DIR
     os.makedirs(working_dir, exist_ok=True)
 
     llm_func = _make_glm_llm_func()
-    embed_model = settings.LIGHTRAG_EMBEDDING_MODEL
+    embed_func = _make_robust_embed_func()
 
     logger.info(
-        "Creating LightRAG — working_dir=%s, llm=GLM-4.7 API (8 parallel), embed=%s (Ollama)",
+        "Creating LightRAG — working_dir=%s, llm=GLM-4.7 API (4 parallel), embed=nomic-embed-text (Ollama)",
         working_dir,
-        embed_model,
     )
 
     rag = LightRAG(
         working_dir=working_dir,
         llm_model_func=llm_func,
-        llm_model_name=f"glm:{settings.AI_MODEL_NAME}",
-        embedding_func=ollama_embed,
-        max_parallel_insert=8,
+        llm_model_name=f"glm:{settings.LIGHTRAG_MODEL_NAME}",
+        embedding_func=embed_func,
+        max_parallel_insert=4,
+        embedding_func_max_async=8,
         # Increase timeouts for large-scale indexing
         default_embedding_timeout=300,
         default_llm_timeout=300,
@@ -333,7 +490,7 @@ async def _build() -> None:
     logger.info("LightRAG storages initialized")
 
     # Step 6: Insert all documents via LightRAG's built-in parallel pipeline
-    logger.info("Starting parallel index build for %d documents (8 workers)…", len(texts))
+    logger.info("Starting parallel index build for %d documents (4 workers)…", len(texts))
     start = time.time()
 
     # Start progress monitor in background
@@ -411,6 +568,15 @@ async def _build() -> None:
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Build LightRAG knowledge-graph index")
+    parser.add_argument("--clear", action="store_true", help="Clear existing index and rebuild from scratch")
+    args = parser.parse_args()
+
+    if args.clear:
+        _clear_index()
+        logger.info("Index cleared via --clear flag.")
+
     asyncio.run(_build())
 
 
