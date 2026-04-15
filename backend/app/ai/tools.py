@@ -1,8 +1,9 @@
 """Tool definitions and implementations for ReAct Tool Calling.
 
-Provides two tools for the LLM:
+Provides three tools for the LLM:
 - search_artifacts: keyword / era / category search against SQLite
 - get_artifact_detail: fetch a single artifact by ID
+- query_knowledge_graph: semantic entity search via Neo4j
 """
 
 import json
@@ -13,6 +14,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
+from app.services.graph import _get_neo4j_driver, _check_neo4j_has_data, _query_neo4j_entities
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,32 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_knowledge_graph",
+            "description": (
+                "查询知识图谱中的语义实体和关系。"
+                "当用户询问概念性的知识（如'青铜器有什么特点'、'商代有哪些重要文物'）时，"
+                "使用此工具获取图谱中的实体关系信息，比结构化文物数据更适合回答概念性问题。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "搜索关键词，用于匹配图谱中的实体名称",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回实体数量上限，默认20",
+                        "default": 20,
+                    },
+                },
+                "required": ["keyword"],
+            },
+        },
+    },
 ]
 
 
@@ -95,6 +123,8 @@ def execute_tool(name: str, arguments: dict[str, Any], db: Session) -> dict[str,
             return _tool_search_artifacts(db, arguments)
         elif name == "get_artifact_detail":
             return _tool_get_artifact_detail(db, arguments)
+        elif name == "query_knowledge_graph":
+            return _tool_query_knowledge_graph(arguments)
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as exc:
@@ -188,6 +218,58 @@ def _tool_get_artifact_detail(db: Session, args: dict[str, Any]) -> dict[str, An
         "location": a.location,
         "image_url": a.image_url,
         "tags": a.tags,
+    }
+
+
+# ---------------------------------------------------------------------------
+# query_knowledge_graph implementation
+# ---------------------------------------------------------------------------
+
+def _tool_query_knowledge_graph(args: dict[str, Any]) -> dict[str, Any]:
+    """Query Neo4j knowledge graph for semantic entities and relations."""
+    keyword: str = args.get("keyword", "")
+    limit: int = min(int(args.get("limit", 20)), 50)
+
+    if not keyword:
+        return {"entities": [], "relations": [], "count": 0, "source": "neo4j"}
+
+    driver = _get_neo4j_driver()
+
+    # Check Neo4j availability
+    if not _check_neo4j_has_data(driver):
+        return {
+            "entities": [],
+            "relations": [],
+            "count": 0,
+            "source": "neo4j",
+            "message": "知识图谱暂无数据，请先运行 build_lightrag_index.py 构建索引",
+        }
+
+    # Query entities and relations
+    nodes, links = _query_neo4j_entities(driver, limit=limit, keyword=keyword)
+
+    # Format results
+    entities = []
+    for node in nodes:
+        entities.append({
+            "name": node.name,
+            "type": node.type,
+            "description": node.properties.get("description", ""),
+        })
+
+    relations = []
+    for link in links:
+        relations.append({
+            "source": link.source.replace("neo4j_", ""),
+            "target": link.target.replace("neo4j_", ""),
+            "relation": link.relation,
+        })
+
+    return {
+        "entities": entities,
+        "relations": relations,
+        "count": len(entities),
+        "source": "neo4j",
     }
 
 
