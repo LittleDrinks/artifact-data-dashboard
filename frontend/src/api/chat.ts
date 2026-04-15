@@ -86,6 +86,7 @@ export async function sendChatMessage(
   question: string,
   sessionId?: number | null,
   onEvent?: (event: SSEEventData) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const token = localStorage.getItem('token');
   const response = await fetch('/api/chat/ask', {
@@ -98,9 +99,16 @@ export async function sendChatMessage(
       question,
       session_id: sessionId ?? undefined,
     }),
+    signal,
   });
 
   if (!response.ok) {
+    // Handle 401 — clear token and redirect to login (same as axios interceptor)
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+      return;
+    }
     const errorText = await response.text();
     let detail = '请求失败';
     try {
@@ -116,32 +124,40 @@ export async function sendChatMessage(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
+      buffer += decoder.decode(value, { stream: true });
 
-    // Parse SSE format: "data: {...}\n\n"
-    // Only process complete lines (ending with \n); keep the tail in buffer
-    const lines = buffer.split('\n');
-    // Last element is either an incomplete line (no trailing \n) or empty string (trailing \n)
-    buffer = lines.pop() ?? '';
+      // Parse SSE format: "data: {...}\n\n"
+      // Only process complete lines (ending with \n); keep the tail in buffer
+      const lines = buffer.split('\n');
+      // Last element is either an incomplete line (no trailing \n) or empty string (trailing \n)
+      buffer = lines.pop() ?? '';
 
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (line.startsWith('data: ')) {
-        const jsonStr = line.slice(6);
-        // Skip SSE keep-alive empty data lines (data: )
-        if (jsonStr === '') continue;
-        try {
-          const event: SSEEventData = JSON.parse(jsonStr);
-          onEvent?.(event);
-        } catch {
-          // Incomplete JSON — unlikely for complete lines, but safe to ignore
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6);
+          // Skip SSE keep-alive empty data lines (data: )
+          if (jsonStr === '') continue;
+          try {
+            const event: SSEEventData = JSON.parse(jsonStr);
+            onEvent?.(event);
+          } catch {
+            // Incomplete JSON — unlikely for complete lines, but safe to ignore
+          }
         }
+        // All other lines (empty delimiters, comments) are ignored
       }
-      // All other lines (empty delimiters, comments) are ignored
     }
+  } catch (err: unknown) {
+    // AbortError is expected when user cancels (switch session / unmount)
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return;
+    }
+    throw err;
   }
 }

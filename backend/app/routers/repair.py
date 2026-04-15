@@ -14,6 +14,8 @@ from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.user import User
+from app.routers.auth import get_current_user
 from app.services import artifact as artifact_service
 
 router = APIRouter()
@@ -43,6 +45,7 @@ async def repair_image(
     radius: int = Form(default=3, ge=1, le=20, description="修复半径"),
     method: str = Form(default="telea", description="修复算法：telea 或 ns"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     使用 OpenCV inpaint 修复文物图片。

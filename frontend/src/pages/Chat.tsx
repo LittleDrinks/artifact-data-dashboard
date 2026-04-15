@@ -85,6 +85,14 @@ export default function Chat() {
   const inputRef = useRef<any>(null);
   const isAtBottomRef = useRef(true);
   const prevMsgCountRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Abort any in-flight SSE request on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -131,19 +139,26 @@ export default function Chat() {
       const msgs: ChatMessageInfo[] = await getChatMessages(sessionId);
       const displayMsgs: DisplayMessage[] = msgs.map((m) => {
         // Parse tool_calls JSON if available
+        // Backend stores: [{tool, args, result}, ...] array
         let toolCall: DisplayMessage['toolCall'] = null;
         if (m.tool_calls) {
           try {
             const tcData = JSON.parse(m.tool_calls);
-            if (tcData.results && tcData.count) {
-              toolCall = {
-                tool: 'search_artifacts',
-                query: '', // Query is not stored in tool_calls
-                results: tcData.results as SearchResultItem[],
-                count: tcData.count,
-                elapsed: tcData.elapsed || 0,
-                done: true,
-              };
+            if (Array.isArray(tcData)) {
+              // Find the first search_artifacts tool call with results
+              for (const tc of tcData) {
+                if (tc.result?.results) {
+                  toolCall = {
+                    tool: tc.tool || 'search_artifacts',
+                    query: tc.args?.keyword || '',
+                    results: tc.result.results as SearchResultItem[],
+                    count: tc.result.count || tc.result.results.length || 0,
+                    elapsed: 0,
+                    done: true,
+                  };
+                  break;
+                }
+              }
             }
           } catch {
             // Invalid JSON, ignore
@@ -169,9 +184,22 @@ export default function Chat() {
   // ── Select session ──
   const handleSelectSession = useCallback(
     (session: ChatSessionInfo) => {
+      // Abort any in-flight SSE before switching
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      setLoading(false);
+
       setActiveSessionId(session.id);
       setSelectedIds(new Set());
       setHistoryVisible(false);
+
+      // Clear state before loading new session
+      setRagThinking('');
+      setRagToolResults([]);
+      setRagToolQuery('');
+      setRagToolElapsed(0);
+      setRagSources([]);
+
       loadSessionMessages(session.id);
     },
     [loadSessionMessages],
@@ -197,6 +225,11 @@ export default function Chat() {
 
   // ── New session ──
   const handleNewSession = useCallback(() => {
+    // Abort any in-flight SSE
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setLoading(false);
+
     setActiveSessionId(null);
     setMessages([]);
     setRagThinking('');
@@ -250,7 +283,14 @@ export default function Chat() {
     setRagSources([]);
 
     try {
+      // Create AbortController for this request
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       await sendChatMessage(query, activeSessionId, (event: SSEEventData) => {
+        // If this request was aborted, ignore late events
+        if (controller.signal.aborted) return;
+
         switch (event.type) {
           case 'thinking_start':
             // Nothing extra
@@ -347,13 +387,25 @@ export default function Chat() {
           default:
             break;
         }
-      });
+      }, controller.signal);
     } catch (err: unknown) {
+      // Don't show error if request was aborted (user action)
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Remove the empty assistant message on abort
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        setLoading(false);
+        return;
+      }
       const msg = err instanceof Error ? err.message : '发送失败';
       message.error(msg);
       // Remove the empty assistant message
       setMessages((prev) => prev.filter((m) => m.id !== assistantId));
       setLoading(false);
+    } finally {
+      // Clear ref if this is still the active controller
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }, [inputValue, loading, activeSessionId, loadSessions]);
 

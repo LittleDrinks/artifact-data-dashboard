@@ -74,12 +74,16 @@ ADD_new/
 | /api/stats/overview | GET | 统计概览 |
 | /api/stats/by-era | GET | 按年代统计 |
 | /api/stats/by-category | GET | 按类别统计 |
-| /api/wordcloud | GET | 词云数据 |
+| /api/stats/by-location | GET | 按出土地点统计 |
+| /api/stats/wordcloud | GET | 词云数据 |
 | /api/graph/full | GET | 全图数据 |
 | /api/graph/search | GET | 图谱搜索 |
+| /api/graph/node/:node_id | GET | 节点详情 |
 | /api/chat/sessions | GET/POST | 会话管理 |
+| /api/chat/sessions | DELETE | 批量删除会话 |
 | /api/chat/sessions/:id/messages | GET | 历史消息 |
 | /api/chat/ask | POST | AI问答（SSE流式） |
+| /api/artifacts/:id/repair-image | POST | 图像修复（需认证） |
 
 ## SQLite 数据模型
 
@@ -131,7 +135,7 @@ CREATE TABLE attachments (
   mime_type TEXT,
   size_bytes INTEGER,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+);  -- 注意：MVP 不含附件上传功能，此表预留
 ```
 
 ## 设计系统
@@ -165,6 +169,30 @@ CREATE TABLE attachments (
 - 每个 agent 每完成一个功能模块 commit 一次
 - commit message 格式：`feat(module): 描述`
 - 不要 commit node_modules, __pycache__, .env 等
+
+## Agent 使用规范
+
+### 模型选择（强制）
+派 agent 时**必须**指定 `model` 参数，可选值：
+- `opus`：复杂架构决策、代码审查、需要深度思考的任务
+- `sonnet`：日常开发、功能实现、代码修改（**默认选择**）
+- `haiku`：简单查询、文件搜索、轻量任务
+
+**禁止**：不指定 model（会回退到 claude-opus-4-6，该模型不可用）
+
+### Subagent vs Agent Team Member
+
+| 场景 | 方式 | 说明 |
+|------|------|------|
+| 简单搜索、代码查找 | Subagent（`subagent_type`） | Explore/Plan 等内置类型，无 team 上下文 |
+| 单次独立任务 | Subagent | 用完即弃，不需要通信 |
+| 多 agent 并行协作 | **Agent Team Member**（`team_name`） | 共享 task list，可互相通信 |
+| 需要 reviewer-generator 对抗流程 | **Agent Team Member** | reviewer 审完通知 generator |
+
+### 对抗式优化流程
+1. reviewer-X：审查系统，输出问题报告到 `docs/review-round-X.md`，只审不改
+2. generator-X：按报告修复，自检，commit，通知 reviewer 确认
+3. 本轮完成后删除两个 teammate（必须同时关闭对应 tmux pane：`tmux kill-pane -t <pane_id>`），清理上下文，开启下一轮
 
 ## 关键约束
 

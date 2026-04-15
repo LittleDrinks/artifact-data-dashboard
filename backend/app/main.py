@@ -3,6 +3,8 @@ FastAPI application entry point.
 Configures CORS, includes routers, and sets up startup/shutdown events.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,12 +12,25 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import init_db
 from app.routers import health, auth, artifacts, stats, graph, chat, repair
+from app.services.graph import _close_neo4j_driver
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup and shutdown logic."""
+    # Startup
+    init_db()
+    yield
+    # Shutdown
+    _close_neo4j_driver()
+
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS configuration - allow frontend dev server
@@ -44,9 +59,3 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error"},
     )
-
-
-@app.on_event("startup")
-def on_startup():
-    """Initialize database tables on application startup."""
-    init_db()

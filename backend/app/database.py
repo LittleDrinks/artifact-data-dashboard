@@ -52,6 +52,8 @@ def get_db() -> Generator[Session, None, None]:
 
 def _ensure_admin_user():
     """Create a default admin user if one does not already exist."""
+    import os
+
     from app.models.user import User
     from app.services.auth import hash_password
 
@@ -59,10 +61,11 @@ def _ensure_admin_user():
     try:
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
+            default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
             admin = User(
                 username="admin",
                 email="admin@heritage.cn",
-                password_hash=hash_password("admin123"),
+                password_hash=hash_password(default_password),
                 role="admin",
             )
             db.add(admin)
