@@ -1,18 +1,138 @@
-"""知识图谱服务 — 从 SQLite artifacts 表动态构建图谱关系
+"""知识图谱服务 — Neo4j + SQLite 双数据源
 
-MVP 阶段不使用 Neo4j，直接从文物数据中提取关系：
-- artifact → era（属于朝代）
-- artifact → category（属于类别）
-- artifact → location（出土于）
-- artifact → tags（包含标签，多个标签拆分）
+优先从 Neo4j 查询实体/关系（LightRAG 构建的语义图谱），
+如果 Neo4j 无数据则 fallback 到 SQLite artifacts 表动态构建基础关系。
+
+Neo4j 图谱：实体(entity_name, entity_type) + 关系(src_name, target_name, relation_type)
+SQLite 基础图谱：artifact → era/category/location/tags
 """
 
+import logging
 from typing import Optional, List, Tuple, Dict, Set
 
+from neo4j import GraphDatabase
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.artifact import Artifact
 from app.schemas.graph import GraphNode, GraphLink
+
+logger = logging.getLogger(__name__)
+
+# Neo4j driver singleton
+_neo4j_driver = None
+
+
+def _get_neo4j_driver():
+    """Lazy-initialize Neo4j driver."""
+    global _neo4j_driver
+    if _neo4j_driver is None:
+        try:
+            _neo4j_driver = GraphDatabase.driver(
+                settings.NEO4J_URI,
+                auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+            )
+            logger.info("Neo4j driver connected: %s", settings.NEO4J_URI)
+        except Exception as e:
+            logger.warning("Neo4j connection failed: %s", e)
+            _neo4j_driver = None
+    return _neo4j_driver
+
+
+def _close_neo4j_driver():
+    """Close Neo4j driver on shutdown."""
+    global _neo4j_driver
+    if _neo4j_driver:
+        _neo4j_driver.close()
+        _neo4j_driver = None
+
+
+def _query_neo4j_entities(driver, limit: int = 100, keyword: str = None) -> Tuple[List[GraphNode], List[GraphLink]]:
+    """Query entities and relations from Neo4j (LightRAG knowledge graph).
+
+    Returns (nodes_list, links_list). Empty lists if Neo4j unavailable or no data.
+    """
+    if driver is None:
+        return [], []
+
+    nodes: Dict[str, GraphNode] = {}
+    links: Dict[str, GraphLink] = {}
+
+    try:
+        with driver.session() as session:
+            # Query entities
+            if keyword:
+                # Search by name containing keyword
+                entity_query = """
+                    MATCH (e)
+                    WHERE e.entity_name CONTAINS $keyword
+                    RETURN e.entity_name AS name, e.entity_type AS type, e.description AS desc
+                    LIMIT $limit
+                """
+                result = session.run(entity_query, keyword=keyword, limit=limit)
+            else:
+                entity_query = """
+                    MATCH (e)
+                    RETURN e.entity_name AS name, e.entity_type AS type, e.description AS desc
+                    LIMIT $limit
+                """
+                result = session.run(entity_query, limit=limit)
+
+            for record in result:
+                name = record.get("name")
+                entity_type = record.get("type", "unknown")
+                desc = record.get("desc", "")
+                if name:
+                    node_id = f"neo4j_{name}"
+                    nodes[node_id] = GraphNode(
+                        id=node_id,
+                        name=name,
+                        type=entity_type,
+                        properties={"description": desc},
+                    )
+
+            # Query relations between matched entities
+            if nodes:
+                entity_names = list(nodes.keys())
+                # Query relations
+                rel_query = """
+                    MATCH (a)-[r]->(b)
+                    WHERE a.entity_name IN $names AND b.entity_name IN $names
+                    RETURN a.entity_name AS src, b.entity_name AS tgt, type(r) AS rel_type
+                """
+                rel_result = session.run(rel_query, names=[n.replace("neo4j_", "") for n in entity_names])
+                for record in rel_result:
+                    src = record.get("src")
+                    tgt = record.get("tgt")
+                    rel_type = record.get("rel_type", "related")
+                    if src and tgt:
+                        src_id = f"neo4j_{src}"
+                        tgt_id = f"neo4j_{tgt}"
+                        link_key = f"{src_id}->{tgt_id}"
+                        links[link_key] = GraphLink(
+                            source=src_id,
+                            target=tgt_id,
+                            relation=rel_type,
+                        )
+
+        return list(nodes.values()), list(links.values())
+    except Exception as e:
+        logger.warning("Neo4j query failed: %s", e)
+        return [], []
+
+
+def _check_neo4j_has_data(driver) -> bool:
+    """Check if Neo4j has any entity nodes."""
+    if driver is None:
+        return False
+    try:
+        with driver.session() as session:
+            result = session.run("MATCH (e) RETURN count(e) AS cnt LIMIT 1")
+            record = result.single()
+            cnt = record.get("cnt", 0) if record else 0
+            return cnt > 0
+    except Exception:
+        return False
 
 
 def _parse_tags(tags_str: Optional[str]) -> List[str]:
@@ -127,14 +247,27 @@ def get_full_graph(
     """
     获取完整图谱数据。
 
+    优先从 Neo4j 查询（LightRAG 构建的语义图谱），如果无数据则 fallback 到 SQLite。
+
     Args:
         db: 数据库会话
-        limit: 返回前 N 个文物的图谱数据
-        offset: 偏移量，用于分页
+        limit: 返回前 N 个实体/文物
+        offset: 偏移量，用于分页（仅 SQLite fallback 时使用）
 
     Returns:
         (nodes_list, links_list)
     """
+    driver = _get_neo4j_driver()
+
+    # Try Neo4j first
+    if _check_neo4j_has_data(driver):
+        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=limit)
+        if neo4j_nodes:
+            logger.info("get_full_graph: returned %d nodes from Neo4j", len(neo4j_nodes))
+            return neo4j_nodes, neo4j_links
+
+    # Fallback to SQLite
+    logger.info("get_full_graph: Neo4j empty or unavailable, falling back to SQLite")
     artifacts = (
         db.query(Artifact)
         .order_by(Artifact.id)
@@ -153,9 +286,35 @@ def search_graph(
     """
     搜索图谱节点，返回匹配节点及其一跳邻居构成的子图。
 
+    优先从 Neo4j 查询语义实体，如果无数据则 fallback 到 SQLite artifacts。
+
     搜索范围：节点名称包含关键词。
-    使用 DB-level ILIKE 过滤，避免加载全部文物。
     """
+    driver = _get_neo4j_driver()
+
+    # Try Neo4j first
+    if _check_neo4j_has_data(driver):
+        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=50, keyword=keyword)
+        if neo4j_nodes:
+            logger.info("search_graph: found %d nodes in Neo4j for keyword '%s'", len(neo4j_nodes), keyword)
+            # Collect one-hop neighbors
+            matched_ids = {n.id for n in neo4j_nodes}
+            result_node_ids: Set[str] = set(matched_ids)
+            result_link_keys: Set[str] = set()
+
+            for link in neo4j_links:
+                if link.source in matched_ids or link.target in matched_ids:
+                    result_node_ids.add(link.source)
+                    result_node_ids.add(link.target)
+                    result_link_keys.add(link.source + "->" + link.target)
+
+            nodes_dict = {n.id: n for n in neo4j_nodes}
+            result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
+            result_links = [l for l in neo4j_links if l.source + "->" + l.target in result_link_keys]
+            return result_nodes, result_links
+
+    # Fallback to SQLite
+    logger.info("search_graph: Neo4j empty or unavailable, falling back to SQLite")
     # DB-level filtering — only load matching artifacts
     search_term = f"%{keyword}%"
     matched_artifacts = (
