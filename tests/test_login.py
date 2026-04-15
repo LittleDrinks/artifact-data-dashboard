@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from playwright.async_api import async_playwright, expect
 
-from conftest import BASE_URL, save_screenshot_on_failure, DEFAULT_TIMEOUT
+from conftest import BASE_URL, save_screenshot_on_failure, DEFAULT_TIMEOUT, NAVIGATION_TIMEOUT
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -27,27 +27,33 @@ async def test_valid_login_redirects_to_dashboard():
             # Verify we're on login page
             assert "/login" in page.url, f"Expected to be on login page, got {page.url}"
 
-            # Fill login form using exact IDs
-            await page.locator('#username').fill("admin")
-            await page.locator('#password').fill("admin123")
+            # Fill login form using placeholder-based selectors (Ant Design doesn't use explicit IDs)
+            # The Form.Item name creates an input with placeholder text
+            username_input = page.locator('input[placeholder="用户名"]').first
+            password_input = page.locator('input[placeholder="密码"]').first
+
+            await username_input.fill("admin")
+            await password_input.fill("admin123")
 
             # Click login button and wait for navigation
             await page.locator('button[type="submit"]').click()
 
             # Wait for URL to change (login redirects to dashboard)
-            # Give it more time since this involves API call
-            max_wait = 10
-            for i in range(max_wait):
-                await page.wait_for_timeout(1000)
+            # Use waitForURL with conftest NAVIGATION_TIMEOUT for reliable detection
+            try:
+                await page.wait_for_url("**/", timeout=NAVIGATION_TIMEOUT)
+            except Exception:
+                # If waitForURL fails, check if at least the token was stored
+                token = await page.evaluate("localStorage.getItem('token')")
                 current_url = page.url
-                if "/login" not in current_url:
-                    break
+                assert token or "/login" not in current_url, \
+                    f"Login failed - no token and still on login page after {NAVIGATION_TIMEOUT}ms. URL: {current_url}"
 
             current_url = page.url
 
             # Verify we're on dashboard (not login page)
             assert "/login" not in current_url, \
-                f"Login failed - still on login page after {max_wait}s. URL: {current_url}"
+                f"Login failed - still on login page. URL: {current_url}"
 
         except Exception as e:
             await save_screenshot_on_failure(page, test_name)
@@ -74,9 +80,9 @@ async def test_wrong_password_shows_error():
             await page.goto(f"{BASE_URL}/login")
             await page.wait_for_load_state("networkidle")
 
-            # Fill login form with wrong password
-            await page.locator('#username').fill("admin")
-            await page.locator('#password').fill("wrongpassword")
+            # Fill login form with wrong password using placeholder-based selectors
+            await page.locator('input[placeholder="用户名"]').first.fill("admin")
+            await page.locator('input[placeholder="密码"]').first.fill("wrongpassword")
 
             # Click login button
             await page.locator('button[type="submit"]').click()

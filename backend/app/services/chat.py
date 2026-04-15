@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from openai import OpenAI
+import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -41,6 +42,8 @@ SYSTEM_PROMPT = (
     "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库\n"
     "2. **get_artifact_detail** — 获取指定文物的完整信息\n\n"
     "回答规则：\n"
+    "- 【不调用工具的场景】如果用户只是打招呼（你好、嗨、hello）、寒暄、问你的能力（你能做什么/你是谁）、"
+    "或者发发表情/闲聊，直接友好回复即可，**绝对不要调用任何工具**\n"
     "- 用户询问文物相关信息时，务必先调用工具查询数据库，不要凭记忆编造\n"
     "- 综合工具返回的数据回答，用编号列表和加粗标题组织内容\n"
     "- 引用数据时标注来源（如「数据库检索结果 #1」）\n"
@@ -63,6 +66,7 @@ def _get_client() -> OpenAI:
         _client = OpenAI(
             api_key=settings.AI_API_KEY,
             base_url=settings.AI_API_BASE,
+            timeout=120.0,  # 2 minutes — covers long DeepSeek Reasoner responses
         )
     return _client
 
@@ -306,13 +310,23 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
         in_thinking = False
         in_answer = False
 
-        stream = client.chat.completions.create(
-            model=settings.AI_MODEL_NAME,
-            messages=messages,
-            tools=TOOL_DEFINITIONS,
-            stream=True,
-            max_tokens=4096,
-        )
+        try:
+            stream = client.chat.completions.create(
+                model=settings.AI_MODEL_NAME,
+                messages=messages,
+                tools=TOOL_DEFINITIONS,
+                stream=True,
+                max_tokens=4096,
+            )
+        except (httpx.TimeoutException, Exception) as exc:
+            err_msg = str(exc)[:200]
+            logger.warning("LLM stream creation failed: %s", err_msg)
+            yield _sse_event("answer_start", {})
+            yield _sse_event("answer_delta", {
+                "content": "抱歉，AI 服务暂时响应超时，请稍后重试。"
+            })
+            yield _sse_event("answer_end", {})
+            return content_text
 
         for chunk in stream:
             if not chunk.choices:
