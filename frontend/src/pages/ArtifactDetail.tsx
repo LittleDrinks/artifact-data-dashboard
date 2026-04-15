@@ -5,12 +5,13 @@ import {
   Space, Modal, Form, Input, Select, Row, Col, message,
 } from 'antd';
 import {
-  ArrowLeftOutlined, EditOutlined, LinkOutlined,
+  ArrowLeftOutlined, EditOutlined, LinkOutlined, ToolOutlined,
 } from '@ant-design/icons';
 import { getArtifact, updateArtifact, deleteArtifact, type Artifact, type ArtifactFormData } from '../api/artifacts';
 import { getStatsByCategory, getStatsByEra } from '../api/stats';
 import { useAuth } from '../hooks/useAuth';
 import { CATEGORY_COLORS } from '../constants/colors';
+import ImageRepair from './ImageRepair';
 
 export default function ArtifactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +27,9 @@ export default function ArtifactDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [form] = Form.useForm();
+
+  // 图像修复模式
+  const [showRepair, setShowRepair] = useState(false);
 
   // 筛选器选项
   const [categories, setCategories] = useState<{ label: string; value: string }[]>([]);
@@ -199,39 +203,56 @@ export default function ArtifactDetail() {
       <Row gutter={24}>
         {/* 左侧：图片 */}
         <Col xs={24} lg={10}>
-          <Card
-            style={{
-              borderRadius: 'var(--r-card)',
-              border: '1px solid var(--border)',
-              marginBottom: 16,
-              overflow: 'hidden',
-            }}
-            styles={{ body: { padding: 0 } }}
-          >
-            {artifact.image_url ? (
-              <Image
-                src={artifact.image_url}
-                alt={artifact.name}
-                style={{ width: '100%', maxHeight: 400, objectFit: 'contain' }}
-                fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmNGY4Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM5NGEzYjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7lm77niIfllYblk4Hlm77moIc8L3RleHQ+PC9zdmc+"
-              />
-            ) : (
-              <div style={{
-                height: 300,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'var(--bg-panel)',
-                color: 'var(--text-muted)',
-                fontSize: 14,
-                flexDirection: 'column',
-                gap: 8,
-              }}>
-                <span style={{ fontSize: 48 }}>🏺</span>
-                <span>暂无图片</span>
-              </div>
-            )}
-          </Card>
+          {showRepair ? (
+            <ImageRepair
+              artifact={artifact}
+              onClose={() => setShowRepair(false)}
+            />
+          ) : (
+            <Card
+              style={{
+                borderRadius: 'var(--r-card)',
+                border: '1px solid var(--border)',
+                marginBottom: 16,
+                overflow: 'hidden',
+              }}
+              styles={{ body: { padding: 0 } }}
+              extra={artifact.image_url && (
+                <Button
+                  size="small"
+                  icon={<ToolOutlined />}
+                  onClick={() => setShowRepair(true)}
+                  style={{ margin: 8 }}
+                >
+                  图像修复
+                </Button>
+              )}
+            >
+              {artifact.image_url ? (
+                <Image
+                  src={artifact.image_url}
+                  alt={artifact.name}
+                  style={{ width: '100%', maxHeight: 400, objectFit: 'contain' }}
+                  fallback="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmNGY4Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM5NGEzYjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7lm77niIfllYblk4Hlm77moIc8L3RleHQ+PC9zdmc+"
+                />
+              ) : (
+                <div style={{
+                  height: 300,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--text-muted)',
+                  fontSize: 14,
+                  flexDirection: 'column',
+                  gap: 8,
+                }}>
+                  <span style={{ fontSize: 48 }}>🏺</span>
+                  <span>暂无图片</span>
+                </div>
+              )}
+            </Card>
+          )}
         </Col>
 
         {/* 右侧：信息 */}

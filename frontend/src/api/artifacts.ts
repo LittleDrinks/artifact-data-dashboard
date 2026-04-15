@@ -68,3 +68,36 @@ export async function updateArtifact(id: number, data: Partial<ArtifactFormData>
 export async function deleteArtifact(id: number): Promise<void> {
   await client.delete(`/artifacts/${id}`);
 }
+
+/** 修复文物图片 */
+export interface RepairImageParams {
+  artifactId: number;
+  maskFile: File;
+  radius?: number;
+  method?: 'telea' | 'ns';
+}
+
+export interface RepairImageResponse {
+  success: boolean;
+  artifact_id: number;
+  artifact_name: string;
+  repaired_image: string;  // base64 encoded PNG
+  method: string;
+  radius: number;
+}
+
+export async function repairImage(params: RepairImageParams): Promise<RepairImageResponse> {
+  const formData = new FormData();
+  formData.append('mask', params.maskFile);
+  formData.append('radius', String(params.radius || 3));
+  formData.append('method', params.method || 'telea');
+
+  const res = await client.post<RepairImageResponse>(
+    `/artifacts/${params.artifactId}/repair-image`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }
+  );
+  return res.data;
+}
