@@ -468,9 +468,15 @@ async def _build() -> None:
     llm_func = _make_glm_llm_func()
     embed_func = _make_robust_embed_func()
 
+    # Neo4j connection settings
+    neo4j_uri = settings.NEO4J_URI
+    neo4j_user = settings.NEO4J_USER
+    neo4j_password = settings.NEO4J_PASSWORD
+
     logger.info(
-        "Creating LightRAG — working_dir=%s, llm=GLM-4.7 API (4 parallel), embed=nomic-embed-text (Ollama)",
+        "Creating LightRAG — working_dir=%s, Neo4j=%s, llm=GLM-4.7 API (4 parallel), embed=nomic-embed-text (Ollama)",
         working_dir,
+        neo4j_uri,
     )
 
     rag = LightRAG(
@@ -483,6 +489,11 @@ async def _build() -> None:
         # Increase timeouts for large-scale indexing
         default_embedding_timeout=300,
         default_llm_timeout=300,
+        # Neo4j graph storage
+        graph_storage="Neo4JStorage",
+        neo4j_uri=neo4j_uri,
+        neo4j_user=neo4j_user,
+        neo4j_password=neo4j_password,
     )
 
     # Initialize storages
