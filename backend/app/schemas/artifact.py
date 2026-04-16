@@ -15,6 +15,11 @@ class ArtifactBase(BaseModel):
     location: Optional[str] = Field(None, max_length=100, description="出土地点")
     image_url: Optional[str] = Field(None, max_length=500, description="图片链接")
     tags: Optional[str] = Field(None, description="标签（逗号分隔）")
+    # 新增字段
+    material: Optional[str] = Field(None, max_length=50, description="材质")
+    museum: Optional[str] = Field(None, max_length=100, description="馆藏")
+    source_url: Optional[str] = Field(None, max_length=500, description="来源链接")
+    dimensions: Optional[str] = Field(None, max_length=100, description="尺寸")
 
 
 class ArtifactCreate(ArtifactBase):
@@ -31,6 +36,11 @@ class ArtifactUpdate(BaseModel):
     location: Optional[str] = Field(None, max_length=100)
     image_url: Optional[str] = Field(None, max_length=500)
     tags: Optional[str] = None
+    # 新增字段
+    material: Optional[str] = Field(None, max_length=50)
+    museum: Optional[str] = Field(None, max_length=100)
+    source_url: Optional[str] = Field(None, max_length=500)
+    dimensions: Optional[str] = Field(None, max_length=100)
 
 
 class ArtifactResponse(ArtifactBase):

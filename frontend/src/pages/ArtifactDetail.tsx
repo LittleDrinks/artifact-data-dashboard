@@ -309,8 +309,17 @@ export default function ArtifactDetail() {
                   : <span style={{ color: 'var(--text-muted)' }}>未知</span>
                 }
               </Descriptions.Item>
+              <Descriptions.Item label="材质">
+                {artifact.material || <span style={{ color: 'var(--text-muted)' }}>未知</span>}
+              </Descriptions.Item>
+              <Descriptions.Item label="馆藏">
+                {artifact.museum || <span style={{ color: 'var(--text-muted)' }}>未知</span>}
+              </Descriptions.Item>
               <Descriptions.Item label="出土地点" span={2}>
                 {artifact.location || <span style={{ color: 'var(--text-muted)' }}>未知</span>}
+              </Descriptions.Item>
+              <Descriptions.Item label="尺寸">
+                {artifact.dimensions || <span style={{ color: 'var(--text-muted)' }}>未知</span>}
               </Descriptions.Item>
               <Descriptions.Item label="记录时间">
                 {new Date(artifact.created_at).toLocaleDateString('zh-CN')}

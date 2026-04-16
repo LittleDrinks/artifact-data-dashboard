@@ -20,6 +20,11 @@ class Artifact(Base):
     location: Mapped[Optional[str]] = mapped_column(String(100))
     image_url: Mapped[Optional[str]] = mapped_column(String(500))
     tags: Mapped[Optional[str]] = mapped_column(Text)
+    # 新增字段（数据质量修复）
+    material: Mapped[Optional[str]] = mapped_column(String(50), index=True)  # 材质
+    museum: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # 馆藏
+    source_url: Mapped[Optional[str]] = mapped_column(String(500))  # Wikipedia 来源链接
+    dimensions: Mapped[Optional[str]] = mapped_column(String(100))  # 尺寸
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),

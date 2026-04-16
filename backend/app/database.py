@@ -90,10 +90,39 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS ix_artifacts_era ON artifacts(era)",
             "CREATE INDEX IF NOT EXISTS ix_artifacts_name ON artifacts(name)",
             "CREATE INDEX IF NOT EXISTS ix_chat_sessions_user_id ON chat_sessions(user_id)",
+            # 新增字段索引
+            "CREATE INDEX IF NOT EXISTS ix_artifacts_material ON artifacts(material)",
+            "CREATE INDEX IF NOT EXISTS ix_artifacts_museum ON artifacts(museum)",
         ]
         for idx_sql in indexes:
             conn.execute(text(idx_sql))
         conn.commit()
 
+    # 确保新字段存在（数据质量修复迁移）
+    _ensure_new_columns()
+
     # Ensure admin user exists
     _ensure_admin_user()
+
+
+def _ensure_new_columns():
+    """Add new columns if they don't exist (SQLite migration)."""
+    new_columns = [
+        ("material", "VARCHAR(50)"),
+        ("museum", "VARCHAR(100)"),
+        ("source_url", "VARCHAR(500)"),
+        ("dimensions", "VARCHAR(100)"),
+    ]
+
+    with engine.connect() as conn:
+        # 获取现有列
+        result = conn.execute(text("PRAGMA table_info(artifacts)"))
+        existing_columns = {row[1] for row in result.fetchall()}
+
+        # 添加缺失的列
+        for col_name, col_type in new_columns:
+            if col_name not in existing_columns:
+                conn.execute(text(f"ALTER TABLE artifacts ADD COLUMN {col_name} {col_type}"))
+                print(f"Added column: {col_name}")
+
+        conn.commit()

@@ -9,6 +9,11 @@ export interface Artifact {
   location: string | null;
   image_url: string | null;
   tags: string | null;
+  // 新增字段
+  material: string | null;  // 材质
+  museum: string | null;    // 馆藏
+  source_url: string | null;  // 来源链接
+  dimensions: string | null;  // 尺寸
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +43,11 @@ export interface ArtifactFormData {
   location?: string | null;
   image_url?: string | null;
   tags?: string | null;
+  // 新增字段
+  material?: string | null;
+  museum?: string | null;
+  source_url?: string | null;
+  dimensions?: string | null;
 }
 
 /** 获取文物列表 */

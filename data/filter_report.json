@@ -1,0 +1,243 @@
+{
+  "total_artifacts": 818,
+  "kept_count": 771,
+  "filtered_count": 47,
+  "filter_rate": "5.75%",
+  "filtered_items": [
+    {
+      "name": "中华人民共和国",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD"
+    },
+    {
+      "name": "国家文物局",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%9B%BD%E5%AE%B6%E6%96%87%E7%89%A9%E5%B1%80"
+    },
+    {
+      "name": "商代",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%95%86%E4%BB%A3"
+    },
+    {
+      "name": "湖南省",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%B9%96%E5%8D%97%E7%9C%81"
+    },
+    {
+      "name": "宁乡县",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%AE%81%E4%B9%A1%E5%8E%BF"
+    },
+    {
+      "name": "中国国家博物馆",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E5%9B%BD%E5%AE%B6%E5%8D%9A%E7%89%A9%E9%A6%86"
+    },
+    {
+      "name": "新石器时代",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%96%B0%E7%9F%B3%E5%99%A8%E6%97%B6%E4%BB%A3"
+    },
+    {
+      "name": "商朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%95%86%E6%9C%9D"
+    },
+    {
+      "name": "西周",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E5%91%A8"
+    },
+    {
+      "name": "战国",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%88%98%E5%9B%BD"
+    },
+    {
+      "name": "秦朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E7%A7%A6%E6%9C%9D"
+    },
+    {
+      "name": "西汉",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E6%B1%89"
+    },
+    {
+      "name": "东汉",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%9C%E6%B1%89"
+    },
+    {
+      "name": "曹魏",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%9B%B9%E9%AD%8F"
+    },
+    {
+      "name": "晋朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%99%8B%E6%9C%9D"
+    },
+    {
+      "name": "三国",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%89%E5%9B%BD"
+    },
+    {
+      "name": "五胡十六国",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%94%E8%83%A1%E5%8D%81%E5%85%AD%E5%9B%BD"
+    },
+    {
+      "name": "南朝 (中国朝代)",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%97%E6%9C%9D_(%E4%B8%AD%E5%9C%8B%E6%9C%9D%E4%BB%A3)"
+    },
+    {
+      "name": "南北朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%97%E5%8C%97%E6%9C%9D"
+    },
+    {
+      "name": "北魏",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8C%97%E9%AD%8F"
+    },
+    {
+      "name": "唐朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%94%90%E6%9C%9D"
+    },
+    {
+      "name": "西夏",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E5%A4%8F"
+    },
+    {
+      "name": "元朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%85%83%E6%9C%9D"
+    },
+    {
+      "name": "明朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%98%8E%E6%9C%9D"
+    },
+    {
+      "name": "隋朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E9%9A%8B%E6%9C%9D"
+    },
+    {
+      "name": "杜牧",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%9D%9C%E7%89%A7"
+    },
+    {
+      "name": "五代十国",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%94%E4%BB%A3%E5%8D%81%E5%9B%BD"
+    },
+    {
+      "name": "黄筌",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E9%BB%84%E7%AD%8C"
+    },
+    {
+      "name": "宋朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%AE%8B%E6%9C%9D"
+    },
+    {
+      "name": "文彦博",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%96%87%E5%BD%A6%E5%8D%9A"
+    },
+    {
+      "name": "马和之",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E9%A9%AC%E5%92%8C%E4%B9%8B"
+    },
+    {
+      "name": "夏朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%A4%8F%E6%9C%9D"
+    },
+    {
+      "name": "战国时期",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%88%98%E5%9B%BD%E6%97%B6%E6%9C%9F"
+    },
+    {
+      "name": "汉朝",
+      "category": "禁止出境展览文物",
+      "url": "https://zh.wikipedia.org/wiki/%E6%B1%89%E6%9C%9D"
+    },
+    {
+      "name": "中国青铜器",
+      "category": "中国青铜器",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E9%9D%92%E9%93%9C%E5%99%A8"
+    },
+    {
+      "name": "钫 (器皿)",
+      "category": "中国青铜器",
+      "url": "https://zh.wikipedia.org/wiki/%E9%92%AB_(%E5%99%A8%E7%9A%BF)"
+    },
+    {
+      "name": "鼎",
+      "category": "中国青铜器",
+      "url": "https://zh.wikipedia.org/wiki/%E9%BC%8E"
+    },
+    {
+      "name": "卣",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E5%8D%A3"
+    },
+    {
+      "name": "尊",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E5%B0%8A"
+    },
+    {
+      "name": "斝",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E6%96%9D"
+    },
+    {
+      "name": "盉",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E7%9B%89"
+    },
+    {
+      "name": "觥",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A7%A5"
+    },
+    {
+      "name": "觯",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E8%A7%AF"
+    },
+    {
+      "name": "豆 (器皿)",
+      "category": "中国古代礼器",
+      "url": "https://zh.wikipedia.org/wiki/%E8%B1%86_(%E5%99%A8%E7%9A%BF)"
+    },
+    {
+      "name": "中国文物学会",
+      "category": "中国文物",
+      "url": "https://zh.wikipedia.org/wiki/%E4%B8%AD%E5%9B%BD%E6%96%87%E7%89%A9%E5%AD%A6%E4%BC%9A"
+    },
+    {
+      "name": "破四旧",
+      "category": "中国文物",
+      "url": "https://zh.wikipedia.org/wiki/%E7%A0%B4%E5%9B%9B%E6%97%A7"
+    },
+    {
+      "name": "如果国宝会说话",
+      "category": "中国文物",
+      "url": "https://zh.wikipedia.org/wiki/%E5%A6%82%E6%9E%9C%E5%9B%BD%E5%AE%9D%E4%BC%9A%E8%AF%B4%E8%AF%9D"
+    }
+  ]
+}
