@@ -17,7 +17,7 @@ def get_full_graph(
     limit: int = Query(100, ge=1, le=1000, description="返回前 N 个文物的图谱数据"),
     offset: int = Query(0, ge=0, description="偏移量"),
     node_types: Optional[str] = Query(
-        "artifact",
+        "artifact,era,category,location,tag",
         description="逗号分隔的节点类型，如 artifact,era,category,location,tag",
     ),
     db: Session = Depends(get_db),
@@ -37,7 +37,7 @@ def get_full_graph(
 def search_graph(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     node_types: Optional[str] = Query(
-        "artifact",
+        "artifact,era,category,location,tag",
         description="逗号分隔的节点类型",
     ),
     db: Session = Depends(get_db),

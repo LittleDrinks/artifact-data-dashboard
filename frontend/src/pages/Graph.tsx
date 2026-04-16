@@ -100,9 +100,9 @@ export default function Graph() {
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Node type filter — default artifact only
+  // Node type filter — default show all entity types to display edges
   const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
-  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact']));
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact', 'era', 'category', 'location', 'tag']));
 
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
