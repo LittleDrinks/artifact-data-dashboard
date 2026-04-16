@@ -16,9 +16,11 @@ import {
   SearchOutlined,
   RobotOutlined,
   LoadingOutlined,
-  CheckCircleFilled,
   DeleteOutlined,
   CloseOutlined,
+  DownOutlined,
+  RightOutlined,
+  BulbOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
@@ -46,9 +48,9 @@ interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  // thinking is hidden from user but kept in model for internal use
-  _thinking: string;
-  _thinkingDone: boolean;
+  // thinking is now visible as collapsible section
+  thinking: string;
+  thinkingDone: boolean;
   // Support multiple tool calls from ReAct loop
   toolCalls: ToolCallEntry[];
   streaming: boolean;
@@ -82,6 +84,10 @@ export default function Chat() {
   const [ragToolQueries, setRagToolQueries] = useState<string[]>([]);
   const [ragToolElapsed, setRagToolElapsed] = useState(0);
   const [ragToolLoading, setRagToolLoading] = useState(false);
+  // Selected tool call index for RAG panel (which retrieval to show)
+  const [selectedToolCallIndex, setSelectedToolCallIndex] = useState<number>(-1);
+  // Thinking section expansion state (per message)
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
 
   // Refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -103,19 +109,27 @@ export default function Chat() {
     if (!lastAssistant || lastAssistant.streaming) return;
     const toolCalls = lastAssistant.toolCalls;
     if (toolCalls.length > 0) {
-      // Show accumulated results from all tool calls
-      const allResults = toolCalls.flatMap(tc => tc.results);
-      setRagToolResults(allResults);
-      setRagToolQueries(toolCalls.map(tc => tc.query));
-      setRagToolElapsed(toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0));
+      // Show results from selected tool call (default to latest)
+      const idx = selectedToolCallIndex >= 0 && selectedToolCallIndex < toolCalls.length
+        ? selectedToolCallIndex
+        : toolCalls.length - 1;
+      const selectedTc = toolCalls[idx];
+      setRagToolResults(selectedTc.results);
+      setRagToolQueries([selectedTc.query]);
+      setRagToolElapsed(selectedTc.elapsed);
       setRagToolLoading(false);
+      // Update selected index if it was out of bounds
+      if (selectedToolCallIndex < 0 || selectedToolCallIndex >= toolCalls.length) {
+        setSelectedToolCallIndex(toolCalls.length - 1);
+      }
     } else {
       setRagToolResults([]);
       setRagToolQueries([]);
       setRagToolElapsed(0);
       setRagToolLoading(false);
+      setSelectedToolCallIndex(-1);
     }
-  }, [messages]);
+  }, [messages, selectedToolCallIndex]);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -185,8 +199,8 @@ export default function Chat() {
           id: generateId(),
           role: m.role as 'user' | 'assistant',
           content: m.content || '',
-          _thinking: '',
-          _thinkingDone: true,
+          thinking: '',
+          thinkingDone: true,
           toolCalls,
           streaming: false,
         };
@@ -196,15 +210,18 @@ export default function Chat() {
       // Auto-show panel if last assistant message has tool calls
       const lastAssistant = [...displayMsgs].reverse().find(m => m.role === 'assistant');
       if (lastAssistant && lastAssistant.toolCalls.length > 0) {
-        const allResults = lastAssistant.toolCalls.flatMap(tc => tc.results);
-        setRagToolResults(allResults);
-        setRagToolQueries(lastAssistant.toolCalls.map(tc => tc.query));
-        setRagToolElapsed(lastAssistant.toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0));
+        // Show the latest retrieval by default
+        const latestIdx = lastAssistant.toolCalls.length - 1;
+        setSelectedToolCallIndex(latestIdx);
+        setRagToolResults(lastAssistant.toolCalls[latestIdx].results);
+        setRagToolQueries([lastAssistant.toolCalls[latestIdx].query]);
+        setRagToolElapsed(lastAssistant.toolCalls[latestIdx].elapsed);
         setRagVisible(true);
       } else {
         setRagToolResults([]);
         setRagToolQueries([]);
         setRagToolElapsed(0);
+        setSelectedToolCallIndex(-1);
         setRagVisible(false);
       }
     } catch {
@@ -227,6 +244,7 @@ export default function Chat() {
       setRagToolQueries([]);
       setRagToolElapsed(0);
       setRagToolLoading(false);
+      setSelectedToolCallIndex(-1);
 
       loadSessionMessages(session.id);
     },
@@ -264,6 +282,7 @@ export default function Chat() {
     setRagToolQueries([]);
     setRagToolElapsed(0);
     setRagToolLoading(false);
+    setSelectedToolCallIndex(-1);
     setRagVisible(false);
     inputRef.current?.focus();
   }, []);
@@ -280,8 +299,8 @@ export default function Chat() {
       id: generateId(),
       role: 'user',
       content: query,
-      _thinking: '',
-      _thinkingDone: true,
+      thinking: '',
+      thinkingDone: true,
       toolCalls: [],
       streaming: false,
     };
@@ -290,8 +309,8 @@ export default function Chat() {
       id: generateId(),
       role: 'assistant',
       content: '',
-      _thinking: '',
-      _thinkingDone: false,
+      thinking: '',
+      thinkingDone: false,
       toolCalls: [],
       streaming: true,
     };
@@ -304,6 +323,7 @@ export default function Chat() {
     setRagToolQueries([]);
     setRagToolElapsed(0);
     setRagToolLoading(false);
+    setSelectedToolCallIndex(-1);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -314,15 +334,22 @@ export default function Chat() {
 
         switch (event.type) {
           case 'thinking_start':
-            // Thinking is completely hidden - do nothing visible
-            break;
-
-          case 'thinking_delta':
-            // Silently accumulate thinking (not displayed anywhere)
+            // Mark thinking as started (will show loading spinner)
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, _thinking: m._thinking + (event.content || '') }
+                  ? { ...m, thinkingDone: false }
+                  : m,
+              ),
+            );
+            break;
+
+          case 'thinking_delta':
+            // Accumulate thinking text (visible in collapsible section)
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, thinking: m.thinking + (event.content || '') }
                   : m,
               ),
             );
@@ -331,7 +358,7 @@ export default function Chat() {
           case 'thinking_end':
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, _thinkingDone: true } : m,
+                m.id === assistantId ? { ...m, thinkingDone: true } : m,
               ),
             );
             break;
@@ -340,30 +367,32 @@ export default function Chat() {
             // Auto-open RAG panel when tool call starts
             setRagVisible(true);
             setRagToolLoading(true);
-            // Add new query to the list
-            setRagToolQueries((prev) => [...prev, event.query || query]);
-            setRagToolResults([]);
             // ADD a new tool call entry (don't replace previous ones)
+            let newToolCallIdx = 0;
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? {
-                      ...m,
-                      toolCalls: [
-                        ...m.toolCalls,
-                        {
-                          tool: event.tool || 'search_artifacts',
-                          query: event.query || query,
-                          results: [],
-                          count: 0,
-                          elapsed: 0,
-                          done: false,
-                        },
-                      ],
-                    }
-                  : m,
-              ),
+              prev.map((m) => {
+                if (m.id === assistantId) {
+                  newToolCallIdx = m.toolCalls.length; // Index of new tool call
+                  return {
+                    ...m,
+                    toolCalls: [
+                      ...m.toolCalls,
+                      {
+                        tool: event.tool || 'search_artifacts',
+                        query: event.query || query,
+                        results: [],
+                        count: 0,
+                        elapsed: 0,
+                        done: false,
+                      },
+                    ],
+                  };
+                }
+                return m;
+              }),
             );
+            // Update selected index to the new tool call (will be set after render)
+            setTimeout(() => setSelectedToolCallIndex(newToolCallIdx), 0);
             break;
 
           case 'tool_call_result':
@@ -383,9 +412,10 @@ export default function Chat() {
                 return { ...m, toolCalls: updatedToolCalls };
               }),
             );
-            // Accumulate results in RAG panel
-            setRagToolResults((prev) => [...prev, ...(event.results || [])]);
-            setRagToolElapsed((prev) => prev + (event.elapsed || 0));
+            // Update RAG panel to show this retrieval's results
+            setRagToolResults(event.results || []);
+            setRagToolQueries([event.query || query]);
+            setRagToolElapsed(event.elapsed || 0);
             setRagToolLoading(false);
             break;
 
@@ -444,52 +474,161 @@ export default function Chat() {
     }
   };
 
-  // ── Render inline tool call indicator (minimal, non-expandable) ──
-  const renderToolCallIndicator = (msg: DisplayMessage) => {
-    if (msg.toolCalls.length === 0) return null;
-
-    const totalRounds = msg.toolCalls.length;
-    const totalCount = msg.toolCalls.reduce((sum, tc) => sum + tc.count, 0);
-    const totalElapsed = msg.toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0);
-    const allDone = msg.toolCalls.every(tc => tc.done);
-    const anyInProgress = msg.toolCalls.some(tc => !tc.done);
+  // ── Render thinking section (collapsible) ──
+  const renderThinkingSection = (msg: DisplayMessage) => {
+    if (!msg.thinking && msg.thinkingDone) return null;
+    const isExpanded = expandedThinking.has(msg.id);
+    const toggleExpand = () => {
+      setExpandedThinking((prev) => {
+        const next = new Set(prev);
+        if (next.has(msg.id)) next.delete(msg.id);
+        else next.add(msg.id);
+        return next;
+      });
+    };
 
     return (
       <div
         style={{
           marginBottom: 10,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '3px 10px',
+          borderRadius: 6,
           background: '#f6f9fc',
           border: '1px solid #e5edf5',
-          borderRadius: 12,
-          fontSize: 12,
-          color: '#64748d',
         }}
       >
-        {anyInProgress ? (
-          <>
-            <LoadingOutlined style={{ fontSize: 10, color: '#533afd' }} />
-            <span>检索中...</span>
-          </>
-        ) : allDone && totalCount > 0 ? (
-          <>
-            <CheckCircleFilled style={{ fontSize: 10, color: '#15be53' }} />
-            <span>
-              已检索 {totalRounds} 轮 · {totalCount} 条结果
+        <div
+          onClick={toggleExpand}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 12px',
+            cursor: 'pointer',
+            fontSize: 12,
+            color: '#64748d',
+            userSelect: 'none',
+          }}
+        >
+          <BulbOutlined style={{ fontSize: 12, color: '#533afd' }} />
+          <span style={{ fontWeight: 500 }}>思考过程</span>
+          {!msg.thinkingDone && (
+            <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
+          )}
+          {msg.thinkingDone && msg.thinking && (
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>
+              ({msg.thinking.length} 字)
             </span>
-            {totalElapsed > 0 && (
-              <span style={{ color: '#94a3b8' }}>· {totalElapsed.toFixed(1)}s</span>
-            )}
-          </>
-        ) : allDone ? (
-          <>
-            <CheckCircleFilled style={{ fontSize: 10, color: '#94a3b8' }} />
-            <span>检索完成 · 无相关结果</span>
-          </>
-        ) : null}
+          )}
+          {isExpanded ? (
+            <DownOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
+          ) : (
+            <RightOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
+          )}
+        </div>
+        {isExpanded && msg.thinking && (
+          <div
+            style={{
+              padding: '10px 12px',
+              fontSize: 12,
+              lineHeight: 1.7,
+              color: '#64748d',
+              whiteSpace: 'pre-wrap',
+              borderTop: '1px solid #e5edf5',
+            }}
+          >
+            {msg.thinking}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Render per-tool-call bubbles ──
+  const renderToolCallBubbles = (msg: DisplayMessage) => {
+    if (msg.toolCalls.length === 0) return null;
+
+    return (
+      <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {msg.toolCalls.map((tc, idx) => {
+          const isSelected = selectedToolCallIndex === idx;
+          const handleClick = () => {
+            setSelectedToolCallIndex(idx);
+            setRagToolResults(tc.results);
+            setRagToolQueries([tc.query]);
+            setRagToolElapsed(tc.elapsed);
+            setRagVisible(true);
+          };
+
+          return (
+            <div
+              key={idx}
+              onClick={handleClick}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 12px',
+                background: isSelected ? 'rgba(83,58,253,0.08)' : '#f6f9fc',
+                border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
+                borderRadius: 8,
+                fontSize: 12,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!isSelected) {
+                  (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
+                  (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isSelected) {
+                  (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
+                  (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
+                }
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: '#533afd',
+                  background: 'rgba(83,58,253,0.1)',
+                  width: 18,
+                  height: 18,
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {idx + 1}
+              </span>
+              <SearchOutlined style={{ fontSize: 12, color: '#533afd' }} />
+              <span
+                style={{
+                  maxWidth: 200,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: '#061b31',
+                }}
+              >
+                "{tc.query}"
+              </span>
+              {!tc.done ? (
+                <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 'auto' }} />
+              ) : tc.count > 0 ? (
+                <span style={{ marginLeft: 'auto', color: '#15be53', fontWeight: 500 }}>
+                  {tc.count} 条
+                </span>
+              ) : (
+                <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>无结果</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -674,7 +813,8 @@ export default function Chat() {
                       }),
                 }}
               >
-                {msg.role === 'assistant' && renderToolCallIndicator(msg)}
+                {msg.role === 'assistant' && renderThinkingSection(msg)}
+                {msg.role === 'assistant' && renderToolCallBubbles(msg)}
 
                 {/* Content */}
                 <div>
@@ -839,7 +979,60 @@ export default function Chat() {
             />
           </div>
 
-          {/* Search queries indicator */}
+          {/* Retrieval tabs (when multiple tool calls exist) */}
+          {/* Get the last assistant message's tool calls */}
+          {(() => {
+            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+            const allToolCalls = lastAssistant?.toolCalls || [];
+            if (allToolCalls.length > 1) {
+              return (
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    borderBottom: '1px solid #f0f4f8',
+                    fontSize: 12,
+                    flexShrink: 0,
+                    display: 'flex',
+                    gap: 6,
+                  }}
+                >
+                  {allToolCalls.map((tc, idx) => {
+                    const isSelected = selectedToolCallIndex === idx;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          setSelectedToolCallIndex(idx);
+                          setRagToolResults(tc.results);
+                          setRagToolQueries([tc.query]);
+                          setRagToolElapsed(tc.elapsed);
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          fontSize: 11,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                          background: isSelected ? 'rgba(83,58,253,0.1)' : '#fff',
+                          border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
+                          color: isSelected ? '#533afd' : '#64748d',
+                          maxWidth: 100,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        第 {idx + 1} 轮
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
+            return null;
+          })()}
+
+          {/* Current retrieval info */}
           {ragToolQueries.length > 0 && (
             <div
               style={{
@@ -850,11 +1043,9 @@ export default function Chat() {
                 flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: ragToolQueries.length > 1 ? 6 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <SearchOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                  {ragToolQueries.length > 1 ? `检索 ${ragToolQueries.length} 轮` : '检索'}
-                </span>
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>检索关键词</span>
                 {!ragToolLoading && ragToolElapsed > 0 && (
                   <span style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: 11 }}>
                     {ragToolElapsed.toFixed(1)}s
@@ -867,30 +1058,19 @@ export default function Chat() {
                   </span>
                 )}
               </div>
-              {ragToolQueries.map((q, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    marginTop: 4,
-                    paddingLeft: 20,
-                  }}
-                >
-                  <span style={{ fontSize: 10, color: '#94a3b8' }}>{i + 1}.</span>
-                  <span
-                    style={{
-                      maxWidth: 220,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    "{q}"
-                  </span>
-                </div>
-              ))}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  marginTop: 4,
+                  paddingLeft: 20,
+                }}
+              >
+                <span style={{ fontSize: 12, color: '#061b31', fontWeight: 500 }}>
+                  "{ragToolQueries[0]}"
+                </span>
+              </div>
             </div>
           )}
 
