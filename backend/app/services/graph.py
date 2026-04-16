@@ -239,10 +239,34 @@ def build_graph_from_artifacts(
     return nodes, links
 
 
+def _filter_graph_by_types(
+    nodes_dict: Dict[str, GraphNode],
+    links_dict: Dict[str, GraphLink],
+    node_types: List[str],
+) -> Tuple[List[GraphNode], List[GraphLink]]:
+    """Filter graph nodes/links to only include requested node types.
+
+    If 'artifact' is in node_types but other types are not, the non-artifact
+    nodes are removed and their links are dropped as well.
+    """
+    if not node_types or set(node_types) == {"artifact", "era", "category", "location", "tag"}:
+        # No filtering needed — return all
+        return list(nodes_dict.values()), list(links_dict.values())
+
+    allowed = set(node_types)
+    filtered_nodes = {nid: n for nid, n in nodes_dict.items() if n.type in allowed}
+    filtered_links = {
+        lk: l for lk, l in links_dict.items()
+        if l.source in filtered_nodes and l.target in filtered_nodes
+    }
+    return list(filtered_nodes.values()), list(filtered_links.values())
+
+
 def get_full_graph(
     db: Session,
     limit: int = 100,
     offset: int = 0,
+    node_types: Optional[List[str]] = None,
 ) -> Tuple[List[GraphNode], List[GraphLink]]:
     """
     获取完整图谱数据。
@@ -276,12 +300,13 @@ def get_full_graph(
         .all()
     )
     nodes_dict, links_dict = build_graph_from_artifacts(artifacts)
-    return list(nodes_dict.values()), list(links_dict.values())
+    return _filter_graph_by_types(nodes_dict, links_dict, node_types or ["artifact"])
 
 
 def search_graph(
     db: Session,
     keyword: str,
+    node_types: Optional[List[str]] = None,
 ) -> Tuple[List[GraphNode], List[GraphLink]]:
     """
     搜索图谱节点，返回匹配节点及其一跳邻居构成的子图。
@@ -315,6 +340,7 @@ def search_graph(
 
     # Fallback to SQLite
     logger.info("search_graph: Neo4j empty or unavailable, falling back to SQLite")
+    types = node_types or ["artifact"]
     # DB-level filtering — only load matching artifacts
     search_term = f"%{keyword}%"
     matched_artifacts = (
@@ -366,7 +392,7 @@ def search_graph(
             matched_node_ids.add(nid)
 
     if not matched_node_ids:
-        return list(nodes_dict.values()), list(links_dict.values())
+        return _filter_graph_by_types(nodes_dict, links_dict, types)
 
     # Collect one-hop neighbors
     result_node_ids: Set[str] = set(matched_node_ids)
@@ -377,6 +403,11 @@ def search_graph(
             result_node_ids.add(link.source)
             result_node_ids.add(link.target)
             result_link_keys.add(link_key)
+
+    # Apply type filter
+    allowed = set(types)
+    result_node_ids = {nid for nid in result_node_ids if nid in nodes_dict and nodes_dict[nid].type in allowed}
+    result_link_keys = {lk for lk in result_link_keys if links_dict[lk].source in result_node_ids and links_dict[lk].target in result_node_ids}
 
     result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
     result_links = [links_dict[lk] for lk in result_link_keys if lk in links_dict]

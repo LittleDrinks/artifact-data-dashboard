@@ -33,9 +33,10 @@ export interface NodeDetailResponse {
 /** 获取完整图谱数据 */
 export async function getFullGraph(
   limit: number = 100,
+  nodeTypes: string[] = ['artifact'],
 ): Promise<GraphDataResponse> {
   const res = await client.get<GraphDataResponse>('/graph/full', {
-    params: { limit },
+    params: { limit, node_types: nodeTypes.join(',') },
   });
   return res.data;
 }
@@ -43,9 +44,10 @@ export async function getFullGraph(
 /** 搜索图谱节点（返回匹配节点及一跳邻居子图） */
 export async function searchGraph(
   keyword: string,
+  nodeTypes: string[] = ['artifact'],
 ): Promise<GraphDataResponse> {
   const res = await client.get<GraphDataResponse>('/graph/search', {
-    params: { keyword },
+    params: { keyword, node_types: nodeTypes.join(',') },
   });
   return res.data;
 }

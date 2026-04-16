@@ -12,6 +12,7 @@ import {
   Spin,
   Empty,
   Space,
+  Checkbox,
   message,
 } from 'antd';
 import {
@@ -97,6 +98,10 @@ export default function Graph() {
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Node type filter — default artifact only
+  const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact']));
+
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
   const [linkDistance, setLinkDistance] = useState(120);
@@ -105,10 +110,11 @@ export default function Graph() {
   /* ── Fetch data ── */
 
   const fetchGraph = useCallback(
-    async (limit: number) => {
+    async (limit: number, types?: Set<string>) => {
       setLoading(true);
       try {
-        const data = await getFullGraph(limit);
+        const t = types ?? visibleTypes;
+        const data = await getFullGraph(limit, Array.from(t));
         setGraphData(data);
       } catch {
         message.error('获取图谱数据失败');
@@ -116,7 +122,7 @@ export default function Graph() {
         setLoading(false);
       }
     },
-    [],
+    [visibleTypes],
   );
 
   const handleSearch = useCallback(async () => {
@@ -128,7 +134,7 @@ export default function Graph() {
     setLoading(true);
     setActiveSearchKeyword(searchKeyword.trim());
     try {
-      const data = await searchGraph(searchKeyword.trim());
+      const data = await searchGraph(searchKeyword.trim(), Array.from(visibleTypes));
       setGraphData(data);
       setSelectedNode(null);
     } catch {
@@ -136,7 +142,7 @@ export default function Graph() {
     } finally {
       setLoading(false);
     }
-  }, [searchKeyword, nodeLimit, fetchGraph]);
+  }, [searchKeyword, nodeLimit, fetchGraph, visibleTypes]);
 
   const handleNodeClick = useCallback(async (nodeId: string) => {
     setDetailLoading(true);
@@ -157,7 +163,7 @@ export default function Graph() {
       setSearchKeyword(searchParam);
       setActiveSearchKeyword(searchParam);
       setLoading(true);
-      searchGraph(searchParam)
+      searchGraph(searchParam, Array.from(visibleTypes))
         .then(setGraphData)
         .catch(() => message.error('搜索失败'))
         .finally(() => setLoading(false));
@@ -166,6 +172,17 @@ export default function Graph() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Re-fetch when visibleTypes changes (but not on initial mount)
+  const prevTypesRef = useRef(visibleTypes);
+  useEffect(() => {
+    if (prevTypesRef.current !== visibleTypes) {
+      prevTypesRef.current = visibleTypes;
+      if (!searchKeyword.trim()) {
+        fetchGraph(nodeLimit);
+      }
+    }
+  }, [visibleTypes, nodeLimit, searchKeyword, fetchGraph]);
 
   /* ── D3 render effect ── */
   useEffect(() => {
@@ -517,23 +534,27 @@ export default function Graph() {
         />
 
         {/* Stats bar */}
-        {graphData && graphData.nodes.length > 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 12,
-              left: 12,
-              fontSize: 12,
-              color: 'var(--text-muted)',
-              background: 'rgba(255,255,255,0.9)',
-              padding: '4px 12px',
-              borderRadius: 6,
-              border: '1px solid var(--border)',
-            }}
-          >
-            {graphData.total_nodes} 个文物 · {graphData.total_links} 关系
-          </div>
-        )}
+        {graphData && graphData.nodes.length > 0 && (() => {
+          const artCount = graphData.nodes.filter(n => n.type === 'artifact').length;
+          const attrCount = graphData.nodes.filter(n => n.type !== 'artifact').length;
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 12,
+                left: 12,
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                background: 'rgba(255,255,255,0.9)',
+                padding: '4px 12px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+              }}
+            >
+              {artCount} 个文物{attrCount > 0 ? ` · ${attrCount} 个属性` : ''} · {graphData.total_links} 关系
+            </div>
+          );
+        })()}
 
         {/* Legend */}
         {graphData && graphData.nodes.length > 0 && (
@@ -647,6 +668,57 @@ export default function Graph() {
             onChange={(v) => setNodeLimit(v)}
             onAfterChange={() => fetchGraph(nodeLimit)}
           />
+        </Card>
+
+        {/* Node type filter */}
+        <Card
+          size="small"
+          title={
+            <span style={{ fontWeight: 510, fontSize: 14 }}>
+              <InfoCircleOutlined style={{ marginRight: 6 }} />
+              节点类型
+            </span>
+          }
+          style={{
+            borderRadius: 'var(--r-card)',
+            boxShadow: 'var(--shadow-sm)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {allTypes.map((type) => (
+              <label
+                key={type}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}
+              >
+                <Checkbox
+                  checked={visibleTypes.has(type)}
+                  onChange={(e) => {
+                    const next = new Set(visibleTypes);
+                    if (e.target.checked) {
+                      next.add(type);
+                    } else {
+                      next.delete(type);
+                    }
+                    if (next.size > 0) {
+                      setVisibleTypes(next);
+                    }
+                  }}
+                />
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: '50%',
+                    background: TYPE_COLORS[type],
+                    display: 'inline-block',
+                    flexShrink: 0,
+                  }}
+                />
+                {TYPE_NAMES[type]}
+              </label>
+            ))}
+          </div>
         </Card>
 
         {/* Force parameters */}

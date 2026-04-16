@@ -278,11 +278,11 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     for tc_log in all_tool_calls_log:
         if tc_log.get("tool") == "search_artifacts":
             for r in tc_log.get("result", {}).get("results", []):
-                sources.append({"name": r["name"], "source": "文物数据库"})
+                sources.append({"name": r["name"], "source": "文物数据库", "artifact_id": r.get("id")})
         elif tc_log.get("tool") == "get_artifact_detail":
             detail = tc_log.get("result", {})
             if "error" not in detail:
-                sources.append({"name": detail.get("name", ""), "source": "文物数据库"})
+                sources.append({"name": detail.get("name", ""), "source": "文物数据库", "artifact_id": detail.get("id")})
 
     yield _sse_event("done", {
         "elapsed": total_elapsed,
@@ -303,6 +303,10 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
     """
     client = _get_client()
 
+    # Some models (e.g. deepseek-reasoner) don't support tool calling.
+    # Try with tools first; if the API rejects it, fall back to plain chat.
+    use_tools = True
+
     for _round in range(MAX_REACT_ROUNDS):
         thinking_text = ""
         content_text = ""
@@ -311,15 +315,22 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
         in_answer = False
 
         try:
-            stream = client.chat.completions.create(
+            kwargs = dict(
                 model=settings.AI_MODEL_NAME,
                 messages=messages,
-                tools=TOOL_DEFINITIONS,
                 stream=True,
                 max_tokens=4096,
             )
+            if use_tools:
+                kwargs["tools"] = TOOL_DEFINITIONS
+            stream = client.chat.completions.create(**kwargs)
         except (httpx.TimeoutException, Exception) as exc:
-            err_msg = str(exc)[:200]
+            err_msg = str(exc)[:300]
+            # If model doesn't support tools, retry without
+            if use_tools and ("tool" in err_msg.lower() or "function" in err_msg.lower() or "does not support" in err_msg.lower() or "400" in err_msg):
+                logger.warning("Model %s may not support tools, retrying without: %s", settings.AI_MODEL_NAME, err_msg)
+                use_tools = False
+                continue
             logger.warning("LLM stream creation failed: %s", err_msg)
             yield _sse_event("answer_start", {})
             yield _sse_event("answer_delta", {

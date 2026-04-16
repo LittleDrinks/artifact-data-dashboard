@@ -49,6 +49,7 @@ export interface SearchResultItem {
 export interface SourceItem {
   name: string;
   source: string;
+  artifact_id?: number;
 }
 
 /** 创建会话 */

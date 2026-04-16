@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Input,
   Button,
@@ -61,6 +62,8 @@ function generateId(): string {
 /* ── Component ── */
 
 export default function Chat() {
+  const navigate = useNavigate();
+
   // Sessions
   const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
@@ -71,6 +74,9 @@ export default function Chat() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Inline tool call expansion
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
 
   // RAG panel
   const [ragVisible, setRagVisible] = useState(true);
@@ -93,6 +99,17 @@ export default function Chat() {
       abortControllerRef.current?.abort();
     };
   }, []);
+
+  // ── Sync RAG panel with last assistant message (for historical / after streaming) ──
+  useEffect(() => {
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!lastAssistant || lastAssistant.streaming) return;
+    setRagThinking(lastAssistant.thinking);
+    setRagToolResults(lastAssistant.toolCall?.results || []);
+    setRagToolQuery(lastAssistant.toolCall?.query || '');
+    setRagToolElapsed(lastAssistant.toolCall?.elapsed || 0);
+    setRagSources(lastAssistant.sources);
+  }, [messages]);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -519,30 +536,40 @@ export default function Chat() {
         >
           参考来源
         </div>
-        {msg.sources.map((s, i) => (
-          <div
-            key={i}
-            style={{
-              fontSize: 12,
-              color: '#533afd',
-              padding: '2px 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
+        {msg.sources.map((s, i) => {
+          const clickable = !!s.artifact_id;
+          return (
             <div
+              key={i}
               style={{
-                width: 4,
-                height: 4,
-                borderRadius: '50%',
-                background: '#94a3b8',
-                flexShrink: 0,
+                fontSize: 12,
+                color: clickable ? '#533afd' : '#64748d',
+                padding: '2px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                cursor: clickable ? 'pointer' : 'default',
+                textDecoration: clickable ? 'none' : 'none',
               }}
-            />
-            [{i + 1}] {s.name} — {s.source}
-          </div>
-        ))}
+              onClick={() => {
+                if (s.artifact_id) {
+                  navigate(`/artifacts/${s.artifact_id}`);
+                }
+              }}
+            >
+              <div
+                style={{
+                  width: 4,
+                  height: 4,
+                  borderRadius: '50%',
+                  background: clickable ? '#533afd' : '#94a3b8',
+                  flexShrink: 0,
+                }}
+              />
+              [{i + 1}] {s.name} — {s.source}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -879,7 +906,7 @@ export default function Chat() {
             >
               {ragThinking || (
                 <span style={{ color: '#94a3b8' }}>
-                  等待 AI 思考...
+                  {loading ? 'AI 正在思考...' : '暂无思考内容'}
                 </span>
               )}
             </div>
@@ -977,7 +1004,7 @@ export default function Chat() {
                 </div>
               </>
             ) : (
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>等待工具调用...</span>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>{loading ? '等待工具调用...' : '暂无工具调用'}</span>
             )}
           </RagSection>
 
@@ -990,33 +1017,42 @@ export default function Chat() {
           >
             {ragSources.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {ragSources.map((s, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      fontSize: 12,
-                      color: '#533afd',
-                      padding: '2px 0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                    }}
-                  >
+                {ragSources.map((s, i) => {
+                  const clickable = !!s.artifact_id;
+                  return (
                     <div
+                      key={i}
                       style={{
-                        width: 4,
-                        height: 4,
-                        borderRadius: '50%',
-                        background: '#94a3b8',
-                        flexShrink: 0,
+                        fontSize: 12,
+                        color: clickable ? '#533afd' : '#64748d',
+                        padding: '2px 0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: clickable ? 'pointer' : 'default',
                       }}
-                    />
-                    [{i + 1}] {s.name} — {s.source}
-                  </div>
-                ))}
+                      onClick={() => {
+                        if (s.artifact_id) {
+                          navigate(`/artifacts/${s.artifact_id}`);
+                        }
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 4,
+                          height: 4,
+                          borderRadius: '50%',
+                          background: clickable ? '#533afd' : '#94a3b8',
+                          flexShrink: 0,
+                        }}
+                      />
+                      [{i + 1}] {s.name} — {s.source}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>等待引用结果...</span>
+              <span style={{ fontSize: 12, color: '#94a3b8' }}>{loading ? '等待引用结果...' : '暂无引用'}</span>
             )}
           </RagSection>
         </div>
@@ -1176,6 +1212,13 @@ export default function Chat() {
 
 function ThinkingBlock({ content, done }: { content: string; done: boolean }) {
   const [expanded, setExpanded] = useState(false);
+
+  // Auto-expand while streaming (thinking in progress)
+  useEffect(() => {
+    if (content && !done) {
+      setExpanded(true);
+    }
+  }, [content, done]);
 
   if (!content) return null;
 
