@@ -124,25 +124,37 @@ function StatCards({
   );
 }
 
-/* ── Era Order for historical sorting ── */
+/* ── Era Normalization & Order ── */
 
+// Canonical era names in historical chronological order
 const ERA_ORDER: readonly string[] = [
   '新石器时代',
   '夏',
   '商',
   '西周',
+  '西周晚期',
   '东周',
   '春秋',
+  '春秋晚期',
   '战国',
+  '战国中晚期',
   '秦',
   '西汉',
   '东汉',
   '三国',
-  '晋',
-  '南北朝',
+  '曹魏',
+  '西晋',
+  '东晋',
+  '十六国',
+  '北朝',
+  '北魏',
+  '北齐',
+  '北燕',
+  '南朝',
   '隋',
   '唐',
   '五代',
+  '五代十国',
   '北宋',
   '南宋',
   '元',
@@ -151,16 +163,103 @@ const ERA_ORDER: readonly string[] = [
   '民国',
 ];
 
+// Era variant mapping: complex/varied era names -> canonical name
+const ERA_NORMALIZE_MAP: Record<string, string> = {
+  // Dynasty variants with "朝" suffix
+  '夏朝': '夏',
+  '商朝': '商',
+  '商代': '商',
+  '秦朝': '秦',
+  '秦代': '秦',
+  '汉朝': '汉',
+  '晋朝': '晋',
+  '唐朝': '唐',
+  '隋朝': '隋',
+  '宋朝': '宋',
+  '元朝': '元',
+  '明朝': '明',
+  '清代': '清',
+  '清朝': '清',
+  // Complex era descriptions - map to appropriate canonical era
+  '古蜀（相当于中原地区的商朝）': '商',
+  '古蜀': '商',
+  '公元前11世纪': '西周',
+  // Sub-periods that should be grouped
+  '西周早期': '西周',
+  '东周早期': '东周',
+  '春秋早期': '春秋',
+  '战国早期': '战国',
+  '战国晚期': '战国',
+  '西汉早期': '西汉',
+  '西汉晚期': '西汉',
+  '东汉早期': '东汉',
+  '东汉晚期': '东汉',
+  '唐早期': '唐',
+  '唐晚期': '唐',
+  '北宋早期': '北宋',
+  '北宋晚期': '北宋',
+  '南宋早期': '南宋',
+  '南宋晚期': '南宋',
+  '明早期': '明',
+  '明晚期': '明',
+  '清早期': '清',
+  '清晚期': '清',
+};
+
+/**
+ * Normalize era value to canonical name.
+ * - Empty string returns null (filtered out)
+ * - Known variants mapped to canonical names
+ * - Unknown values returned as-is (sorted to end)
+ */
+function normalizeEra(era: string): string | null {
+  if (!era || era.trim() === '' || era === '未知') return null;
+
+  const trimmed = era.trim();
+
+  // Direct match in ERA_ORDER
+  if (ERA_ORDER.includes(trimmed)) return trimmed;
+
+  // Check normalization map
+  if (ERA_NORMALIZE_MAP[trimmed]) return ERA_NORMALIZE_MAP[trimmed];
+
+  // Try partial matching for complex descriptions
+  for (const [variant, canonical] of Object.entries(ERA_NORMALIZE_MAP)) {
+    if (trimmed.includes(variant)) return canonical;
+  }
+
+  // Try extracting dynasty from complex text
+  for (const canonical of ERA_ORDER) {
+    if (trimmed.includes(canonical)) return canonical;
+  }
+
+  return trimmed; // Keep unknown values (sorted to end)
+}
+
 /* ── Bar Chart: era distribution ── */
 
 function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
-  // Sort era data by historical order
+  // Normalize and aggregate era data, then sort by historical order
   const sortedData = useMemo(() => {
-    return [...data].sort((a, b) => {
+    // First normalize and aggregate
+    const normalizedCounts: Record<string, number> = {};
+
+    for (const item of data) {
+      const normalized = normalizeEra(item.era);
+      if (normalized) {
+        normalizedCounts[normalized] = (normalizedCounts[normalized] || 0) + item.count;
+      }
+    }
+
+    // Convert to array and sort
+    const aggregated = Object.entries(normalizedCounts)
+      .map(([era, count]) => ({ era, count }));
+
+    return aggregated.sort((a, b) => {
       const aIdx = ERA_ORDER.indexOf(a.era);
       const bIdx = ERA_ORDER.indexOf(b.era);
       // Unknown eras go to the end
-      if (aIdx === -1 && bIdx === -1) return 0;
+      if (aIdx === -1 && bIdx === -1) return a.era.localeCompare(b.era);
       if (aIdx === -1) return 1;
       if (bIdx === -1) return -1;
       return aIdx - bIdx;
@@ -188,13 +287,16 @@ function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
       ) : sortedData.length === 0 ? (
         <Empty description="暂无年代数据" style={{ padding: '40px 0' }} />
       ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={sortedData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart data={sortedData} margin={{ top: 5, right: 10, left: -10, bottom: 60 }}>
             <XAxis
               dataKey="era"
-              tick={{ fontSize: 12, fill: '#64748d' }}
+              tick={{ fontSize: 11, fill: '#64748d' }}
               axisLine={{ stroke: '#e5edf5' }}
               tickLine={false}
+              angle={-35}
+              textAnchor="end"
+              height={60}
             />
             <YAxis
               tick={{ fontSize: 12, fill: '#64748d' }}
@@ -213,7 +315,7 @@ function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
               dataKey="count"
               fill="#533afd"
               radius={[4, 4, 0, 0]}
-              maxBarSize={40}
+              maxBarSize={36}
             />
           </BarChart>
         </ResponsiveContainer>
