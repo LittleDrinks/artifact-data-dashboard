@@ -91,6 +91,7 @@ export default function Graph() {
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
   const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const isDraggingRef = useRef(false); // Prevent hover effects during drag
   const [searchParams] = useSearchParams();
 
   /* ── State ── */
@@ -286,6 +287,9 @@ export default function Graph() {
         handleNodeClick(d.id);
       })
       .on('mouseenter', (_event, d) => {
+        // Skip hover effects during drag to prevent flickering
+        if (isDraggingRef.current) return;
+
         // Highlight connected links
         const connectedIds = new Set<string>();
         linkSel.each(function (l) {
@@ -310,14 +314,27 @@ export default function Graph() {
           .attr('opacity', 0.25);
       })
       .on('mouseleave', () => {
+        // Skip hover effects during drag to prevent flickering
+        if (isDraggingRef.current) return;
+
         linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
         linkLabelSel.style('opacity', 0);
+        // Reset group opacity to 1 (clears hover dimming)
+        // Circle/text inside have their own opacity for search highlighting
         nodeSel.attr('opacity', 1);
       })
       .call(
         d3
           .drag<SVGGElement, SimNode>()
           .on('start', (event, d) => {
+            // Set dragging flag and clear any existing hover highlighting
+            isDraggingRef.current = true;
+            linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
+            linkLabelSel.style('opacity', 0);
+            // Reset group opacity to 1 (clears hover dimming)
+            // Circle/text inside have their own opacity for search highlighting
+            nodeSel.attr('opacity', 1);
+
             if (!event.active) simulationRef.current?.alphaTarget(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
@@ -327,6 +344,9 @@ export default function Graph() {
             d.fy = event.y;
           })
           .on('end', (event, d) => {
+            // Clear dragging flag
+            isDraggingRef.current = false;
+
             if (!event.active) simulationRef.current?.alphaTarget(0);
             d.fx = null;
             d.fy = null;
