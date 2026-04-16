@@ -442,72 +442,146 @@ export default function Chat() {
     );
   };
 
-  // ── Render tool call bar ──
+  // ── Render tool call bar (expandable inline) ──
   const renderToolCallBar = (msg: DisplayMessage) => {
     if (!msg.toolCall) return null;
     const tc = msg.toolCall;
+    const isExpanded = expandedToolCalls.has(msg.id);
+
     return (
       <div
-        className="tool-call-bar"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
           marginBottom: 12,
-          background: '#f6f9fc',
           border: '1px solid #e5edf5',
           borderRadius: 4,
-          fontSize: 12,
-          cursor: 'pointer',
-          transition: 'all 0.12s',
+          overflow: 'hidden',
         }}
-        onClick={() => setRagVisible(true)}
       >
+        {/* Header bar */}
         <div
+          className="tool-call-bar"
           style={{
-            width: 20,
-            height: 20,
-            borderRadius: 3,
-            background: '#533afd',
-            color: '#fff',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 10,
-            flexShrink: 0,
+            gap: 8,
+            padding: '6px 12px',
+            background: '#f6f9fc',
+            fontSize: 12,
+            cursor: 'pointer',
+            transition: 'all 0.12s',
+            userSelect: 'none',
+          }}
+          onClick={() => {
+            setExpandedToolCalls((prev) => {
+              const next = new Set(prev);
+              if (next.has(msg.id)) next.delete(msg.id);
+              else next.add(msg.id);
+              return next;
+            });
           }}
         >
-          <SearchOutlined style={{ fontSize: 10 }} />
+          <RightOutlined
+            style={{
+              fontSize: 10,
+              transition: 'transform 0.2s',
+              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            }}
+          />
+          <div
+            style={{
+              width: 16,
+              height: 16,
+              borderRadius: 3,
+              background: '#533afd',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 9,
+              flexShrink: 0,
+            }}
+          >
+            <SearchOutlined style={{ fontSize: 9 }} />
+          </div>
+          <span style={{ fontWeight: 400, color: '#061b31' }}>知识检索</span>
+          <span
+            style={{
+              color: '#94a3b8',
+              fontSize: 11,
+              maxWidth: 260,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            "{tc.query}"
+          </span>
+          <div style={{ marginLeft: 'auto', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+            {tc.done ? (
+              <>
+                <CheckCircleFilled style={{ color: '#15be53', fontSize: 8 }} />
+                <span style={{ color: '#108c3d' }}>
+                  {tc.count} 条结果 · {tc.elapsed}s
+                </span>
+              </>
+            ) : (
+              <>
+                <LoadingOutlined style={{ color: '#533afd' }} />
+                <span style={{ color: '#533afd' }}>检索中</span>
+              </>
+            )}
+          </div>
         </div>
-        <span style={{ fontWeight: 400, color: '#061b31' }}>知识检索</span>
-        <span
-          style={{
-            color: '#94a3b8',
-            fontSize: 11,
-            maxWidth: 300,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          "{tc.query}"
-        </span>
-        <div style={{ marginLeft: 'auto', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-          {tc.done ? (
-            <>
-              <CheckCircleFilled style={{ color: '#15be53', fontSize: 8 }} />
-              <span style={{ color: '#108c3d' }}>
-                {tc.count} 条结果 · {tc.elapsed}s
-              </span>
-            </>
-          ) : (
-            <>
-              <LoadingOutlined style={{ color: '#533afd' }} />
-              <span style={{ color: '#533afd' }}>检索中</span>
-            </>
-          )}
-        </div>
+
+        {/* Expandable results */}
+        {isExpanded && tc.done && tc.results.length > 0 && (
+          <div
+            style={{
+              borderTop: '1px solid #e5edf5',
+              padding: '8px 12px',
+              background: '#fff',
+              maxHeight: 240,
+              overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            {tc.results.map((r) => (
+              <div
+                key={r.id}
+                style={{
+                  padding: '6px 8px',
+                  background: '#f6f9fc',
+                  border: '1px solid #e5edf5',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  transition: 'border-color 0.12s',
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/artifacts/${r.id}`);
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 400, color: '#061b31', marginBottom: 2 }}>
+                  {r.name}
+                </div>
+                <div style={{ fontSize: 11, color: '#64748d', lineHeight: 1.5 }}>
+                  {r.snippet}
+                </div>
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                  {[r.category, r.era, r.location].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
