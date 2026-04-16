@@ -14,12 +14,14 @@ import {
   Space,
   Checkbox,
   message,
+  Tooltip,
 } from 'antd';
 import {
   SearchOutlined,
   ReloadOutlined,
   ZoomInOutlined,
   InfoCircleOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -94,15 +96,16 @@ export default function Graph() {
   /* ── State ── */
   const [loading, setLoading] = useState(true);
   const [graphData, setGraphData] = useState<GraphDataResponse | null>(null);
-  const [nodeLimit, setNodeLimit] = useState(100);
+  const [nodeLimit, setNodeLimit] = useState(50);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [activeSearchKeyword, setActiveSearchKeyword] = useState('');
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Node type filter — default show all entity types to display edges
+  // Node type filter — default show only artifacts for cleaner initial view
+  // User can enable other types to see relationships
   const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
-  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact', 'era', 'category', 'location', 'tag']));
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact']));
 
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
@@ -660,7 +663,11 @@ export default function Graph() {
           }}
         >
           <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-            节点数量上限: <strong style={{ color: 'var(--text-heading)' }}>{nodeLimit}</strong>
+            文物数量上限: <strong style={{ color: 'var(--text-heading)' }}>{nodeLimit}</strong>
+            <br />
+            <span style={{ fontSize: 11, opacity: 0.7 }}>
+              显示关系时节点总数 = 文物 + 朝代 + 类别 + 地点 + 标签
+            </span>
           </div>
           <Slider
             min={10}
@@ -687,6 +694,45 @@ export default function Graph() {
             border: '1px solid var(--border)',
           }}
         >
+          <div style={{ marginBottom: 10 }}>
+            <Tooltip
+              title={
+                visibleTypes.size === allTypes.length
+                  ? '切换到仅显示文物节点，图谱更清晰'
+                  : '显示文物与属性（朝代/类别/地点/标签）的关系，节点数量会大幅增加'
+              }
+            >
+              <Button
+                size="small"
+                type={visibleTypes.size === allTypes.length ? 'default' : 'primary'}
+                onClick={() => {
+                  if (visibleTypes.size === allTypes.length) {
+                    // Currently showing all -> show only artifacts
+                    setVisibleTypes(new Set(['artifact']));
+                  } else {
+                    // Currently partial -> show all to see relationships
+                    setVisibleTypes(new Set(allTypes));
+                  }
+                }}
+                block
+                icon={visibleTypes.size === allTypes.length ? undefined : <WarningOutlined />}
+              >
+                {visibleTypes.size === allTypes.length ? '精简视图（仅文物）' : '显示关系'}
+              </Button>
+            </Tooltip>
+            {visibleTypes.size === allTypes.length && (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                }}
+              >
+                图谱包含属性节点，可能较为密集
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {allTypes.map((type) => (
               <label

@@ -13,6 +13,7 @@ import os
 from typing import Optional, List, Tuple, Dict, Set
 
 from neo4j import GraphDatabase
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -372,9 +373,21 @@ def get_full_graph(
 
     # Level 3: Fallback to SQLite
     logger.info("get_full_graph: falling back to SQLite")
+
+    # Optimize for demo: prioritize artifacts with rich metadata (era, category, location)
+    # This creates a more impressive graph when showing relationships
+
+    # Calculate "richness" score: count non-null attributes
+    richness_expr = (
+        func.coalesce(case((Artifact.era != None, 1), else_=0), 0) +
+        func.coalesce(case((Artifact.category != None, 1), else_=0), 0) +
+        func.coalesce(case((Artifact.location != None, 1), else_=0), 0) +
+        func.coalesce(case((Artifact.tags != None, 1), else_=0), 0)
+    )
+
     artifacts = (
         db.query(Artifact)
-        .order_by(Artifact.id)
+        .order_by(richness_expr.desc(), Artifact.id)
         .offset(offset)
         .limit(limit)
         .all()
