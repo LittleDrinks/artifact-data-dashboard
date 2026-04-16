@@ -345,34 +345,22 @@ def get_full_graph(
     """
     获取完整图谱数据。
 
-    三级 fallback：Neo4j → LightRAG KV Store → SQLite。
+    数据源策略：
+    1. SQLite 文物数据是主要数据源，构建 artifact→era/category/location/tag 关系图
+    2. Neo4j 数据（如果已导入）可以增强图谱，但不替代 SQLite 基础图
+    3. LightRAG KV Store 被跳过 —— 它产生低质量的抽象概念实体
 
     Args:
         db: 数据库会话
-        limit: 返回前 N 个实体/文物
-        offset: 偏移量，用于分页（仅 SQLite fallback 时使用）
-        node_types: 节点类型过滤列表（仅 SQLite fallback 时使用）
+        limit: 返回前 N 个文物的图谱数据
+        offset: 偏移量，用于分页
+        node_types: 节点类型过滤列表，默认显示全部类型以呈现关系
 
     Returns:
         (nodes_list, links_list)
     """
-    driver = _get_neo4j_driver()
-
-    # Level 1: Try Neo4j first
-    if _check_neo4j_has_data(driver):
-        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=limit)
-        if neo4j_nodes:
-            logger.info("get_full_graph: returned %d nodes from Neo4j", len(neo4j_nodes))
-            return neo4j_nodes, neo4j_links
-
-    # Level 2: Try LightRAG KV Store
-    lr_nodes, lr_links = _query_lightrag_kvstore(limit=limit)
-    if lr_nodes:
-        logger.info("get_full_graph: returned %d nodes from LightRAG KV Store", len(lr_nodes))
-        return lr_nodes, lr_links
-
-    # Level 3: Fallback to SQLite
-    logger.info("get_full_graph: falling back to SQLite")
+    # Build SQLite artifact graph as the PRIMARY base (always)
+    # This produces meaningful typed nodes with real relationships
 
     # Optimize for demo: prioritize artifacts with rich metadata (era, category, location)
     # This creates a more impressive graph when showing relationships
@@ -392,8 +380,33 @@ def get_full_graph(
         .limit(limit)
         .all()
     )
+
     nodes_dict, links_dict = build_graph_from_artifacts(artifacts)
-    return _filter_graph_by_types(nodes_dict, links_dict, node_types or ["artifact"])
+
+    # Optionally merge Neo4j entities (if data exists and improves the graph)
+    driver = _get_neo4j_driver()
+    if _check_neo4j_has_data(driver):
+        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=limit)
+        if neo4j_nodes:
+            # Merge Neo4j data into the SQLite base graph
+            for node in neo4j_nodes:
+                if node.id not in nodes_dict:
+                    nodes_dict[node.id] = node
+            for link in neo4j_links:
+                link_key = f"{link.source}->{link.target}"
+                if link_key not in links_dict:
+                    links_dict[link_key] = link
+            logger.info("get_full_graph: merged %d Neo4j nodes into SQLite base", len(neo4j_nodes))
+
+    # Skip LightRAG KV Store - it produces poor quality abstract entities
+    # All entities are type "entity" with no meaningful relationships to artifacts
+
+    # Default to ALL node types to show relationships (artifact→era, etc.)
+    # This is critical for a good demo experience
+    default_types = ["artifact", "era", "category", "location", "tag"]
+    effective_types = node_types if node_types else default_types
+
+    return _filter_graph_by_types(nodes_dict, links_dict, effective_types)
 
 
 def search_graph(
@@ -404,13 +417,13 @@ def search_graph(
     """
     搜索图谱节点，返回匹配节点及其一跳邻居构成的子图。
 
-    优先从 Neo4j 查询语义实体，如果无数据则 fallback 到 SQLite artifacts。
+    数据源策略：优先 SQLite 文物数据，Neo4j 可增强，跳过 LightRAG KV Store。
 
     搜索范围：节点名称包含关键词。
     """
     driver = _get_neo4j_driver()
 
-    # Level 1: Try Neo4j first
+    # Try Neo4j first (if it has data, semantic entities are valuable for search)
     if _check_neo4j_has_data(driver):
         neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=50, keyword=keyword)
         if neo4j_nodes:
@@ -431,15 +444,12 @@ def search_graph(
             result_links = [l for l in neo4j_links if l.source + "->" + l.target in result_link_keys]
             return result_nodes, result_links
 
-    # Level 2: Try LightRAG KV Store
-    lr_nodes, lr_links = _query_lightrag_kvstore(limit=50, keyword=keyword)
-    if lr_nodes:
-        logger.info("search_graph: found %d nodes in LightRAG KV Store for '%s'", len(lr_nodes), keyword)
-        return lr_nodes, lr_links
+    # Skip LightRAG KV Store — it produces poor quality entities
 
-    # Level 3: Fallback to SQLite
-    logger.info("search_graph: falling back to SQLite")
-    types = node_types or ["artifact"]
+    # SQLite search — primary fallback
+    logger.info("search_graph: searching SQLite for '%s'", keyword)
+    default_types = ["artifact", "era", "category", "location", "tag"]
+    types = node_types if node_types else default_types
     # DB-level filtering — only load matching artifacts
     search_term = f"%{keyword}%"
     matched_artifacts = (

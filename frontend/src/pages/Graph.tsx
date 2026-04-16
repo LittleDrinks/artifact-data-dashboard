@@ -102,10 +102,10 @@ export default function Graph() {
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Node type filter — default show only artifacts for cleaner initial view
-  // User can enable other types to see relationships
+  // Node type filter — default show ALL types to display relationships (edges)
+  // This is critical for a good demo experience — users see artifact→era/category/location
   const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
-  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(['artifact']));
+  const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
 
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
