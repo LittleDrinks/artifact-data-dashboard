@@ -1,13 +1,15 @@
-"""知识图谱服务 — Neo4j + SQLite 双数据源
+"""知识图谱服务 — Neo4j + LightRAG KV Store + SQLite 三级数据源
 
-优先从 Neo4j 查询实体/关系（LightRAG 构建的语义图谱），
-如果 Neo4j 无数据则 fallback 到 SQLite artifacts 表动态构建基础关系。
+优先级：Neo4j → LightRAG KV Store → SQLite fallback
 
 Neo4j 图谱：实体(entity_name, entity_type) + 关系(src_name, target_name, relation_type)
+LightRAG KV Store：entity_names + relation_pairs（从 JSON 文件读取）
 SQLite 基础图谱：artifact → era/category/location/tags
 """
 
+import json
 import logging
+import os
 from typing import Optional, List, Tuple, Dict, Set
 
 from neo4j import GraphDatabase
@@ -133,6 +135,77 @@ def _check_neo4j_has_data(driver) -> bool:
             return cnt > 0
     except Exception:
         return False
+
+
+def _query_lightrag_kvstore(
+    limit: int = 100,
+    keyword: Optional[str] = None,
+) -> Tuple[List[GraphNode], List[GraphLink]]:
+    """Read LightRAG KV Store JSON files and build graph data.
+
+    Returns (nodes_list, links_list). Empty lists if files not found.
+    """
+    lightrag_dir = settings.LIGHTRAG_DIR
+    entities_path = os.path.join(lightrag_dir, "kv_store_full_entities.json")
+    relations_path = os.path.join(lightrag_dir, "kv_store_full_relations.json")
+
+    if not os.path.isfile(entities_path) or not os.path.isfile(relations_path):
+        return [], []
+
+    try:
+        with open(entities_path, "r", encoding="utf-8") as f:
+            entities_data = json.load(f)
+        with open(relations_path, "r", encoding="utf-8") as f:
+            relations_data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to read LightRAG KV Store: %s", e)
+        return [], []
+
+    # Collect all unique entity names
+    all_entity_names: Set[str] = set()
+    for doc in entities_data.values():
+        for name in doc.get("entity_names", []):
+            all_entity_names.add(name)
+
+    # Filter by keyword if provided
+    if keyword:
+        kw = keyword.lower()
+        all_entity_names = {n for n in all_entity_names if kw in n.lower()}
+
+    # Build nodes
+    nodes: Dict[str, GraphNode] = {}
+    for name in all_entity_names:
+        node_id = f"lightrag_{name}"
+        nodes[node_id] = GraphNode(
+            id=node_id,
+            name=name,
+            type="entity",
+        )
+
+    # Build links from relations
+    links: Dict[str, GraphLink] = {}
+    for doc in relations_data.values():
+        for pair in doc.get("relation_pairs", []):
+            if len(pair) >= 2:
+                src_name, tgt_name = pair[0], pair[1]
+                src_id = f"lightrag_{src_name}"
+                tgt_id = f"lightrag_{tgt_name}"
+                # Only include if both endpoints are in our node set
+                if src_id in nodes and tgt_id in nodes:
+                    link_key = f"{src_id}->{tgt_id}"
+                    links[link_key] = GraphLink(
+                        source=src_id,
+                        target=tgt_id,
+                        relation="相关",
+                    )
+
+    # Apply limit
+    node_list = list(nodes.values())[:limit]
+    node_ids = {n.id for n in node_list}
+    link_list = [l for l in links.values() if l.source in node_ids and l.target in node_ids]
+
+    logger.info("LightRAG KV Store: %d entities, %d relations", len(node_list), len(link_list))
+    return node_list, link_list
 
 
 def _parse_tags(tags_str: Optional[str]) -> List[str]:
@@ -271,27 +344,34 @@ def get_full_graph(
     """
     获取完整图谱数据。
 
-    优先从 Neo4j 查询（LightRAG 构建的语义图谱），如果无数据则 fallback 到 SQLite。
+    三级 fallback：Neo4j → LightRAG KV Store → SQLite。
 
     Args:
         db: 数据库会话
         limit: 返回前 N 个实体/文物
         offset: 偏移量，用于分页（仅 SQLite fallback 时使用）
+        node_types: 节点类型过滤列表（仅 SQLite fallback 时使用）
 
     Returns:
         (nodes_list, links_list)
     """
     driver = _get_neo4j_driver()
 
-    # Try Neo4j first
+    # Level 1: Try Neo4j first
     if _check_neo4j_has_data(driver):
         neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=limit)
         if neo4j_nodes:
             logger.info("get_full_graph: returned %d nodes from Neo4j", len(neo4j_nodes))
             return neo4j_nodes, neo4j_links
 
-    # Fallback to SQLite
-    logger.info("get_full_graph: Neo4j empty or unavailable, falling back to SQLite")
+    # Level 2: Try LightRAG KV Store
+    lr_nodes, lr_links = _query_lightrag_kvstore(limit=limit)
+    if lr_nodes:
+        logger.info("get_full_graph: returned %d nodes from LightRAG KV Store", len(lr_nodes))
+        return lr_nodes, lr_links
+
+    # Level 3: Fallback to SQLite
+    logger.info("get_full_graph: falling back to SQLite")
     artifacts = (
         db.query(Artifact)
         .order_by(Artifact.id)
@@ -317,7 +397,7 @@ def search_graph(
     """
     driver = _get_neo4j_driver()
 
-    # Try Neo4j first
+    # Level 1: Try Neo4j first
     if _check_neo4j_has_data(driver):
         neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=50, keyword=keyword)
         if neo4j_nodes:
@@ -338,8 +418,14 @@ def search_graph(
             result_links = [l for l in neo4j_links if l.source + "->" + l.target in result_link_keys]
             return result_nodes, result_links
 
-    # Fallback to SQLite
-    logger.info("search_graph: Neo4j empty or unavailable, falling back to SQLite")
+    # Level 2: Try LightRAG KV Store
+    lr_nodes, lr_links = _query_lightrag_kvstore(limit=50, keyword=keyword)
+    if lr_nodes:
+        logger.info("search_graph: found %d nodes in LightRAG KV Store for '%s'", len(lr_nodes), keyword)
+        return lr_nodes, lr_links
+
+    # Level 3: Fallback to SQLite
+    logger.info("search_graph: falling back to SQLite")
     types = node_types or ["artifact"]
     # DB-level filtering — only load matching artifacts
     search_term = f"%{keyword}%"

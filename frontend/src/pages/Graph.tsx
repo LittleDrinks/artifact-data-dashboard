@@ -55,6 +55,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
 
 const TYPE_COLORS: Record<string, string> = {
   artifact: '#533afd',
+  entity: '#533afd',
   era: '#c45100',
   category: '#3d8b37',
   location: '#2874ad',
@@ -63,6 +64,7 @@ const TYPE_COLORS: Record<string, string> = {
 
 const TYPE_NAMES: Record<string, string> = {
   artifact: '文物',
+  entity: '实体',
   era: '朝代',
   category: '类别',
   location: '地点',
