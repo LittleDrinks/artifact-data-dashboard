@@ -13,13 +13,12 @@ import {
   SendOutlined,
   PlusOutlined,
   HistoryOutlined,
-  RightOutlined,
   SearchOutlined,
   RobotOutlined,
   LoadingOutlined,
-  MenuFoldOutlined,
   CheckCircleFilled,
   DeleteOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
@@ -30,26 +29,28 @@ import {
   type ChatMessageInfo,
   type SSEEventData,
   type SearchResultItem,
-  type SourceItem,
 } from '../api/chat';
 
 /* ── Types ── */
+
+interface ToolCallEntry {
+  tool: string;
+  query: string;
+  results: SearchResultItem[];
+  count: number;
+  elapsed: number;
+  done: boolean;
+}
 
 interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  thinking: string;
-  thinkingDone: boolean;
-  toolCall: {
-    tool: string;
-    query: string;
-    results: SearchResultItem[];
-    count: number;
-    elapsed: number;
-    done: boolean;
-  } | null;
-  sources: SourceItem[];
+  // thinking is hidden from user but kept in model for internal use
+  _thinking: string;
+  _thinkingDone: boolean;
+  // Support multiple tool calls from ReAct loop
+  toolCalls: ToolCallEntry[];
   streaming: boolean;
 }
 
@@ -75,16 +76,12 @@ export default function Chat() {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Inline tool call expansion
-  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
-
-  // RAG panel
-  const [ragVisible, setRagVisible] = useState(true);
-  const [ragThinking, setRagThinking] = useState('');
+  // RAG side panel
+  const [ragVisible, setRagVisible] = useState(false);
   const [ragToolResults, setRagToolResults] = useState<SearchResultItem[]>([]);
-  const [ragToolQuery, setRagToolQuery] = useState('');
+  const [ragToolQueries, setRagToolQueries] = useState<string[]>([]);
   const [ragToolElapsed, setRagToolElapsed] = useState(0);
-  const [ragSources, setRagSources] = useState<SourceItem[]>([]);
+  const [ragToolLoading, setRagToolLoading] = useState(false);
 
   // Refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -104,11 +101,20 @@ export default function Chat() {
   useEffect(() => {
     const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
     if (!lastAssistant || lastAssistant.streaming) return;
-    setRagThinking(lastAssistant.thinking);
-    setRagToolResults(lastAssistant.toolCall?.results || []);
-    setRagToolQuery(lastAssistant.toolCall?.query || '');
-    setRagToolElapsed(lastAssistant.toolCall?.elapsed || 0);
-    setRagSources(lastAssistant.sources);
+    const toolCalls = lastAssistant.toolCalls;
+    if (toolCalls.length > 0) {
+      // Show accumulated results from all tool calls
+      const allResults = toolCalls.flatMap(tc => tc.results);
+      setRagToolResults(allResults);
+      setRagToolQueries(toolCalls.map(tc => tc.query));
+      setRagToolElapsed(toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0));
+      setRagToolLoading(false);
+    } else {
+      setRagToolResults([]);
+      setRagToolQueries([]);
+      setRagToolElapsed(0);
+      setRagToolLoading(false);
+    }
   }, [messages]);
 
   // ── Load sessions ──
@@ -126,7 +132,6 @@ export default function Chat() {
   }, [loadSessions]);
 
   // ── Auto-scroll ──
-  // Use ref (not state) for at-bottom tracking to avoid stale closure issues
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
@@ -140,7 +145,6 @@ export default function Chat() {
     const isNewMessage = messages.length !== prevMsgCountRef.current;
     prevMsgCountRef.current = messages.length;
 
-    // Always scroll when new messages arrive; during streaming only if at bottom
     if (isNewMessage || isAtBottomRef.current) {
       requestAnimationFrame(() => {
         if (container) {
@@ -155,25 +159,21 @@ export default function Chat() {
     try {
       const msgs: ChatMessageInfo[] = await getChatMessages(sessionId);
       const displayMsgs: DisplayMessage[] = msgs.map((m) => {
-        // Parse tool_calls JSON if available
-        // Backend stores: [{tool, args, result}, ...] array
-        let toolCall: DisplayMessage['toolCall'] = null;
+        const toolCalls: ToolCallEntry[] = [];
         if (m.tool_calls) {
           try {
             const tcData = JSON.parse(m.tool_calls);
             if (Array.isArray(tcData)) {
-              // Find the first search_artifacts tool call with results
               for (const tc of tcData) {
                 if (tc.result?.results) {
-                  toolCall = {
+                  toolCalls.push({
                     tool: tc.tool || 'search_artifacts',
                     query: tc.args?.keyword || '',
                     results: tc.result.results as SearchResultItem[],
                     count: tc.result.count || tc.result.results.length || 0,
                     elapsed: 0,
                     done: true,
-                  };
-                  break;
+                  });
                 }
               }
             }
@@ -185,14 +185,28 @@ export default function Chat() {
           id: generateId(),
           role: m.role as 'user' | 'assistant',
           content: m.content || '',
-          thinking: '', // Thinking text is not stored in DB
-          thinkingDone: true,
-          toolCall,
-          sources: toolCall?.results?.map((r) => ({ name: r.name, source: '文物数据库' })) || [],
+          _thinking: '',
+          _thinkingDone: true,
+          toolCalls,
           streaming: false,
         };
       });
       setMessages(displayMsgs);
+
+      // Auto-show panel if last assistant message has tool calls
+      const lastAssistant = [...displayMsgs].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant && lastAssistant.toolCalls.length > 0) {
+        const allResults = lastAssistant.toolCalls.flatMap(tc => tc.results);
+        setRagToolResults(allResults);
+        setRagToolQueries(lastAssistant.toolCalls.map(tc => tc.query));
+        setRagToolElapsed(lastAssistant.toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0));
+        setRagVisible(true);
+      } else {
+        setRagToolResults([]);
+        setRagToolQueries([]);
+        setRagToolElapsed(0);
+        setRagVisible(false);
+      }
     } catch {
       setMessages([]);
     }
@@ -201,7 +215,6 @@ export default function Chat() {
   // ── Select session ──
   const handleSelectSession = useCallback(
     (session: ChatSessionInfo) => {
-      // Abort any in-flight SSE before switching
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       setLoading(false);
@@ -210,12 +223,10 @@ export default function Chat() {
       setSelectedIds(new Set());
       setHistoryVisible(false);
 
-      // Clear state before loading new session
-      setRagThinking('');
       setRagToolResults([]);
-      setRagToolQuery('');
+      setRagToolQueries([]);
       setRagToolElapsed(0);
-      setRagSources([]);
+      setRagToolLoading(false);
 
       loadSessionMessages(session.id);
     },
@@ -232,6 +243,7 @@ export default function Chat() {
       if (ids.includes(activeSessionId!)) {
         setActiveSessionId(null);
         setMessages([]);
+        setRagVisible(false);
       }
       setSelectedIds(new Set());
       loadSessions();
@@ -242,18 +254,17 @@ export default function Chat() {
 
   // ── New session ──
   const handleNewSession = useCallback(() => {
-    // Abort any in-flight SSE
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setLoading(false);
 
     setActiveSessionId(null);
     setMessages([]);
-    setRagThinking('');
     setRagToolResults([]);
-    setRagToolQuery('');
+    setRagToolQueries([]);
     setRagToolElapsed(0);
-    setRagSources([]);
+    setRagToolLoading(false);
+    setRagVisible(false);
     inputRef.current?.focus();
   }, []);
 
@@ -265,60 +276,53 @@ export default function Chat() {
     setInputValue('');
     setLoading(true);
 
-    // Add user message
     const userMsg: DisplayMessage = {
       id: generateId(),
       role: 'user',
       content: query,
-      thinking: '',
-      thinkingDone: true,
-      toolCall: null,
-      sources: [],
+      _thinking: '',
+      _thinkingDone: true,
+      toolCalls: [],
       streaming: false,
     };
 
-    // Add placeholder assistant message
     const assistantMsg: DisplayMessage = {
       id: generateId(),
       role: 'assistant',
       content: '',
-      thinking: '',
-      thinkingDone: false,
-      toolCall: null,
-      sources: [],
+      _thinking: '',
+      _thinkingDone: false,
+      toolCalls: [],
       streaming: true,
     };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     const assistantId = assistantMsg.id;
 
-    // Reset RAG panel
-    setRagThinking('');
+    // Reset RAG state
     setRagToolResults([]);
-    setRagToolQuery('');
+    setRagToolQueries([]);
     setRagToolElapsed(0);
-    setRagSources([]);
+    setRagToolLoading(false);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      // Create AbortController for this request
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
       await sendChatMessage(query, activeSessionId, (event: SSEEventData) => {
-        // If this request was aborted, ignore late events
         if (controller.signal.aborted) return;
 
         switch (event.type) {
           case 'thinking_start':
-            // Nothing extra
+            // Thinking is completely hidden - do nothing visible
             break;
 
           case 'thinking_delta':
-            setRagThinking((prev) => prev + (event.content || ''));
+            // Silently accumulate thinking (not displayed anywhere)
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, thinking: m.thinking + (event.content || '') }
+                  ? { ...m, _thinking: m._thinking + (event.content || '') }
                   : m,
               ),
             );
@@ -327,26 +331,35 @@ export default function Chat() {
           case 'thinking_end':
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId ? { ...m, thinkingDone: true } : m,
+                m.id === assistantId ? { ...m, _thinkingDone: true } : m,
               ),
             );
             break;
 
           case 'tool_call_start':
-            setRagToolQuery(event.query || query);
+            // Auto-open RAG panel when tool call starts
+            setRagVisible(true);
+            setRagToolLoading(true);
+            // Add new query to the list
+            setRagToolQueries((prev) => [...prev, event.query || query]);
+            setRagToolResults([]);
+            // ADD a new tool call entry (don't replace previous ones)
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
                   ? {
                       ...m,
-                      toolCall: {
-                        tool: event.tool || 'search_artifacts',
-                        query: event.query || query,
-                        results: [],
-                        count: 0,
-                        elapsed: 0,
-                        done: false,
-                      },
+                      toolCalls: [
+                        ...m.toolCalls,
+                        {
+                          tool: event.tool || 'search_artifacts',
+                          query: event.query || query,
+                          results: [],
+                          count: 0,
+                          elapsed: 0,
+                          done: false,
+                        },
+                      ],
                     }
                   : m,
               ),
@@ -354,24 +367,26 @@ export default function Chat() {
             break;
 
           case 'tool_call_result':
-            setRagToolResults(event.results || []);
-            setRagToolElapsed(event.elapsed || 0);
+            // Update the LAST tool call entry (the most recent one)
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId && m.toolCall
-                  ? {
-                      ...m,
-                      toolCall: {
-                        ...m.toolCall,
-                        results: event.results || [],
-                        count: event.count || 0,
-                        elapsed: event.elapsed || 0,
-                        done: true,
-                      },
-                    }
-                  : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== assistantId || m.toolCalls.length === 0) return m;
+                const lastIdx = m.toolCalls.length - 1;
+                const updatedToolCalls = [...m.toolCalls];
+                updatedToolCalls[lastIdx] = {
+                  ...updatedToolCalls[lastIdx],
+                  results: event.results || [],
+                  count: event.count || 0,
+                  elapsed: event.elapsed || 0,
+                  done: true,
+                };
+                return { ...m, toolCalls: updatedToolCalls };
+              }),
             );
+            // Accumulate results in RAG panel
+            setRagToolResults((prev) => [...prev, ...(event.results || [])]);
+            setRagToolElapsed((prev) => prev + (event.elapsed || 0));
+            setRagToolLoading(false);
             break;
 
           case 'answer_delta':
@@ -388,15 +403,14 @@ export default function Chat() {
             break;
 
           case 'done':
-            setRagSources(event.sources || []);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, streaming: false, sources: event.sources || [] }
+                  ? { ...m, streaming: false }
                   : m,
               ),
             );
-            // Reload sessions to pick up any new session
+            setRagToolLoading(false);
             loadSessions();
             setLoading(false);
             break;
@@ -406,20 +420,16 @@ export default function Chat() {
         }
       }, controller.signal);
     } catch (err: unknown) {
-      // Don't show error if request was aborted (user action)
       if (err instanceof DOMException && err.name === 'AbortError') {
-        // Remove the empty assistant message on abort
         setMessages((prev) => prev.filter((m) => m.id !== assistantId));
         setLoading(false);
         return;
       }
       const msg = err instanceof Error ? err.message : '发送失败';
       message.error(msg);
-      // Remove the empty assistant message
       setMessages((prev) => prev.filter((m) => m.id !== assistantId));
       setLoading(false);
     } finally {
-      // Clear ref if this is still the active controller
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
@@ -434,216 +444,52 @@ export default function Chat() {
     }
   };
 
-  // ── Render thinking block ──
-  const renderThinkingBlock = (msg: DisplayMessage) => {
-    if (!msg.thinking) return null;
-    return (
-      <ThinkingBlock content={msg.thinking} done={msg.thinkingDone} />
-    );
-  };
+  // ── Render inline tool call indicator (minimal, non-expandable) ──
+  const renderToolCallIndicator = (msg: DisplayMessage) => {
+    if (msg.toolCalls.length === 0) return null;
 
-  // ── Render tool call bar (expandable inline) ──
-  const renderToolCallBar = (msg: DisplayMessage) => {
-    if (!msg.toolCall) return null;
-    const tc = msg.toolCall;
-    const isExpanded = expandedToolCalls.has(msg.id);
+    const totalRounds = msg.toolCalls.length;
+    const totalCount = msg.toolCalls.reduce((sum, tc) => sum + tc.count, 0);
+    const totalElapsed = msg.toolCalls.reduce((sum, tc) => sum + tc.elapsed, 0);
+    const allDone = msg.toolCalls.every(tc => tc.done);
+    const anyInProgress = msg.toolCalls.some(tc => !tc.done);
 
     return (
       <div
         style={{
-          marginBottom: 12,
-          border: '1px solid #e5edf5',
-          borderRadius: 4,
-          overflow: 'hidden',
-        }}
-      >
-        {/* Header bar */}
-        <div
-          className="tool-call-bar"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 12px',
-            background: '#f6f9fc',
-            fontSize: 12,
-            cursor: 'pointer',
-            transition: 'all 0.12s',
-            userSelect: 'none',
-          }}
-          onClick={() => {
-            setExpandedToolCalls((prev) => {
-              const next = new Set(prev);
-              if (next.has(msg.id)) next.delete(msg.id);
-              else next.add(msg.id);
-              return next;
-            });
-          }}
-        >
-          <RightOutlined
-            style={{
-              fontSize: 10,
-              transition: 'transform 0.2s',
-              transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            }}
-          />
-          <div
-            style={{
-              width: 16,
-              height: 16,
-              borderRadius: 3,
-              background: '#533afd',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 9,
-              flexShrink: 0,
-            }}
-          >
-            <SearchOutlined style={{ fontSize: 9 }} />
-          </div>
-          <span style={{ fontWeight: 400, color: '#061b31' }}>知识检索</span>
-          <span
-            style={{
-              color: '#94a3b8',
-              fontSize: 11,
-              maxWidth: 260,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            "{tc.query}"
-          </span>
-          <div style={{ marginLeft: 'auto', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-            {tc.done ? (
-              <>
-                <CheckCircleFilled style={{ color: '#15be53', fontSize: 8 }} />
-                <span style={{ color: '#108c3d' }}>
-                  {tc.count} 条结果 · {tc.elapsed}s
-                </span>
-              </>
-            ) : (
-              <>
-                <LoadingOutlined style={{ color: '#533afd' }} />
-                <span style={{ color: '#533afd' }}>检索中</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Expandable results */}
-        {isExpanded && tc.done && tc.results.length > 0 && (
-          <div
-            style={{
-              borderTop: '1px solid #e5edf5',
-              padding: '8px 12px',
-              background: '#fff',
-              maxHeight: 240,
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-            }}
-          >
-            {tc.results.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  padding: '6px 8px',
-                  background: '#f6f9fc',
-                  border: '1px solid #e5edf5',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  transition: 'border-color 0.12s',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`/artifacts/${r.id}`);
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 400, color: '#061b31', marginBottom: 2 }}>
-                  {r.name}
-                </div>
-                <div style={{ fontSize: 11, color: '#64748d', lineHeight: 1.5 }}>
-                  {r.snippet}
-                </div>
-                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                  {[r.category, r.era, r.location].filter(Boolean).join(' · ')}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ── Render sources ──
-  const renderSources = (msg: DisplayMessage) => {
-    if (!msg.sources || msg.sources.length === 0) return null;
-    return (
-      <div
-        style={{
-          marginTop: 12,
-          padding: '10px 12px',
+          marginBottom: 10,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 10px',
           background: '#f6f9fc',
           border: '1px solid #e5edf5',
-          borderRadius: 4,
+          borderRadius: 12,
+          fontSize: 12,
+          color: '#64748d',
         }}
       >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 400,
-            color: '#94a3b8',
-            textTransform: 'uppercase',
-            marginBottom: 4,
-          }}
-        >
-          参考来源
-        </div>
-        {msg.sources.map((s, i) => {
-          const clickable = !!s.artifact_id;
-          return (
-            <div
-              key={i}
-              style={{
-                fontSize: 12,
-                color: clickable ? '#533afd' : '#64748d',
-                padding: '2px 0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                cursor: clickable ? 'pointer' : 'default',
-                textDecoration: clickable ? 'none' : 'none',
-              }}
-              onClick={() => {
-                if (s.artifact_id) {
-                  navigate(`/artifacts/${s.artifact_id}`);
-                }
-              }}
-            >
-              <div
-                style={{
-                  width: 4,
-                  height: 4,
-                  borderRadius: '50%',
-                  background: clickable ? '#533afd' : '#94a3b8',
-                  flexShrink: 0,
-                }}
-              />
-              [{i + 1}] {s.name} — {s.source}
-            </div>
-          );
-        })}
+        {anyInProgress ? (
+          <>
+            <LoadingOutlined style={{ fontSize: 10, color: '#533afd' }} />
+            <span>检索中...</span>
+          </>
+        ) : allDone && totalCount > 0 ? (
+          <>
+            <CheckCircleFilled style={{ fontSize: 10, color: '#15be53' }} />
+            <span>
+              已检索 {totalRounds} 轮 · {totalCount} 条结果
+            </span>
+            {totalElapsed > 0 && (
+              <span style={{ color: '#94a3b8' }}>· {totalElapsed.toFixed(1)}s</span>
+            )}
+          </>
+        ) : allDone ? (
+          <>
+            <CheckCircleFilled style={{ fontSize: 10, color: '#94a3b8' }} />
+            <span>检索完成 · 无相关结果</span>
+          </>
+        ) : null}
       </div>
     );
   };
@@ -691,14 +537,16 @@ export default function Chat() {
               历史记录
             </Button>
           </div>
-          <Button
-            type="text"
-            icon={<MenuFoldOutlined />}
-            size="small"
-            onClick={() => setRagVisible(!ragVisible)}
-          >
-            {ragVisible ? '隐藏面板' : '知识面板'}
-          </Button>
+          {(ragToolResults.length > 0 || ragToolLoading) && (
+            <Button
+              type="text"
+              size="small"
+              onClick={() => setRagVisible(!ragVisible)}
+              style={{ color: ragVisible ? '#533afd' : '#64748d', fontSize: 12 }}
+            >
+              {ragVisible ? '收起检索结果' : `检索结果 (${ragToolResults.length})`}
+            </Button>
+          )}
         </div>
 
         {/* Messages */}
@@ -826,19 +674,13 @@ export default function Chat() {
                       }),
                 }}
               >
-                {msg.role === 'assistant' && (
-                  <>
-                    {renderThinkingBlock(msg)}
-                    {renderToolCallBar(msg)}
-                  </>
-                )}
+                {msg.role === 'assistant' && renderToolCallIndicator(msg)}
 
                 {/* Content */}
                 <div>
                   {msg.role === 'assistant' ? (
                     <ReactMarkdown
                       components={{
-                        // Style for markdown elements
                         p: ({ children }) => <p style={{ margin: 0, lineHeight: 1.7 }}>{children}</p>,
                         strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,
                         em: ({ children }) => <em style={{ fontStyle: 'italic' }}>{children}</em>,
@@ -871,8 +713,6 @@ export default function Chat() {
                     />
                   )}
                 </div>
-
-                {msg.role === 'assistant' && renderSources(msg)}
               </div>
             </div>
           ))}
@@ -934,201 +774,269 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* ── RAG Knowledge Panel ── */}
+      {/* ── RAG Side Panel (auto-shows on tool calls) ── */}
       {ragVisible && (
         <div
           style={{
             width: 340,
             borderLeft: '1px solid #e5edf5',
-            background: '#f6f9fc',
-            padding: 16,
-            overflowY: 'auto',
+            background: '#fff',
+            display: 'flex',
+            flexDirection: 'column',
             minHeight: 0,
-            transition: 'border-color 0.2s',
+            overflow: 'hidden',
           }}
         >
+          {/* Panel header */}
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 400,
-              color: '#94a3b8',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderBottom: '1px solid #e5edf5',
+              flexShrink: 0,
             }}
           >
-            知识检索详情
-          </div>
-
-          {/* Thinking Section */}
-          <RagSection
-            title="Thinking"
-            color="#ea2261"
-            dotColor="#ea2261"
-            defaultExpanded
-          >
-            <div
-              style={{
-                borderLeft: '3px solid #ea2261',
-                padding: '10px 12px',
-                background: '#f6f9fc',
-                fontSize: 12,
-                color: '#64748d',
-                lineHeight: 1.7,
-                borderRadius: '0 4px 4px 0',
-              }}
-            >
-              {ragThinking || (
-                <span style={{ color: '#94a3b8' }}>
-                  {loading ? 'AI 正在思考...' : '暂无思考内容'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  background: '#533afd',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <SearchOutlined style={{ fontSize: 11 }} />
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 500, color: '#061b31' }}>
+                检索结果
+              </span>
+              {ragToolResults.length > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    background: 'rgba(83,58,253,0.1)',
+                    color: '#533afd',
+                    padding: '1px 8px',
+                    borderRadius: 10,
+                  }}
+                >
+                  {ragToolResults.length}
                 </span>
               )}
             </div>
-          </RagSection>
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              size="small"
+              onClick={() => setRagVisible(false)}
+              style={{ color: '#94a3b8' }}
+            />
+          </div>
 
-          {/* Tool Calling Section */}
-          <RagSection
-            title="Tool Calling"
-            color="#2874ad"
-            dotColor="#2874ad"
-            defaultExpanded
+          {/* Search queries indicator */}
+          {ragToolQueries.length > 0 && (
+            <div
+              style={{
+                padding: '10px 16px',
+                borderBottom: '1px solid #f0f4f8',
+                fontSize: 12,
+                color: '#64748d',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: ragToolQueries.length > 1 ? 6 : 0 }}>
+                <SearchOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  {ragToolQueries.length > 1 ? `检索 ${ragToolQueries.length} 轮` : '检索'}
+                </span>
+                {!ragToolLoading && ragToolElapsed > 0 && (
+                  <span style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: 11 }}>
+                    {ragToolElapsed.toFixed(1)}s
+                  </span>
+                )}
+                {ragToolLoading && (
+                  <span style={{ marginLeft: 'auto', color: '#533afd', fontSize: 11 }}>
+                    <LoadingOutlined style={{ marginRight: 4 }} />
+                    检索中
+                  </span>
+                )}
+              </div>
+              {ragToolQueries.map((q, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginTop: 4,
+                    paddingLeft: 20,
+                  }}
+                >
+                  <span style={{ fontSize: 10, color: '#94a3b8' }}>{i + 1}.</span>
+                  <span
+                    style={{
+                      maxWidth: 220,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    "{q}"
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Results list */}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              padding: '12px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
           >
-            {ragToolQuery ? (
-              <>
-                <div style={{ marginBottom: 8 }}>
+            {ragToolLoading && ragToolResults.length === 0 ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '40px 0',
+                  gap: 12,
+                }}
+              >
+                <LoadingOutlined style={{ fontSize: 24, color: '#533afd' }} />
+                <span style={{ fontSize: 13, color: '#64748d' }}>正在检索文物数据...</span>
+              </div>
+            ) : ragToolResults.length > 0 ? (
+              ragToolResults.map((r, i) => (
+                <div
+                  key={r.id}
+                  style={{
+                    padding: '10px 12px',
+                    background: '#f6f9fc',
+                    border: '1px solid #e5edf5',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onClick={() => navigate(`/artifacts/${r.id}`)}
+                  onMouseEnter={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    el.style.borderColor = '#b9b9f9';
+                    el.style.background = 'rgba(83,58,253,0.04)';
+                    el.style.transform = 'translateY(-1px)';
+                    el.style.boxShadow = '0 2px 8px rgba(83,58,253,0.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    const el = e.currentTarget as HTMLElement;
+                    el.style.borderColor = '#e5edf5';
+                    el.style.background = '#f6f9fc';
+                    el.style.transform = 'translateY(0)';
+                    el.style.boxShadow = 'none';
+                  }}
+                >
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '6px 10px',
-                      background: '#fff',
-                      border: '1px solid #e5edf5',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      color: '#061b31',
+                      marginBottom: 4,
                     }}
                   >
-                    <SearchOutlined />
-                    <span>检索: "{ragToolQuery}"</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 500,
+                        color: '#533afd',
+                        background: 'rgba(83,58,253,0.1)',
+                        width: 18,
+                        height: 18,
+                        borderRadius: 3,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#061b31' }}>
+                      {r.name}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: '#64748d',
+                      lineHeight: 1.6,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {r.snippet}
                   </div>
                   <div
                     style={{
                       fontSize: 11,
                       color: '#94a3b8',
-                      marginTop: 4,
-                      padding: '0 2px',
+                      marginTop: 6,
+                      display: 'flex',
+                      gap: 4,
+                      flexWrap: 'wrap',
                     }}
                   >
-                    找到 <strong style={{ color: '#061b31', fontWeight: 400 }}>{ragToolResults.length}</strong>{' '}
-                    条相关结果 · 耗时 {ragToolElapsed}s
+                    {[r.category, r.era, r.location]
+                      .filter(Boolean)
+                      .map((tag) => (
+                        <span
+                          key={tag}
+                          style={{
+                            padding: '1px 6px',
+                            background: '#fff',
+                            border: '1px solid #e5edf5',
+                            borderRadius: 3,
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
                   </div>
                 </div>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                    maxHeight: 340,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {ragToolResults.map((r) => (
-                    <div
-                      key={r.id}
-                      style={{
-                        padding: '8px 10px',
-                        background: '#f6f9fc',
-                        border: '1px solid #e5edf5',
-                        borderRadius: 4,
-                        transition: 'border-color 0.12s',
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 400,
-                          color: '#061b31',
-                          marginBottom: 2,
-                        }}
-                      >
-                        {r.name}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: '#64748d',
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {r.snippet}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: '#94a3b8',
-                          marginTop: 4,
-                        }}
-                      >
-                        {[r.category, r.era, r.location].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
+              ))
             ) : (
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>{loading ? '等待工具调用...' : '暂无工具调用'}</span>
-            )}
-          </RagSection>
-
-          {/* Citations Section */}
-          <RagSection
-            title="引用结果"
-            color="#108c3d"
-            dotColor="#15be53"
-            defaultExpanded
-          >
-            {ragSources.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {ragSources.map((s, i) => {
-                  const clickable = !!s.artifact_id;
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        fontSize: 12,
-                        color: clickable ? '#533afd' : '#64748d',
-                        padding: '2px 0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        cursor: clickable ? 'pointer' : 'default',
-                      }}
-                      onClick={() => {
-                        if (s.artifact_id) {
-                          navigate(`/artifacts/${s.artifact_id}`);
-                        }
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 4,
-                          height: 4,
-                          borderRadius: '50%',
-                          background: clickable ? '#533afd' : '#94a3b8',
-                          flexShrink: 0,
-                        }}
-                      />
-                      [{i + 1}] {s.name} — {s.source}
-                    </div>
-                  );
-                })}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '40px 0',
+                  gap: 8,
+                }}
+              >
+                <SearchOutlined style={{ fontSize: 24, color: '#e5edf5' }} />
+                <span style={{ fontSize: 13, color: '#94a3b8' }}>暂无检索结果</span>
+                <span style={{ fontSize: 11, color: '#c5cdd8', textAlign: 'center', lineHeight: 1.5 }}>
+                  发送消息后，AI 检索的文物将显示在这里
+                </span>
               </div>
-            ) : (
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>{loading ? '等待引用结果...' : '暂无引用'}</span>
             )}
-          </RagSection>
+          </div>
         </div>
       )}
 
@@ -1278,158 +1186,6 @@ export default function Chat() {
           51%, 100% { opacity: 0; }
         }
       `}</style>
-    </div>
-  );
-}
-
-/* ── Thinking Block Sub-Component ── */
-
-function ThinkingBlock({ content, done }: { content: string; done: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-
-  // Auto-expand while streaming (thinking in progress)
-  useEffect(() => {
-    if (content && !done) {
-      setExpanded(true);
-    }
-  }, [content, done]);
-
-  if (!content) return null;
-
-  return (
-    <div
-      style={{
-        marginBottom: 12,
-        border: '1px solid #e5edf5',
-        borderRadius: 4,
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '8px 12px',
-          cursor: 'pointer',
-          fontSize: 12,
-          color: '#64748d',
-          background: '#f6f9fc',
-          transition: 'background 0.12s',
-          userSelect: 'none',
-        }}
-      >
-        <RightOutlined
-          style={{
-            fontSize: 10,
-            transition: 'transform 0.2s',
-            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-          }}
-        />
-        <span style={{ fontWeight: 400, color: '#273951' }}>Thinking</span>
-        {!done && (
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#533afd' }}>
-            <LoadingOutlined style={{ marginRight: 4 }} />
-            思考中...
-          </span>
-        )}
-        {done && (
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>
-            完成
-          </span>
-        )}
-      </div>
-      {expanded && (
-        <div
-          style={{
-            padding: '10px 12px',
-            fontSize: 12,
-            color: '#64748d',
-            lineHeight: 1.7,
-            borderTop: '1px solid #e5edf5',
-            background: '#fff',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {content}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── RAG Section Sub-Component ── */
-
-function RagSection({
-  title,
-  color,
-  dotColor,
-  defaultExpanded = false,
-  children,
-}: {
-  title: string;
-  color: string;
-  dotColor: string;
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  return (
-    <div
-      style={{
-        border: '1px solid #e5edf5',
-        borderRadius: 4,
-        overflow: 'hidden',
-        marginBottom: 12,
-      }}
-    >
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          fontSize: 12,
-          fontWeight: 400,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '8px 12px',
-          cursor: 'pointer',
-          background: '#fff',
-          transition: 'background 0.12s',
-          userSelect: 'none',
-          color,
-        }}
-      >
-        <RightOutlined
-          style={{
-            fontSize: 10,
-            transition: 'transform 0.2s',
-            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            color: '#94a3b8',
-          }}
-        />
-        <div
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: dotColor,
-          }}
-        />
-        {title}
-      </div>
-      {expanded && (
-        <div
-          style={{
-            padding: '10px 12px',
-            borderTop: '1px solid #e5edf5',
-            background: '#fff',
-          }}
-        >
-          {children}
-        </div>
-      )}
     </div>
   );
 }
