@@ -10,6 +10,7 @@ const Artifacts = lazy(() => import('./pages/Artifacts'));
 const ArtifactDetail = lazy(() => import('./pages/ArtifactDetail'));
 const Graph = lazy(() => import('./pages/Graph'));
 const Chat = lazy(() => import('./pages/Chat'));
+const Knowledge = lazy(() => import('./pages/Knowledge'));
 
 /** Loading fallback */
 function PageLoader() {
@@ -60,6 +61,7 @@ export default function App() {
             <Route path="artifacts/:id" element={<ArtifactDetail />} />
             <Route path="graph" element={<Graph />} />
             <Route path="chat" element={<Chat />} />
+            <Route path="knowledge" element={<Knowledge />} />
           </Route>
 
           {/* 未匹配路由重定向 */}

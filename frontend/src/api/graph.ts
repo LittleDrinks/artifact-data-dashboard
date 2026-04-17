@@ -80,3 +80,35 @@ export async function exportGraph(limit: number = 500): Promise<void> {
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
 }
+
+/** 文本知识抽取 */
+export async function extractTriples(text: string): Promise<{ data: unknown }> {
+  const res = await client.post('/graph/extract', { text });
+  return res;
+}
+
+/** CSV 导入（multipart/form-data） */
+export async function importGraphCSV(file: File): Promise<{ data: { count: number } }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await client.post('/graph/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res;
+}
+
+/** CSV 导出（直接下载） */
+export async function exportGraphCSV(): Promise<void> {
+  const res = await client.get('/graph/export', {
+    responseType: 'blob',
+  });
+  const blob = new Blob([res.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'graph_triples.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}

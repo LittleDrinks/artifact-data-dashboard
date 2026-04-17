@@ -8,6 +8,7 @@ import {
   MessageOutlined,
   LogoutOutlined,
   UserOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../hooks/useAuth';
 
@@ -18,6 +19,7 @@ const menuItems = [
   { key: '/artifacts', icon: <AppstoreOutlined />, label: '文物管理' },
   { key: '/graph', icon: <ApartmentOutlined />, label: '知识图谱' },
   { key: '/chat', icon: <MessageOutlined />, label: 'AI 问答' },
+  { key: '/knowledge', icon: <ExperimentOutlined />, label: '知识抽取' },
 ];
 
 /** 主布局：侧边栏 + 顶栏 */
