@@ -208,9 +208,16 @@ export default function Graph() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Re-fetch when visibleTypes changes (but not on initial mount)
-  const prevTypesRef = useRef(visibleTypes);
+  // Track previous types to avoid re-fetching on initial mount
+  // Initialize with null and set on first useEffect run for robustness
+  const prevTypesRef = useRef<Set<string> | null>(null);
   useEffect(() => {
+    // On first run, just record the current types and skip fetch
+    if (prevTypesRef.current === null) {
+      prevTypesRef.current = visibleTypes;
+      return;
+    }
+    // On subsequent runs, only fetch if visibleTypes actually changed
     if (prevTypesRef.current !== visibleTypes) {
       prevTypesRef.current = visibleTypes;
       if (!searchKeyword.trim()) {
