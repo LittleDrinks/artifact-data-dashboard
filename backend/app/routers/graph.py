@@ -1,8 +1,11 @@
 """知识图谱路由 — 图谱数据查询 API"""
 
+import csv
+import io
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -67,4 +70,39 @@ def get_node_detail(
         node=node,
         links=links,
         neighbors=neighbors,
+    )
+
+
+@router.get("/export")
+def export_graph_csv(
+    limit: int = Query(500, ge=1, le=1000, description="导出前 N 个文物的图谱数据"),
+    db: Session = Depends(get_db),
+):
+    """导出图谱三元组为 CSV"""
+    # Get graph data (default all node types to get all relations)
+    nodes, links = graph_service.get_full_graph(db, limit=limit, offset=0, node_types=None)
+
+    # Build a lookup for node names
+    node_names = {n.id: n.name for n in nodes}
+
+    # Build CSV content
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # Header row
+    writer.writerow(["source_name", "relation", "target_name"])
+
+    # Data rows - each link is a triple
+    for link in links:
+        src_name = node_names.get(link.source, link.source)
+        tgt_name = node_names.get(link.target, link.target)
+        writer.writerow([src_name, link.relation, tgt_name])
+
+    # Stream response
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=graph_triples_export.csv",
+        },
     )

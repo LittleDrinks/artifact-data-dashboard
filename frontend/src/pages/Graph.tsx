@@ -22,6 +22,7 @@ import {
   ZoomInOutlined,
   InfoCircleOutlined,
   WarningOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -30,6 +31,7 @@ import {
   getFullGraph,
   searchGraph,
   getNodeDetail,
+  exportGraph,
 } from '../api/graph';
 import type {
   GraphNode,
@@ -107,6 +109,9 @@ export default function Graph() {
   // This is critical for a good demo experience — users see artifact→era/category/location
   const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
+
+  // 导出状态
+  const [exporting, setExporting] = useState(false);
 
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
@@ -483,6 +488,18 @@ export default function Graph() {
     setLinkDistance(120);
     setCollisionPadding(6);
   }, []);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      await exportGraph(nodeLimit);
+      message.success('导出成功');
+    } catch {
+      message.error('导出失败');
+    } finally {
+      setExporting(false);
+    }
+  }, [nodeLimit]);
 
   /* ── Render ── */
 
@@ -877,6 +894,14 @@ export default function Graph() {
             </Button>
             <Button size="small" onClick={handleResetZoom}>
               重置视图
+            </Button>
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              loading={exporting}
+              onClick={handleExport}
+            >
+              导出
             </Button>
           </Space>
         </Card>

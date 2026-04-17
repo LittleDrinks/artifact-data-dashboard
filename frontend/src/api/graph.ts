@@ -61,3 +61,21 @@ export async function getNodeDetail(
   );
   return res.data;
 }
+
+/** 导出图谱三元组为 CSV */
+export async function exportGraph(limit: number = 500): Promise<void> {
+  const res = await client.get('/graph/export', {
+    params: { limit },
+    responseType: 'blob',
+  });
+  // Create download link
+  const blob = new Blob([res.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'graph_triples_export.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}

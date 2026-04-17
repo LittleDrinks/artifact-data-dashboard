@@ -6,11 +6,12 @@ import {
 } from 'antd';
 import {
   PlusOutlined, SearchOutlined, EditOutlined,
-  DeleteOutlined, EyeOutlined, ReloadOutlined,
+  DeleteOutlined, EyeOutlined, ReloadOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
   getArtifacts, createArtifact, updateArtifact, deleteArtifact,
+  exportArtifacts,
   type Artifact, type ArtifactListParams, type ArtifactFormData,
 } from '../api/artifacts';
 import { getStatsByCategory, getStatsByEra, getStatsByLocation } from '../api/stats';
@@ -35,6 +36,9 @@ export default function Artifacts() {
   const [categories, setCategories] = useState<{ label: string; value: string }[]>([]);
   const [eras, setEras] = useState<{ label: string; value: string }[]>([]);
   const [locations, setLocations] = useState<{ label: string; value: string }[]>([]);
+
+  // 导出状态
+  const [exporting, setExporting] = useState(false);
 
   // 弹窗状态
   const [modalOpen, setModalOpen] = useState(false);
@@ -156,6 +160,23 @@ export default function Artifacts() {
       fetchData();
     } catch {
       message.error('删除失败');
+    }
+  };
+
+  /** 导出 CSV */
+  const handleExport = async () => {
+    if (!isAuthenticated) {
+      message.warning('请先登录后再导出');
+      return;
+    }
+    setExporting(true);
+    try {
+      await exportArtifacts(params);
+      message.success('导出成功');
+    } catch {
+      message.error('导出失败');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -301,6 +322,16 @@ export default function Artifacts() {
               >
                 刷新
               </Button>
+              {isAuthenticated && (
+                <Button
+                  icon={<DownloadOutlined />}
+                  loading={exporting}
+                  onClick={handleExport}
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  导出 CSV
+                </Button>
+              )}
               {isAuthenticated && (
                 <Button
                   type="primary"

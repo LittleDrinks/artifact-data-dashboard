@@ -1,9 +1,12 @@
 """Artifacts router - CRUD API with pagination, search, filtering, and auth."""
 
+import csv
+import io
 import math
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -109,3 +112,54 @@ def delete_artifact(
             detail=f"文物 ID {artifact_id} 不存在",
         )
     return None
+
+
+@router.get("/export")
+def export_artifacts_csv(
+    keyword: Optional[str] = Query(None, description="搜索关键词"),
+    category: Optional[str] = Query(None, description="类别筛选"),
+    era: Optional[str] = Query(None, description="年代筛选"),
+    location: Optional[str] = Query(None, description="出土地点筛选"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """导出文物列表为 CSV（需要认证）"""
+    # Get all matching artifacts (no pagination)
+    artifacts, _ = artifact_service.get_artifacts(
+        db,
+        page=1,
+        page_size=10000,  # Large enough for all artifacts
+        search=keyword,
+        category=category,
+        era=era,
+        location=location,
+    )
+
+    # Build CSV content
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # Header row
+    writer.writerow(["id", "name", "category", "era", "location", "material", "museum", "tags"])
+
+    # Data rows
+    for art in artifacts:
+        writer.writerow([
+            art.id,
+            art.name,
+            art.category or "",
+            art.era or "",
+            art.location or "",
+            getattr(art, "material", "") or "",
+            getattr(art, "museum", "") or "",
+            art.tags or "",
+        ])
+
+    # Stream response
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=artifacts_export.csv",
+        },
+    )

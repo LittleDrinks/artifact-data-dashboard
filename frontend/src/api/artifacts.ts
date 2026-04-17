@@ -79,6 +79,24 @@ export async function deleteArtifact(id: number): Promise<void> {
   await client.delete(`/artifacts/${id}`);
 }
 
+/** 导出文物列表为 CSV */
+export async function exportArtifacts(params?: ArtifactListParams): Promise<void> {
+  const res = await client.get('/artifacts/export', {
+    params,
+    responseType: 'blob',
+  });
+  // Create download link
+  const blob = new Blob([res.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'artifacts_export.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 /** 修复文物图片 */
 export interface RepairImageParams {
   artifactId: number;
