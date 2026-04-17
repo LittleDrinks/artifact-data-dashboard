@@ -50,7 +50,7 @@
 2. **可扩展**。新增工具只需注册 Tool schema，不改动编排逻辑
 3. **统一架构**。检索类查询和数据操作类查询使用同一套 Agent 编排
 
-**已验证**：DeepSeek-Reasoner 支持 function calling + reasoning_content。
+**已验证（2026-04-17）**：deepseek-reasoner **同时支持** function calling（tool_calls）和 reasoning_content（思考过程），二者在同一个流式响应中交替出现。无需任何 fallback 或两步方案。
 
 ### 2.2 LLM 模型配置
 
@@ -59,7 +59,7 @@
 | Agent Tool Calling + Thinking | `deepseek-reasoner` | `AI_MODEL_NAME` | **原生 reasoning_content 字段**，支持 tool calling |
 | LightRAG 索引构建 | `glm-4.7` | `LIGHTRAG_MODEL_NAME` | 独立 API 配置，不影响 Chat |
 
-> **关键特性**：deepseek-reasoner 同时提供 `reasoning_content`（思考过程）和 `tool_calls`（工具调用），是当前唯一支持两者兼具的模型。
+> **关键特性**：deepseek-reasoner 同时提供 `reasoning_content`（思考过程）和 `tool_calls`（工具调用）。经实测确认：每轮 ReAct 循环中，模型先输出 thinking（reasoning_content），再输出 tool_calls 或最终回答，二者不冲突。SSE 事件流为：`thinking_start/delta/end → tool_call_start/result → (下一轮) → ... → answer_start/delta/end`。
 
 ### 2.3 System Prompt
 

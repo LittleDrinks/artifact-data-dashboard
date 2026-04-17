@@ -194,6 +194,13 @@ CREATE TABLE attachments (
 2. generator-X：按报告修复，自检，commit，通知 reviewer 确认
 3. 本轮完成后删除两个 teammate（必须同时关闭对应 tmux pane：`tmux kill-pane -t <pane_id>`），清理上下文，开启下一轮
 
+### 验证要求（强制）
+每次派 agent 做前端改动时，**必须要求 teammate 自行启动前端并在浏览器中验证效果**。不能只看 TypeScript 编译通过就认为完成。验证步骤：
+1. `cd frontend && npm run dev` 启动前端
+2. 浏览器打开对应页面（如 http://localhost:5173/chat）
+3. 实际操作验证功能是否正常
+4. 发现问题则继续修复，直到页面功能正确
+
 ## 关键约束
 
 1. **本地开发优先**：先不搞Docker，直接本地跑 FastAPI + Vite dev
