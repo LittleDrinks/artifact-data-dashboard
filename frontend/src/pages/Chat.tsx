@@ -1,5 +1,5 @@
 import ReactMarkdown from 'react-markdown';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Input,
@@ -86,7 +86,7 @@ export default function Chat() {
   const [ragToolLoading, setRagToolLoading] = useState(false);
   // Selected tool call index for RAG panel (which retrieval to show)
   const [selectedToolCallIndex, setSelectedToolCallIndex] = useState<number>(-1);
-  // Thinking section expansion state (per message)
+  // Thinking section expansion state (per round, format: "msgId:roundIdx")
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
 
   // Refs
@@ -335,13 +335,24 @@ export default function Chat() {
         switch (event.type) {
           case 'thinking_start':
             // Start a new thinking round — push an empty string as new round
-            setMessages((prev) =>
-              prev.map((m) =>
+            setMessages((prev) => {
+              const msg = prev.find(m => m.id === assistantId);
+              const currentRoundCount = msg?.thinkingRounds.length ?? 0;
+              const newRoundIdx = currentRoundCount; // The new round will be at this index
+
+              // Auto-expand this new thinking round
+              setExpandedThinking((prevExp) => {
+                const next = new Set(prevExp);
+                next.add(`${assistantId}:${newRoundIdx}`);
+                return next;
+              });
+
+              return prev.map((m) =>
                 m.id === assistantId
                   ? { ...m, thinkingDone: false, thinkingRounds: [...m.thinkingRounds, ''] }
                   : m,
-              ),
-            );
+              );
+            });
             break;
 
           case 'thinking_delta':
@@ -361,9 +372,17 @@ export default function Chat() {
 
           case 'thinking_end':
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, thinkingDone: true } : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                // Auto-collapse the current thinking round (last one)
+                const currentRoundIdx = m.thinkingRounds.length - 1;
+                setExpandedThinking((prevExp) => {
+                  const next = new Set(prevExp);
+                  next.delete(`${assistantId}:${currentRoundIdx}`);
+                  return next;
+                });
+                return { ...m, thinkingDone: true };
+              }),
             );
             break;
 
@@ -478,191 +497,179 @@ export default function Chat() {
     }
   };
 
-  // ── Render thinking section (collapsible, with multi-round support) ──
-  const renderThinkingSection = (msg: DisplayMessage) => {
-    const totalLen = msg.thinkingRounds.reduce((s, r) => s + r.length, 0);
-    if (!totalLen && msg.thinkingDone) return null;
-    const isExpanded = expandedThinking.has(msg.id);
-    const toggleExpand = () => {
-      setExpandedThinking((prev) => {
-        const next = new Set(prev);
-        if (next.has(msg.id)) next.delete(msg.id);
-        else next.add(msg.id);
-        return next;
-      });
-    };
-    const multiRound = msg.thinkingRounds.filter(r => r.length > 0).length > 1;
+  // ── Render interleaved ReAct rounds (thinking + tool call paired) ──
+  const renderReActRounds = (msg: DisplayMessage) => {
+    const maxRounds = Math.max(msg.thinkingRounds.length, msg.toolCalls.length);
+    if (maxRounds === 0) return null;
 
-    return (
-      <div
-        style={{
-          marginBottom: 10,
-          borderRadius: 6,
-          background: '#f6f9fc',
-          border: '1px solid #e5edf5',
-        }}
-      >
-        <div
-          onClick={toggleExpand}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 12px',
-            cursor: 'pointer',
-            fontSize: 12,
-            color: '#64748d',
-            userSelect: 'none',
-          }}
-        >
-          <BulbOutlined style={{ fontSize: 12, color: '#533afd' }} />
-          <span style={{ fontWeight: 500 }}>思考过程</span>
-          {!msg.thinkingDone && (
-            <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
-          )}
-          {msg.thinkingDone && totalLen > 0 && (
-            <span style={{ fontSize: 11, color: '#94a3b8' }}>
-              ({totalLen} 字)
-            </span>
-          )}
-          {isExpanded ? (
-            <DownOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
-          ) : (
-            <RightOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
-          )}
-        </div>
-        {isExpanded && totalLen > 0 && (
+    const elements: React.ReactNode[] = [];
+
+    for (let i = 0; i < maxRounds; i++) {
+      const thinkingRound = msg.thinkingRounds[i];
+      const toolCall = msg.toolCalls[i];
+      const roundHasContent = (thinkingRound && thinkingRound.length > 0) || toolCall;
+      if (!roundHasContent) continue;
+
+      // 1. Render thinking round i (if exists and has content)
+      if (thinkingRound && thinkingRound.length > 0) {
+        const key = `${msg.id}:${i}`;
+        const isExpanded = expandedThinking.has(key);
+        const isStreamingThisRound = !msg.thinkingDone && i === msg.thinkingRounds.length - 1;
+
+        const toggleExpand = () => {
+          setExpandedThinking((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          });
+        };
+
+        elements.push(
           <div
+            key={`thinking-${i}`}
             style={{
-              padding: '10px 12px',
-              fontSize: 12,
-              lineHeight: 1.7,
-              color: '#64748d',
-              borderTop: '1px solid #e5edf5',
+              marginBottom: 8,
+              borderRadius: 6,
+              background: '#f6f9fc',
+              border: '1px solid #e5edf5',
             }}
           >
-            {msg.thinkingRounds.map((round, idx) =>
-              round.length > 0 ? (
-                <div key={idx}>
-                  {multiRound && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: '#94a3b8',
-                        fontWeight: 600,
-                        marginBottom: 4,
-                        marginTop: idx > 0 ? 10 : 0,
-                      }}
-                    >
-                      第 {idx + 1} 轮思考
-                    </div>
-                  )}
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{round}</div>
-                  {multiRound && idx < msg.thinkingRounds.length - 1 && (
-                    <div
-                      style={{
-                        borderBottom: '1px dashed #dfe6ee',
-                        margin: '8px 0',
-                      }}
-                    />
-                  )}
-                </div>
-              ) : null,
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ── Render per-tool-call bubbles ──
-  const renderToolCallBubbles = (msg: DisplayMessage) => {
-    if (msg.toolCalls.length === 0) return null;
-
-    return (
-      <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {msg.toolCalls.map((tc, idx) => {
-          const isSelected = selectedToolCallIndex === idx;
-          const handleClick = () => {
-            setSelectedToolCallIndex(idx);
-            setRagToolResults(tc.results);
-            setRagToolQueries([tc.query]);
-            setRagToolElapsed(tc.elapsed);
-            setRagVisible(true);
-          };
-
-          return (
             <div
-              key={idx}
-              onClick={handleClick}
+              onClick={toggleExpand}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 6,
                 padding: '8px 12px',
-                background: isSelected ? 'rgba(83,58,253,0.08)' : '#f6f9fc',
-                border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
-                borderRadius: 8,
-                fontSize: 12,
                 cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                if (!isSelected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
-                  (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSelected) {
-                  (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
-                  (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
-                }
+                fontSize: 12,
+                color: '#64748d',
+                userSelect: 'none',
               }}
             >
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 500,
-                  color: '#533afd',
-                  background: 'rgba(83,58,253,0.1)',
-                  width: 18,
-                  height: 18,
-                  borderRadius: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                {idx + 1}
-              </span>
-              <SearchOutlined style={{ fontSize: 12, color: '#533afd' }} />
-              <span
-                style={{
-                  maxWidth: 200,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: '#061b31',
-                }}
-              >
-                "{tc.query}"
-              </span>
-              {!tc.done ? (
-                <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 'auto' }} />
-              ) : tc.count > 0 ? (
-                <span style={{ marginLeft: 'auto', color: '#15be53', fontWeight: 500 }}>
-                  {tc.count} 条
+              <BulbOutlined style={{ fontSize: 12, color: '#533afd' }} />
+              <span style={{ fontWeight: 500 }}>思考过程</span>
+              {maxRounds > 1 && (
+                <span style={{ fontSize: 10, color: '#94a3b8' }}>第 {i + 1} 轮</span>
+              )}
+              {isStreamingThisRound && (
+                <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
+              )}
+              {!isStreamingThisRound && thinkingRound.length > 0 && (
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  ({thinkingRound.length} 字)
                 </span>
+              )}
+              {isExpanded ? (
+                <DownOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
               ) : (
-                <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>无结果</span>
+                <RightOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
               )}
             </div>
-          );
-        })}
-      </div>
-    );
+            {isExpanded && thinkingRound.length > 0 && (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  lineHeight: 1.7,
+                  color: '#64748d',
+                  borderTop: '1px solid #e5edf5',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {thinkingRound}
+              </div>
+            )}
+          </div>,
+        );
+      }
+
+      // 2. Render tool call i (if exists)
+      if (toolCall) {
+        const isSelected = selectedToolCallIndex === i;
+        const handleClick = () => {
+          setSelectedToolCallIndex(i);
+          setRagToolResults(toolCall.results);
+          setRagToolQueries([toolCall.query]);
+          setRagToolElapsed(toolCall.elapsed);
+          setRagVisible(true);
+        };
+
+        elements.push(
+          <div
+            key={`tool-${i}`}
+            onClick={handleClick}
+            style={{
+              marginBottom: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 12px',
+              background: isSelected ? 'rgba(83,58,253,0.08)' : '#f6f9fc',
+              border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
+              borderRadius: 8,
+              fontSize: 12,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSelected) {
+                (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
+                (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSelected) {
+                (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
+                (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
+              }
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 500,
+                color: '#533afd',
+                background: 'rgba(83,58,253,0.1)',
+                width: 18,
+                height: 18,
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              {i + 1}
+            </span>
+            <SearchOutlined style={{ fontSize: 12, color: '#533afd' }} />
+            <span
+              style={{
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: '#061b31',
+              }}
+            >
+              "{toolCall.query}"
+            </span>
+            {!toolCall.done ? (
+              <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 'auto' }} />
+            ) : toolCall.count > 0 ? (
+              <span style={{ marginLeft: 'auto', color: '#15be53', fontWeight: 500 }}>
+                {toolCall.count} 条
+              </span>
+            ) : (
+              <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>无结果</span>
+            )}
+          </div>,
+        );
+      }
+    }
+
+    return <div>{elements}</div>;
   };
 
   return (
@@ -845,11 +852,10 @@ export default function Chat() {
                       }),
                 }}
               >
-                {msg.role === 'assistant' && renderThinkingSection(msg)}
-                {msg.role === 'assistant' && renderToolCallBubbles(msg)}
+                {msg.role === 'assistant' && renderReActRounds(msg)}
 
                 {/* Content */}
-                <div>
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                   {msg.role === 'assistant' ? (
                     <ReactMarkdown
                       components={{
