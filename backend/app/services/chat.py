@@ -468,7 +468,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                     yield _sse_event("tool_call_result", {
                         "tool": fn_name,
                         "query": result.get("name", str(fn_args.get("artifact_id", ""))),
-                        "artifact_detail": result,  # Send full artifact detail
+                        "artifactDetail": result,  # Send full artifact detail (camelCase for frontend)
                         "count": 1 if "error" not in result else 0,
                         "elapsed": round(time.time(), 2),
                     })

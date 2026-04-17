@@ -51,6 +51,7 @@ interface ToolCallEntry {
   count: number;
   elapsed: number;
   done: boolean;
+  roundIndex: number; // Which thinking round this tool call belongs to
 }
 
 interface DisplayMessage {
@@ -102,13 +103,6 @@ export default function Chat() {
   const prevMsgCountRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const skipAutoRestoreRef = useRef(false);
-
-  // Abort any in-flight SSE request on unmount
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -172,6 +166,7 @@ export default function Chat() {
                     count: 0,
                     elapsed: 0,
                     done: true,
+                    roundIndex: 0, // Fallback: backend doesn't save round info, loaded messages assign to round 0
                   };
 
                   if (toolName === 'get_artifact_detail') {
@@ -397,6 +392,8 @@ export default function Chat() {
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.id === assistantId) {
+                  // Tool calls after thinking_end of round N belong to round N
+                  const roundIdx = m.thinkingRounds.length > 0 ? m.thinkingRounds.length - 1 : 0;
                   return {
                     ...m,
                     toolCalls: [
@@ -408,6 +405,7 @@ export default function Chat() {
                         count: 0,
                         elapsed: 0,
                         done: false,
+                        roundIndex: roundIdx,
                       },
                     ],
                   };
@@ -512,19 +510,20 @@ export default function Chat() {
 
   // ── Render interleaved ReAct rounds (thinking + tool call paired) ──
   const renderReActRounds = (msg: DisplayMessage) => {
-    const maxRounds = Math.max(msg.thinkingRounds.length, msg.toolCalls.length);
-    if (maxRounds === 0) return null;
+    if (msg.thinkingRounds.length === 0 && msg.toolCalls.length === 0) return null;
 
     const elements: React.ReactNode[] = [];
+    const maxRound = Math.max(
+      msg.thinkingRounds.length,
+      msg.toolCalls.length > 0 ? Math.max(...msg.toolCalls.map(tc => tc.roundIndex)) + 1 : 0,
+    );
 
-    for (let i = 0; i < maxRounds; i++) {
-      const thinkingRound = msg.thinkingRounds[i];
-      const toolCall = msg.toolCalls[i];
-      const roundHasContent = (thinkingRound && thinkingRound.length > 0) || toolCall;
-      if (!roundHasContent) continue;
+    for (let i = 0; i < maxRound; i++) {
+      const thinkingText = msg.thinkingRounds[i];
+      const roundToolCalls = msg.toolCalls.filter(tc => tc.roundIndex === i);
 
-      // 1. Render thinking round i (if exists and has content)
-      if (thinkingRound && thinkingRound.length > 0) {
+      // 1. Render thinking for this round (if exists and has content)
+      if (thinkingText && thinkingText.length > 0) {
         const key = `${msg.id}:${i}`;
         const isExpanded = expandedThinking.has(key);
         const isStreamingThisRound = !msg.thinkingDone && i === msg.thinkingRounds.length - 1;
@@ -566,9 +565,9 @@ export default function Chat() {
               {isStreamingThisRound && (
                 <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
               )}
-              {!isStreamingThisRound && thinkingRound.length > 0 && (
+              {!isStreamingThisRound && thinkingText.length > 0 && (
                 <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                  ({thinkingRound.length} 字)
+                  ({thinkingText.length} 字)
                 </span>
               )}
               {isExpanded ? (
@@ -577,7 +576,7 @@ export default function Chat() {
                 <RightOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
               )}
             </div>
-            {isExpanded && thinkingRound.length > 0 && (
+            {isExpanded && thinkingText.length > 0 && (
               <div
                 style={{
                   padding: '10px 12px',
@@ -588,24 +587,25 @@ export default function Chat() {
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {thinkingRound}
+                {thinkingText}
               </div>
             )}
           </div>,
         );
       }
 
-      // 2. Render tool call i (if exists)
-      if (toolCall) {
-        const isPanelSelected = ragVisible && (panelToolCallIdx === i || (panelToolCallIdx < 0 && i === msg.toolCalls.length - 1));
+      // 2. Render ALL tool calls for this round
+      for (const toolCall of roundToolCalls) {
+        const tcIdx = msg.toolCalls.indexOf(toolCall);
+        const isPanelSelected = ragVisible && (panelToolCallIdx === tcIdx || (panelToolCallIdx < 0 && tcIdx === msg.toolCalls.length - 1));
         const handleClick = () => {
-          setPanelToolCallIdx(i);
+          setPanelToolCallIdx(tcIdx);
           setRagVisible(true);
         };
 
         elements.push(
           <div
-            key={`tool-${i}`}
+            key={`tool-${tcIdx}`}
             onClick={handleClick}
             style={{
               marginBottom: 8,
@@ -646,7 +646,7 @@ export default function Chat() {
                 flexShrink: 0,
               }}
             >
-              {i + 1}
+              {tcIdx + 1}
             </span>
             <SearchOutlined style={{ fontSize: 12, color: '#533afd' }} />
             <span
@@ -1206,63 +1206,91 @@ export default function Chat() {
                         borderRadius: 8,
                       }}
                     >
-                      {/* Mini D3 graph - simple SVG visualization */}
-                      <svg width="100%" height={180} style={{ marginBottom: 8 }}>
-                        {(() => {
-                          // Simple layout: arrange entities in a grid
-                          const entityCount = Math.min(lastTc.entities!.length, 8);
-                          const cols = 4;
-                          const rows = Math.ceil(entityCount / cols);
-                          const cellWidth = 300 / cols;
-                          const cellHeight = 160 / rows;
-                          const nodeRadius = 16;
+                      {/* Group entities by type for structured display */}
+                      {(() => {
+                        const typeGroups: Record<string, typeof lastTc.entities> = {};
+                        (lastTc.entities || []).forEach(e => {
+                          const t = e.type || '其他';
+                          if (!typeGroups[t]) typeGroups[t] = [];
+                          typeGroups[t].push(e);
+                        });
 
-                          return lastTc.entities!.slice(0, 8).map((entity, i) => {
-                            const col = i % cols;
-                            const row = Math.floor(i / cols);
-                            const x = col * cellWidth + cellWidth / 2 + 20;
-                            const y = row * cellHeight + cellHeight / 2 + 10;
+                        const typeIcons: Record<string, string> = {
+                          '文物': '🏛️',
+                          '朝代': '📅',
+                          '类别': '📂',
+                          '地点': '📍',
+                          '标签': '🏷️',
+                        };
 
-                            // Color by type
-                            const colors: Record<string, string> = {
-                              '文物': '#533afd',
-                              '人物': '#f59e0b',
-                              '地点': '#10b981',
-                              '事件': '#ef4444',
-                              '概念': '#6366f1',
-                            };
-                            const color = colors[entity.type] || '#533afd';
+                        const typeColors: Record<string, string> = {
+                          '文物': '#533afd',
+                          '朝代': '#f59e0b',
+                          '类别': '#10b981',
+                          '地点': '#ef4444',
+                          '标签': '#6366f1',
+                        };
 
-                            return (
-                              <g key={i}>
-                                <circle cx={x} cy={y} r={nodeRadius} fill={color} opacity={0.8} />
-                                <text
-                                  x={x}
-                                  y={y + 4}
-                                  textAnchor="middle"
-                                  fill="#fff"
-                                  fontSize={10}
-                                  fontWeight={500}
-                                >
-                                  {entity.name.slice(0, 4)}
-                                </text>
-                                <text
-                                  x={x}
-                                  y={y + nodeRadius + 12}
-                                  textAnchor="middle"
-                                  fill="#64748d"
-                                  fontSize={9}
-                                >
-                                  {entity.type}
-                                </text>
-                              </g>
-                            );
-                          });
-                        })()}
-                      </svg>
-                      <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                        共 {lastTc.entities.length} 个实体，{lastTc.relations?.length || 0} 条关系
-                      </div>
+                        // Group relations by relation type for a compact summary
+                        const relByType: Record<string, {src: string, tgt: string}[]> = {};
+                        (lastTc.relations || []).forEach(r => {
+                          const rt = r.relation || '关联';
+                          if (!relByType[rt]) relByType[rt] = [];
+                          relByType[rt].push({ src: r.source, tgt: r.target });
+                        });
+
+                        return (
+                          <>
+                            {Object.entries(typeGroups).map(([type, ents]) => (
+                              <div key={type} style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: typeColors[type] || '#64748d', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span>{typeIcons[type] || '📌'}</span>
+                                  <span>{type}（{ents.length}）</span>
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                  {ents.slice(0, 12).map((entity, i) => (
+                                    <span
+                                      key={i}
+                                      style={{
+                                        padding: '2px 8px',
+                                        fontSize: 11,
+                                        background: '#fff',
+                                        border: `1px solid ${typeColors[type] || '#e5edf5'}30`,
+                                        borderRadius: 4,
+                                        color: '#334155',
+                                      }}
+                                    >
+                                      {entity.name}
+                                    </span>
+                                  ))}
+                                  {ents.length > 12 && (
+                                    <span style={{ fontSize: 11, color: '#94a3b8', padding: '2px 4px' }}>
+                                      +{ents.length - 12} 更多
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            {/* Relations summary */}
+                            {Object.keys(relByType).length > 0 && (
+                              <div style={{ borderTop: '1px solid #e5edf5', paddingTop: 6, marginTop: 4 }}>
+                                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500, marginBottom: 4 }}>关系概览</div>
+                                {Object.entries(relByType).map(([relType, pairs]) => (
+                                  <div key={relType} style={{ fontSize: 11, color: '#64748d', marginBottom: 2 }}>
+                                    <span style={{ color: '#533afd', fontWeight: 500 }}>{relType}</span>
+                                    <span style={{ color: '#94a3b8' }}>（{pairs.length}条）</span>
+                                    <span style={{ color: '#475569' }}> {pairs.slice(0, 3).map(p => `${p.src}→${p.tgt}`).join('；')}</span>
+                                    {pairs.length > 3 && <span style={{ color: '#94a3b8' }}> 等</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                              共 {lastTc.entities!.length} 个实体，{lastTc.relations?.length || 0} 条关系
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
 
