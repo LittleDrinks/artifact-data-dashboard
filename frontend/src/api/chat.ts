@@ -31,6 +31,8 @@ export interface SSEEventData {
   results?: SearchResultItem[];
   count?: number;
   elapsed?: number;
+  // error (added for tool execution errors)
+  error?: string;
   // done
   sources?: SourceItem[];
 }

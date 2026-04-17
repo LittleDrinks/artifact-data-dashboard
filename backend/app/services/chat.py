@@ -231,6 +231,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
     ]
 
     all_tool_calls_log: list[dict] = []
+    all_thinking_rounds: list[str] = []  # Accumulate thinking text for DB persistence
     answer_text = ""
     sources: list[dict] = []
 
@@ -238,7 +239,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
 
     if use_llm:
         try:
-            answer_text = yield from _react_gen(db, messages, all_tool_calls_log)
+            answer_text = yield from _react_gen(db, messages, all_tool_calls_log, all_thinking_rounds)
         except Exception as exc:
             logger.error("ReAct loop failed: %s", str(exc)[:300], exc_info=True)
             yield _sse_event("thinking_start", {})
@@ -259,6 +260,11 @@ def stream_chat_response(db: Session, query: str, session_id: int):
         yield _sse_event("answer_end", {})
 
     total_elapsed = round(time.time() - start_time, 2)
+
+    # Prepend thinking rounds to tool_calls_log for database persistence
+    # Format: {"type": "thinking", "rounds": [round1_text, round2_text, ...]}
+    if all_thinking_rounds:
+        all_tool_calls_log.insert(0, {"type": "thinking", "rounds": all_thinking_rounds})
 
     # Save AI reply
     tool_calls_json = (
@@ -294,7 +300,7 @@ def stream_chat_response(db: Session, query: str, session_id: int):
 # ReAct loop generator
 # ---------------------------------------------------------------------------
 
-def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
+def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], thinking_rounds: list[str]):
     """ReAct loop generator. Yields SSE event strings, returns final answer text.
 
     Up to MAX_REACT_ROUNDS iterations:
@@ -378,10 +384,13 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
                 content_text += content
                 yield _sse_event("answer_delta", {"content": content})
 
-        # Close thinking phase if still open
+        # Close thinking phase if still open - save to thinking_rounds for DB persistence
         if in_thinking:
             in_thinking = False
             yield _sse_event("thinking_end", {})
+            # Save this round's thinking text for database persistence
+            if thinking_text:
+                thinking_rounds.append(thinking_text)
 
         # --- Tool calls requested ---
         if tc_buffers:
@@ -435,8 +444,10 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict]):
                     "result": result,
                 })
 
-                # Emit tool_call_result
+                # Emit tool_call_result - include query for frontend RAG panel display
                 yield _sse_event("tool_call_result", {
+                    "tool": fn_name,
+                    "query": fn_args.get("keyword", fn_args_str[:100]),
                     "results": result.get("results", []),
                     "count": result.get("count", 0),
                     "elapsed": round(time.time(), 2),

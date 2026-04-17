@@ -174,12 +174,17 @@ export default function Chat() {
       const msgs: ChatMessageInfo[] = await getChatMessages(sessionId);
       const displayMsgs: DisplayMessage[] = msgs.map((m) => {
         const toolCalls: ToolCallEntry[] = [];
+        let thinkingRounds: string[] = [];
         if (m.tool_calls) {
           try {
             const tcData = JSON.parse(m.tool_calls);
             if (Array.isArray(tcData)) {
               for (const tc of tcData) {
-                if (tc.result?.results) {
+                // Check for thinking rounds entry (persisted from backend)
+                if (tc.type === "thinking" && Array.isArray(tc.rounds)) {
+                  thinkingRounds = tc.rounds;
+                } else if (tc.result?.results) {
+                  // Regular tool call entry
                   toolCalls.push({
                     tool: tc.tool || 'search_artifacts',
                     query: tc.args?.keyword || '',
@@ -199,7 +204,7 @@ export default function Chat() {
           id: generateId(),
           role: m.role as 'user' | 'assistant',
           content: m.content || '',
-          thinkingRounds: [],
+          thinkingRounds,
           thinkingDone: true,
           toolCalls,
           streaming: false,
@@ -442,6 +447,8 @@ export default function Chat() {
                 const updatedToolCalls = [...m.toolCalls];
                 updatedToolCalls[lastIdx] = {
                   ...updatedToolCalls[lastIdx],
+                  // Use query from event if available, otherwise keep existing
+                  query: event.query || updatedToolCalls[lastIdx].query,
                   results: event.results || [],
                   count: event.count || 0,
                   elapsed: event.elapsed || 0,
@@ -452,7 +459,8 @@ export default function Chat() {
             );
             // Update RAG panel to show this retrieval's results
             setRagToolResults(event.results || []);
-            setRagToolQueries([event.query || query]);
+            // Use query from the SSE event (backend now includes it)
+            setRagToolQueries([event.query || '']);
             setRagToolElapsed(event.elapsed || 0);
             setRagToolLoading(false);
             break;
