@@ -8,7 +8,7 @@
 
 | 层级 | 技术 | 版本 |
 |------|------|------|
-| 前端 | Vite + React + TypeScript + Ant Design Pro | React 18, AntD 5 |
+| 前端 | Vite + React + TypeScript + Ant Design Pro | React 19, AntD 5 |
 | 后端 | Python FastAPI | 3.12（最低3.10，需用虚拟环境） |
 | AI | LangChain + LightRAG | LangChain 0.3 |
 | 关系数据库 | SQLite（WAL模式） | - |
@@ -157,7 +157,7 @@ CREATE TABLE attachments (
 - 错误处理：统一HTTPException + 错误码
 
 ### 前端
-- Vite + React 18 + TypeScript
+- Vite + React 19 + TypeScript
 - Ant Design Pro 组件库
 - 按功能分模块（features/artifacts, features/graph, features/chat 等）
 - API 调用统一封装在 api/ 目录

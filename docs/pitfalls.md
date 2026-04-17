@@ -42,6 +42,24 @@
 - **解决**：所有 `open()` 调用都加 `encoding='utf-8'` 参数
 - **教训**：Windows 环境下处理中文文件，永远显式指定 encoding='utf-8'
 
+### [2026-04-17] admin 用户创建时 role 字段默认为 'user' 而非 'admin'
+- **现象**：创建 admin 用户时，数据库中 role 字段值为 'user'，导致登录后无法访问需 admin 权限的端点
+- **原因**：用户表 model 定义中 `role` 字段 default 值为 'user'，创建逻辑未显式指定 role='admin'
+- **解决**：在 create_admin_user.py 中显式设置 `role='admin'`，确保管理员用户拥有正确权限
+- **教训**：创建特殊权限用户时，必须显式指定 role 字段，不能依赖 model default 值
+
+### [2026-04-17] category 字段被 Wikipedia 分类数据污染
+- **现象**：部分文物 category 字段包含多个分类，用竖线分隔如 "青铜器|礼器|容器"，导致前端筛选和统计失效
+- **原因**：原始数据来自 Wikipedia 抓取，分类字段直接复制了 Wikipedia 的多分类格式
+- **解决**：编写 Ollama LLM 批量清洗脚本，对每条记录调用 LLM 判断最匹配的标准类别（青铜器、陶瓷、玉器等 8 种）
+- **教训**：外部数据源的字段格式可能不符合预期，导入前需验证字段结构和内容
+
+### [2026-04-17] image_url 存储了 Wikipedia 页面链接而非图片 URL
+- **现象**：约 140 条记录 image_url 字段存储的是 Wikipedia 页面 URL（如 https://zh.wikipedia.org/wiki/xxx），而非图片链接
+- **原因**：数据抓取脚本在页面无图片时，错误地将页面 URL 作为 fallback 写入 image_url 字段
+- **解决**：编写批量清洗脚本，检测 image_url 是否包含 wikipedia.org/wiki，若为页面链接则置空
+- **教训**：数据导入时需严格校验字段类型，页面 URL 和图片 URL 是不同概念，不能混用
+
 ### [2026-04-14] recharts Tooltip formatter 和 Pie label 的 TypeScript 类型严格检查
 - **现象**：`formatter={(value: number) => ...}` 报 TS2322，`label={({ name, percent }) => ...}` 报 TS2769
 - **原因**：recharts 的 Tooltip formatter 参数类型是 `ValueType | undefined`，Pie label 参数类型是 `PieLabelRenderProps`（name 为 `string | undefined`），不能窄化为非可选类型
