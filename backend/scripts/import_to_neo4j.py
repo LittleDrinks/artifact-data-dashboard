@@ -171,6 +171,23 @@ def generate_triples(artifacts: list) -> tuple[list[dict], list[dict]]:
                     if tag_id:
                         add_relation(artifact_id, tag_id, "包含标签")
 
+        # Related artifacts: artifact 与 artifact 相关 (pipe-split)
+        if artifact.related_artifacts:
+            for related_name in artifact.related_artifacts.split("|"):
+                related_name = related_name.strip()
+                if related_name:
+                    # Create a reference to another artifact by name
+                    # We'll try to match it when importing
+                    related_id = f"artifact_ref:{related_name}"
+                    if related_id not in nodes_map:
+                        nodes_map[related_id] = {
+                            "id": related_id,
+                            "name": related_name,
+                            "type": "artifact_ref",
+                            "properties": {"reference": True},
+                        }
+                    add_relation(artifact_id, related_id, "RELATED_TO")
+
     nodes = list(nodes_map.values())
 
     logger.info(

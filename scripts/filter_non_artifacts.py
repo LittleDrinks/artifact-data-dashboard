@@ -30,7 +30,7 @@ def filter_artifacts_list(blacklist: set[str]) -> tuple[list, list, int]:
 
     返回：(保留的条目列表, 被过滤的条目列表, 总条目数)
     """
-    artifacts_file = DATA_DIR / "artifacts_list.json"
+    artifacts_file = DATA_DIR / "final" / "artifacts_list.json"
     with open(artifacts_file, encoding="utf-8") as f:
         artifacts = json.load(f)
 
@@ -50,7 +50,7 @@ def filter_artifacts_list(blacklist: set[str]) -> tuple[list, list, int]:
 
 def save_clean_artifacts(kept: list[dict]) -> None:
     """保存清理后的 artifacts_list"""
-    output_file = DATA_DIR / "artifacts_list_clean.json"
+    output_file = DATA_DIR / "final" / "artifacts_list_clean.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(kept, f, ensure_ascii=False, indent=2)
     print(f"已保存清理后的数据到: {output_file}")
@@ -74,7 +74,7 @@ def generate_report(kept: list, filtered: list, total: int) -> None:
         ]
     }
 
-    report_file = DATA_DIR / "filter_report.json"
+    report_file = DATA_DIR / "final" / "filter_report.json"
     with open(report_file, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"\n过滤报告已保存到: {report_file}")

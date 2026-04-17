@@ -42,10 +42,16 @@ async def login(page: Page) -> None:
 
 
 async def save_screenshot_on_failure(page: Page, test_name: str) -> str:
-    """Save screenshot and return the path."""
-    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{test_name}_{timestamp}.png"
-    filepath = SCREENSHOT_DIR / filename
-    await page.screenshot(path=str(filepath), full_page=True)
-    return str(filepath)
+    """Save screenshot and return the path. Fails gracefully if screenshot fails."""
+    try:
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{test_name}_{timestamp}.png"
+        filepath = SCREENSHOT_DIR / filename
+        # Use shorter timeout for screenshot
+        await page.screenshot(path=str(filepath), full_page=True, timeout=10000)
+        return str(filepath)
+    except Exception as e:
+        # If screenshot fails, just log and continue - don't mask the actual test error
+        print(f"Screenshot failed for {test_name}: {e}")
+        return ""

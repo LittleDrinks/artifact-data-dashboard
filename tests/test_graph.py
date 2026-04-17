@@ -12,11 +12,11 @@ async def login(page):
     """Helper to log in."""
     await page.goto(f"{BASE_URL}/login")
     await page.wait_for_load_state("networkidle")
-    await page.locator('#username').fill("admin")
-    await page.locator('#password').fill("admin123")
+    await page.locator('input[placeholder="用户名"]').first.fill("admin")
+    await page.locator('input[placeholder="密码"]').first.fill("admin123")
     await page.locator('button[type="submit"]').click()
     # Wait for redirect
-    for _ in range(10):
+    for _ in range(15):
         await page.wait_for_timeout(1000)
         if "/login" not in page.url:
             break

@@ -99,7 +99,7 @@ def process_file(filepath: str) -> tuple[bool, int]:
 def main():
     """主函数"""
     base_dir = Path(__file__).parent.parent
-    detail_dir = base_dir / 'data' / 'artifacts_detail'
+    detail_dir = base_dir / 'data' / 'final' / 'artifacts_detail'
 
     if not detail_dir.exists():
         print(f"目录不存在: {detail_dir}")

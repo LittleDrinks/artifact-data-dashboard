@@ -4,8 +4,8 @@ Era normalization: standardize dynasty/period names in artifacts table.
 Strategy:
 1. Comprehensive mapping table for known variants (~80% coverage)
 2. Regex-based pattern matching for date ranges
-3. GLM-4.7 API for remaining unmapped eras
-4. GLM-4.7 API to extract era from description for NULL eras
+3. Local Ollama (qwen2.5:3b) for remaining unmapped eras
+4. Local Ollama (qwen2.5:3b) to extract era from description for NULL eras
 
 Usage:
     cd E:/shared/workplace/ADD_new
@@ -160,12 +160,12 @@ def normalize_era(era: str) -> str | None:
     return None  # unmapped
 
 
-def call_glm_with_retry(client, prompt: str, max_retries: int = 3, model: str = "glm-4.7") -> str | None:
-    """Call GLM with exponential backoff retry. Uses streaming for reliability."""
+def call_ollama_with_retry(client, prompt: str, max_retries: int = 3) -> str | None:
+    """Call Ollama (qwen2.5:3b) with exponential backoff retry. Uses streaming for reliability."""
     for attempt in range(max_retries):
         try:
             stream = client.chat.completions.create(
-                model=model,
+                model="qwen2.5:3b",  # 2GB VRAM, safe for 8GB GPU
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=80,
                 temperature=0.1,
@@ -189,7 +189,7 @@ def call_glm_with_retry(client, prompt: str, max_retries: int = 3, model: str = 
 
 def classify_era_batch(client, items: list[tuple[int, str, str]]) -> dict[int, str]:
     """
-    Use GLM to classify era for a batch of artifacts.
+    Use Ollama to classify era for a batch of artifacts.
     items: [(id, name, current_era_or_desc), ...]
     Returns: {id: normalized_era}
     """
@@ -215,7 +215,7 @@ def classify_era_batch(client, items: list[tuple[int, str, str]]) -> dict[int, s
                 time.sleep(1)  # rate limit buffer
         return result
 
-    response = call_glm_with_retry(client, prompt)
+    response = call_ollama_with_retry(client, prompt)
     if not response:
         return {}
 
@@ -237,29 +237,24 @@ def classify_era_batch(client, items: list[tuple[int, str, str]]) -> dict[int, s
     return result
 
 
-def _get_glm_client():
-    """Load GLM API credentials from .env and return an OpenAI client."""
+def _get_ollama_client():
+    """Return an OpenAI client configured for local Ollama.
+
+    Ollama exposes an OpenAI-compatible API at http://localhost:11434/v1
+    Uses qwen2.5:3b (2GB VRAM) which is safe for 8GB GPU.
+    """
     try:
         from openai import OpenAI
     except ImportError:
         print("  openai not installed", flush=True)
         return None
 
-    env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
-    api_key = api_base = None
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("LIGHTRAG_API_KEY="):
-                api_key = line.split("=", 1)[1]
-            elif line.startswith("LIGHTRAG_API_BASE="):
-                api_base = line.split("=", 1)[1]
-
-    if not api_key:
-        print("  No LIGHTRAG_API_KEY found in .env", flush=True)
-        return None
-
-    return OpenAI(api_key=api_key, base_url=api_base, timeout=120.0)
+    # Ollama OpenAI-compatible endpoint
+    return OpenAI(
+        api_key="ollama",  # Ollama accepts any string as api_key
+        base_url="http://localhost:11434/v1",
+        timeout=120.0,
+    )
 
 
 def main():
@@ -304,11 +299,11 @@ def main():
         for era, ids in sorted(unmapped_eras.items(), key=lambda x: -len(x[1])):
             print(f"    {len(ids):3d}x  {era}")
 
-    # ── Phase 2: GLM for unmapped eras ────────────────────────────────
-    glm_client = _get_glm_client()
-    if unmapped_eras and glm_client:
-        print("\n=== Phase 2: GLM classification for unmapped eras ===")
-        client = glm_client
+    # ── Phase 2: Ollama for unmapped eras ────────────────────────────────
+    ollama_client = _get_ollama_client()
+    if unmapped_eras and ollama_client:
+        print("\n=== Phase 2: Ollama classification for unmapped eras ===")
+        client = ollama_client
 
         # Build items for classification
         items = []
@@ -323,7 +318,7 @@ def main():
                 items.append((aid, name, era))
 
         # Process in batches of 10
-        glm_updated = 0
+        ollama_updated = 0
         batch_size = 10
         for i in range(0, len(items), batch_size):
             batch = items[i:i+batch_size]
@@ -331,14 +326,14 @@ def main():
             result = classify_era_batch(client, batch)
             for aid, era in result.items():
                 cursor.execute("UPDATE artifacts SET era = ? WHERE id = ?", (era, aid))
-                glm_updated += 1
+                ollama_updated += 1
             conn.commit()
             if i + batch_size < len(items):
                 time.sleep(1)
 
-        print(f"  GLM classified: {glm_updated}/{len(items)}")
+        print(f"  Ollama classified: {ollama_updated}/{len(items)}")
 
-    # ── Phase 3: Fill NULL eras from description via GLM ─────────────
+    # ── Phase 3: Fill NULL eras from description via Ollama ─────────────
     print("\n=== Phase 3: Fill NULL eras from description ===")
     cursor.execute("""
         SELECT id, name, description
@@ -348,12 +343,12 @@ def main():
     null_era_rows = cursor.fetchall()
     print(f"Artifacts with no era but has description: {len(null_era_rows)}", flush=True)
 
-    if null_era_rows and not glm_client:
-        print("  Skipping: no GLM client available", flush=True)
+    if null_era_rows and not ollama_client:
+        print("  Skipping: no Ollama client available", flush=True)
         null_era_rows = []
 
     if null_era_rows:
-        client = glm_client
+        client = ollama_client
 
     if null_era_rows:
         items = []
@@ -379,7 +374,7 @@ def main():
                 prompt_lines.append(f"{idx+1}. {name} — {desc[:100]}")
 
             prompt = "\n".join(prompt_lines)
-            response = call_glm_with_retry(client, prompt)
+            response = call_ollama_with_retry(client, prompt)
             if not response:
                 continue
 

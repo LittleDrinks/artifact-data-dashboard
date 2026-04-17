@@ -56,7 +56,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("build_lightrag_index")
 
-DETAILS_DIR = os.path.join(_repo_root, "data", "artifacts_detail")
+DETAILS_DIR = os.path.join(_repo_root, "data", "final", "artifacts_detail")
 LIGHTRAG_DIR = os.path.join(_backend_dir, "data", "lightrag")
 
 # LLM retry config
@@ -142,6 +142,56 @@ def _check_ollama_health() -> bool:
     except Exception as e:
         logger.error("Ollama health check failed: %s", e)
         return False
+
+
+def _unload_nonessential_models(keep_model: str = None) -> None:
+    """Unload all models except the one we need for indexing.
+
+    For 8GB VRAM GPU, we need to be aggressive about memory management.
+    Only keep qwen2.5:3b (LLM) and nomic-embed-text (embedding).
+    """
+    import urllib.request
+    import urllib.error
+
+    # Get list of currently loaded models
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            loaded_models = [m["name"] for m in data.get("models", [])]
+            logger.info("Currently loaded models: %s", ", ".join(loaded_models[:10]))
+    except Exception as e:
+        logger.warning("Could not get loaded models list: %s", e)
+        loaded_models = []
+
+    # Essential models to keep (only these for 8GB VRAM)
+    # For local LLM: qwen2.5:7b (5GB) + nomic-embed-text (0.3GB) = 5.3GB
+    # For cloud LLM: nomic-embed-text only
+    essential = {"nomic-embed-text"}
+    if keep_model:
+        essential.add(keep_model)
+
+    # Unload everything else
+    for model in loaded_models:
+        model_base = model.split(":")[0] if ":" in model else model
+        # Check if this model is essential
+        is_essential = any(e in model or model_base in e for e in essential)
+        if not is_essential:
+            try:
+                data = json.dumps({"name": model, "keep_alive": 0}).encode("utf-8")
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/generate",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    resp.read()
+                logger.info("Unloaded non-essential model: %s", model)
+            except Exception:
+                pass  # Model may not be currently running
+
+    logger.info("VRAM optimization complete — kept essential models: %s", ", ".join(essential))
 
 
 def _unload_ollama_llm_models() -> None:
@@ -435,7 +485,7 @@ async def _monitor_progress(total_docs: int) -> None:
 # ── Main build logic ─────────────────────────────────────────────────
 
 
-async def _build(local_llm: bool = False, model_override: str | None = None) -> None:
+async def _build(local_llm: bool = False, model_override: str | None = None, limit: int = 0) -> None:
     from lightrag import LightRAG
     from app.config import settings
 
@@ -444,6 +494,11 @@ async def _build(local_llm: bool = False, model_override: str | None = None) -> 
     if not artifacts:
         logger.warning("No artifacts loaded — nothing to index.")
         return
+
+    # Apply limit for smoke testing
+    if limit > 0:
+        artifacts = artifacts[:limit]
+        logger.info("SMOKE TEST: limiting to %d artifacts", limit)
 
     logger.info("Loaded %d artifacts from %s", len(artifacts), DETAILS_DIR)
 
@@ -464,8 +519,12 @@ async def _build(local_llm: bool = False, model_override: str | None = None) -> 
         )
         return
 
-    # Step 3: Unload local LLM models to free VRAM (skip if using local LLM)
-    if not local_llm:
+    # Step 3: Unload non-essential models to free VRAM (CRITICAL for 8GB GPU)
+    if local_llm:
+        # For local LLM mode, aggressively unload everything except qwen2.5:3b and nomic-embed-text
+        _unload_nonessential_models(keep_model=model_override or "qwen2.5:3b")
+    else:
+        # For cloud LLM mode, unload all local LLMs to free VRAM for embedding only
         _unload_ollama_llm_models()
 
     # Step 4: Resume or clear existing index
@@ -518,7 +577,8 @@ async def _build(local_llm: bool = False, model_override: str | None = None) -> 
     os.makedirs(working_dir, exist_ok=True)
 
     if local_llm:
-        # Use local Ollama LLM
+        # Use local Ollama LLM - default to qwen2.5:7b (5GB VRAM) for better extraction quality
+        # 3b model was too slow and timed out on entity extraction
         model_name = model_override or "qwen2.5:7b"
         llm_func = _make_ollama_llm_func(model_name)
         logger.info("Using local Ollama LLM: %s", model_name)
@@ -527,16 +587,17 @@ async def _build(local_llm: bool = False, model_override: str | None = None) -> 
 
     embed_func = _make_robust_embed_func()
 
-    # Neo4j connection settings
-    neo4j_uri = settings.NEO4J_URI
-    neo4j_user = settings.NEO4J_USER
-    neo4j_password = settings.NEO4J_PASSWORD
+    # Neo4j connection settings - set environment variables for LightRAG
+    # LightRAG 1.4.14 reads Neo4j config from environment variables
+    os.environ["NEO4J_URI"] = settings.NEO4J_URI
+    os.environ["NEO4J_USERNAME"] = settings.NEO4J_USER
+    os.environ["NEO4J_PASSWORD"] = settings.NEO4J_PASSWORD
 
     llm_label = model_name if local_llm else f"GLM-4.7 API"
     logger.info(
-        "Creating LightRAG — working_dir=%s, Neo4j=%s, llm=%s, embed=nomic-embed-text (Ollama)",
+        "Creating LightRAG — working_dir=%s, Neo4j=%s (via env), llm=%s, embed=nomic-embed-text (Ollama)",
         working_dir,
-        neo4j_uri,
+        settings.NEO4J_URI,
         llm_label,
     )
 
@@ -546,15 +607,12 @@ async def _build(local_llm: bool = False, model_override: str | None = None) -> 
         llm_model_name=model_name if local_llm else f"glm:{settings.LIGHTRAG_MODEL_NAME}",
         embedding_func=embed_func,
         max_parallel_insert=1 if local_llm else 4,
-        embedding_func_max_async=2 if local_llm else 8,
+        embedding_func_max_async=1 if local_llm else 8,
         # Increase timeouts for large-scale indexing
         default_embedding_timeout=300,
-        default_llm_timeout=300,
-        # Neo4j graph storage
+        default_llm_timeout=900,  # 15min for local LLM entity extraction
+        # Neo4j graph storage (configured via env vars NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
         graph_storage="Neo4JStorage",
-        neo4j_uri=neo4j_uri,
-        neo4j_user=neo4j_user,
-        neo4j_password=neo4j_password,
     )
 
     # Initialize storages
@@ -646,14 +704,16 @@ def main() -> None:
     parser.add_argument("--local-llm", action="store_true",
                         help="Use local Ollama LLM (qwen2.5:7b) instead of cloud GLM API")
     parser.add_argument("--model", type=str, default=None,
-                        help="Override LLM model name (e.g. qwen2.5:7b, deepseek-r1:14b)")
+                        help="Override LLM model name (e.g. qwen2.5:7b, qwen2.5:3b)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Limit number of artifacts to index (0 = all, use 3 for smoke test)")
     args = parser.parse_args()
 
     if args.clear:
         _clear_index()
         logger.info("Index cleared via --clear flag.")
 
-    asyncio.run(_build(local_llm=args.local_llm, model_override=args.model))
+    asyncio.run(_build(local_llm=args.local_llm, model_override=args.model, limit=args.limit))
 
 
 if __name__ == "__main__":

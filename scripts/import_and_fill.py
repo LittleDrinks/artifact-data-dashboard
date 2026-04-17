@@ -27,7 +27,7 @@ from app.models.artifact import Artifact
 def load_detail_file(name: str) -> dict:
     """加载详情文件"""
     base_dir = Path(__file__).parent.parent
-    detail_dir = base_dir / 'data' / 'artifacts_detail'
+    detail_dir = base_dir / 'data' / 'final' / 'artifacts_detail'
 
     # 尝试多种文件名格式
     possible_names = [
@@ -74,17 +74,17 @@ def main():
         print("=" * 60)
 
         # 2. 加载清理后的数据（优先使用 clean 版本）
-        clean_path = base_dir / 'data' / 'artifacts_list_clean.json'
+        clean_path = base_dir / 'data' / 'final' / 'artifacts_list_clean.json'
         if clean_path.exists():
             with open(clean_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             print(f"使用清理后数据: artifacts_list_clean.json ({len(data)} 条)")
         else:
             # 回退到原始数据
-            v5_path = base_dir / 'data' / 'artifacts_list_v5.json'
+            v5_path = base_dir / 'data' / 'final' / 'artifacts_list.json'
             with open(v5_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            print(f"使用原始数据: artifacts_list_v5.json ({len(data)} 条)")
+            print(f"使用原始数据: artifacts_list.json ({len(data)} 条)")
 
         # 3. 获取已存在的名称
         existing_names = set()

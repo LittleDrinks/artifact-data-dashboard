@@ -16,7 +16,7 @@ def load_official_list():
 
 def load_existing_artifacts():
     """加载现有文物数据"""
-    path = os.path.join(os.path.dirname(__file__), '..', 'data', 'artifacts_list.json')
+    path = os.path.join(os.path.dirname(__file__), '..', 'data', 'final', 'artifacts_list.json')
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
 

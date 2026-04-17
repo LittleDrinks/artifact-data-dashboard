@@ -17,7 +17,7 @@ import re
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "backend", "data", "app.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "backend", "app", "artifacts.db")
 
 # ── Valid material keywords ──────────────────────────────────────────────
 VALID_MATERIALS = [

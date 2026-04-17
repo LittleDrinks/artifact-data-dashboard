@@ -123,22 +123,22 @@ EXTRACTION_PROMPT_TEMPLATE = """你是一个文化遗产领域的知识图谱构
 
 示例输出：
 [
-  {
-    "subject": "四羊方尊",
+  {{
+    "subject": "{artifact_name}",
     "relation": "uses_technique",
     "object": "青铜铸造",
     "object_type": "concept",
     "confidence": 0.95,
     "evidence": "描述明确提及青铜材质"
-  },
-  {
-    "subject": "四羊方尊",
+  }},
+  {{
+    "subject": "{artifact_name}",
     "relation": "has_decorative_pattern",
     "object": "羊首纹",
     "object_type": "concept",
     "confidence": 0.9,
     "evidence": "器身四角各有一只羊首装饰"
-  }
+  }}
 ]
 
 请严格按上述格式输出，不要添加任何其他内容。"""
@@ -147,8 +147,11 @@ EXTRACTION_PROMPT_TEMPLATE = """你是一个文化遗产领域的知识图谱构
 # ── LLM Backend Functions ────────────────────────────────────────────────
 
 
-def make_ollama_llm(model_name: str = "llama3"):
-    """Create LangChain-compatible Ollama LLM."""
+def make_ollama_llm(model_name: str = "qwen2.5:3b"):
+    """Create LangChain-compatible Ollama LLM.
+
+    Default to qwen2.5:3b (2GB VRAM) which is safe for 8GB GPU.
+    """
     from langchain_community.llms import Ollama
 
     return Ollama(
@@ -182,6 +185,9 @@ async def call_llm_async(llm, prompt: str, max_retries: int = 3) -> str:
             result = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: llm.invoke(prompt)
             )
+            # Handle AIMessage object from ChatOpenAI vs string from Ollama
+            if hasattr(result, 'content'):
+                result = result.content
             # Rate limiting: 1s delay between API calls
             await asyncio.sleep(1)
             return result
@@ -554,8 +560,8 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--model-name", type=str, default="llama3",
-        help="Specific model name (e.g., llama3, qwen2, glm-4.7)"
+        "--model-name", type=str, default="qwen2.5:3b",
+        help="Specific model name (e.g., qwen2.5:3b, llama3, glm-4.7)"
     )
 
     parser.add_argument(

@@ -64,6 +64,8 @@ awesome-design-md/
 # Test artifacts / screenshots
 test-screenshots/
 chat_*.png
+*.png
+*.json
 
 # Third-party / non-project content
 awesome-design-md/

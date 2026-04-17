@@ -4,7 +4,13 @@
 
 ---
 
-*最后更新：2026-04-14*
+*最后更新：2026-04-17*
+
+### [2026-04-17] RTX 4060 8GB VRAM 无法运行 LightRAG 本地实体提取
+- **现象**：qwen2.5:7b (5GB) + nomic-embed-text (0.3GB) = 5.3GB，理论显存足够，但跑 LightRAG entity extraction 时崩溃：`llama runner process has terminated: Error code: 500`
+- **原因**：LightRAG 实体提取需要额外的显存用于 KV cache、中间计算、并行推理；qwen2.5:3b 虽然不崩溃但 600s 内无法完成任务
+- **解决**：规则化图谱（import_to_neo4j.py）不需要 LLM，可以直接跑；LightRAG 索引等云 API 恢复后再跑
+- **教训**：8GB VRAM 对复杂 LLM 任务（如知识图谱实体提取）不够用，建议 >= 12GB 或用云 API
 
 ### [2026-04-14] POST SSE 不能用 EventSource，必须用 fetch + ReadableStream
 - **现象**：POST `/api/chat/ask` 需要发送 JSON body（question、session_id），但浏览器原生 `EventSource` 只支持 GET 请求，无法发送 body 和自定义 header

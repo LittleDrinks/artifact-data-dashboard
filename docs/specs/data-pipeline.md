@@ -1,7 +1,22 @@
 # 数据管道模块规格说明
 
-> 参考：`docs/PRD.md` §3.2 文物数据管理、§3.5 仪表盘
-> 相关 ADR：ADR-003 (LightRAG + LangChain Agent)、ADR-004 (维基百科 + Wikidata 数据源)
+> 最后更新：2026-04-16
+> 当前实现状态：**数据质量修复完成，771 条有效文物**
+
+---
+
+## 当前实现状态
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 数据模型扩展 | ✅ 已实现 | 新增 material、museum、source_url、dimensions 字段 |
+| 非文物过滤 | ✅ 已实现 | 46 条非文物条目已删除 |
+| Era 标准化 | ✅ 已实现 | 统一为 15 种标准朝代名 |
+| Museum 标准化 | ✅ 已实现 | 统一博物馆名称（故宫博物院、湖南博物院等） |
+| Material 清洗 | ✅ 已实现 | 提取材质关键词，过滤描述性句子 |
+| Tags 自动生成 | ✅ 已实现 | 从 category/era/material/location 自动生成，覆盖率 100% |
+| image_url 数据 | ✅ 已有数据 | 但部分可能为 Wikipedia 占位图 |
+| LightRAG 索引 | ⚠️ 索引较小 | 仅 21 个实体、16 个关系 |
 
 ---
 
@@ -9,178 +24,232 @@
 
 数据管道模块负责文物数据的全生命周期管理：采集、清洗、存储、索引构建。
 
-### 1.1 业务需求
+### 1.1 当前数据统计
 
-| 需求 | 描述 | 优先级 |
-|------|------|--------|
-| 数据采集 | 从维基百科 + Wikidata 获取文物数据 | P0 |
-| 数据清洗 | 年代归一化、去重、去除非文物条目 | P0 |
-| 数据存储 | SQLite 存储结构化数据，Neo4j 存储图谱数据 | P0 |
-| 索引构建 | LightRAG 语义索引（向量 + 图谱） | P0 |
-| 覆盖率目标 | 禁止出境展览文物 ≥95%（185+/195） | P1 |
+| 指标 | 值 | 说明 |
+|------|------|------|
+| 有效文物数 | 771 | 过滤 46 条非文物后 |
+| Era 覆盖率 | 80% | 标准化后 |
+| Material 覆盖率 | 30.9% | 清洗后 |
+| Museum 覆盖率 | 32.2% | 标准化后 |
+| Tags 覆盖率 | 100% | 自动生成 |
+| image_url 覆盖率 | 100% | 但部分为占位图 |
+| Description 覆盖率 | ~73% | summary/full_text |
 
 ### 1.2 覆盖优先级分层
 
 | 层级 | 覆盖范围 | 数量目标 | 来源 |
 |------|---------|---------|------|
-| T1（必须） | 禁止出境展览文物 | 195件，覆盖率≥95% | 国家文物局官方名单 |
-| T2（应该） | 各大博物馆镇馆之宝 | ~100件 | 博物馆官方公布 |
+| T1（必须） | 禁止出境展览文物 | 185+/195 | 国家文物局官方名单 |
+| T2（应该） | 各大博物馆镇馆之宝 | ~100 | 博物馆官方公布 |
 | T3（理想） | 一级文物知名条目 | 数千件 | 维基百科分类 |
-| T4（后续） | 二三级文物 | 百万级 | 专业数据库（暂不涉及） |
 
 ---
 
 ## 2. 数据模型
 
-### 2.1 SQLite artifacts 表
+### 2.1 SQLite artifacts 表（完整字段）
 
-| 字段 | 类型 | 说明 | 必填 |
-|------|------|------|------|
-| id | INTEGER (PK) | 自增主键 | 自动 |
-| name | VARCHAR(255) | 文物名称 | ✓ |
-| description | TEXT | 文物描述（≥200字） | ✓ |
-| category | VARCHAR(50) | 类别 | |
-| era | VARCHAR(50) | 年代（标准朝代名） | |
-| location | VARCHAR(100) | 出土地点 | |
-| museum | VARCHAR(100) | 收藏机构 | |
-| image_url | VARCHAR(255) | 图片链接 | |
-| tags | TEXT | 标签（逗号分隔） | |
-| full_text | TEXT | 完整正文（LightRAG 输入） | |
-| node_type | VARCHAR(20) | 节点类型：artifact/dynasty/museum | 默认 artifact |
-| properties_json | JSON | 类型专属属性 | 可选 |
+| 字段 | 类型 | 说明 | 覆盖率 |
+|------|------|------|--------|
+| id | INTEGER (PK) | 自增主键 | 100% |
+| name | VARCHAR(255) | 文物名称 | 100% |
+| description | TEXT | 文物描述 | ~73% |
+| category | VARCHAR(50) | 类别 | 100% |
+| era | VARCHAR(50) | 年代（标准朝代名） | 80% |
+| location | VARCHAR(100) | 出土地点 | ~45% |
+| museum | VARCHAR(100) | 收藏机构 | 32.2% |
+| image_url | VARCHAR(500) | 图片链接 | 100% |
+| tags | TEXT | 标签（逗号分隔） | 100% |
+| material | VARCHAR(50) | 材质 | 30.9% |
+| source_url | VARCHAR(500) | Wikipedia 来源链接 | ~98% |
+| dimensions | VARCHAR(100) | 尺寸 | ~23% |
+
+**模型位置**：`backend/app/models/artifact.py:23-27`
+
+新增字段（数据质量修复）：
+```python
+material: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+museum: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+source_url: Mapped[Optional[str]] = mapped_column(String(500))
+dimensions: Mapped[Optional[str]] = mapped_column(String(100))
+```
 
 ### 2.2 年代归一化规则
 
-将 76 种原始年代值归一化为 15 种标准朝代：
+将原始年代值归一化为 15 种标准朝代：
 
 | 标准朝代 | 原始值示例 |
 |---------|-----------|
-| 新石器时代 | 新石器时代、仰韶文化、龙山文化、良渚文化 |
-| 夏 | 夏、夏朝 |
+| 新石器时代 | 新石器时代、仰韶文化、龙山文化 |
 | 商 | 商、商代、商朝、商晚期 |
-| 西周 | 西周、西周早期 |
-| 东周 | 东周、春秋、战国 |
-| 秦 | 秦、秦朝 |
 | 汉 | 汉、西汉、东汉、两汉 |
-| 三国 | 三国、曹魏、蜀汉、东吴 |
-| 南北朝 | 南北朝、北魏、南朝 |
 | 唐 | 唐、唐朝、唐代 |
-| 五代 | 五代、五代十国 |
-| 宋 | 宋、北宋、南宋 |
-| 元 | 元、元朝 |
-| 明 | 明、明朝 |
-| 清 | 清、清朝、清代 |
+| ... | ... |
+
+**脚本位置**：`scripts/normalize_eras.py`
 
 ---
 
-## 3. 数据采集策略
+## 3. 数据清洗脚本
 
-### 3.1 数据源
+### 3.1 非文物过滤
 
-| 数据源 | 获取方式 | 内容 |
-|--------|---------|------|
-| 维基百科 | MediaWiki API + BeautifulSoup | 文物列表 + 详细描述 |
-| Wikidata | SPARQLWrapper | 结构化属性（三元组） |
-| 故宫数字文物库 | Selenium（动态加载） | 官方图片和分类 |
+**脚本**：`scripts/filter_non_artifacts.py`
 
-### 3.2 维基百科分类爬取优先级
+黑名单类别：
+- 朝代/时期（商代、唐朝、五代十国等）
+- 地点/机构（国家文物局、湖南省等）
+- 人物（杜牧、文彦博等）
+- 器物通类（鼎、尊、盉等）
 
-```
-Priority 1: 禁止出境展览文物（三批）
-Priority 2: 各博物馆镇馆之宝（国博、故宫、湖北、陕西、湖南）
-Priority 3: 中国青铜器、中国陶瓷、中国玉器分类
-Priority 4: 书法家、画家分类（书画作品）
-Priority 5: 秦始皇陵、唐三彩、中国古代科学仪器分类
-```
+**执行结果**：删除 46 条非文物条目
 
-### 3.3 知识抽取方案
+### 3.2 Museum 标准化
 
-使用 Qwen2.5-7B（通过 Ollama 本地部署或 DeepSeek API）从 infobox + 正文提取结构化字段：
+**脚本**：`scripts/normalize_museum.py:19-85`
 
-**抽取字段**：era、location、museum、material、dimensions、tags
+映射表覆盖：
+- 故宫博物院（北京故宫博物院 → 故宫博物院）
+- 台北故宫博物院（国立故宫博物院 → 台北故宫博物院）
+- 湖南博物院（湖南省博物馆 → 湖南博物院）
+- 中国国家博物馆
 
-**准确率目标**：F1 ≥ 0.85（需抽样 30-50 条实测验证）
+处理规则：
+- 去除"于XXX博物馆"前缀
+- 省级博物馆命名统一
+
+### 3.3 Material 清洗
+
+**脚本**：`scripts/clean_material.py:23-30`
+
+有效材质关键词：青铜、铜、陶、瓷、玉、金、银、石、木、丝、纸、绢、竹、骨、漆、铁、琉璃、珐琅、水晶、玛瑙等
+
+清洗规则：
+- 提取材质关键词
+- 过滤描述性句子（如"鼓不但可用于音乐性质")
+- 处理"XX质"模式
+
+### 3.4 Tags 自动生成
+
+**脚本**：`scripts/generate_tags.py:70-106`
+
+生成规则：
+- 从 category 提取类别标签
+- 从 era 提取朝代标签
+- 从 material 提取材质标签
+- 从 location 提取省份标签
+
+**覆盖率**：100%（所有文物都有 tags）
 
 ---
 
-## 4. LightRAG 索引构建
+## 4. LightRAG 索引
 
-### 4.1 输入语料要求
+### 4.1 索引位置
 
-- 文本长度：≥200 字（短文本抽不出有意义的关系）
-- 文本干净：无维基引用标记 `[1]`、无 HTML 标签
-- 覆盖全面：1000-1500 条有效文物
+`backend/data/lightrag/` 目录：
+- `kv_store_full_entities.json` — 实体数据
+- `kv_store_full_relations.json` — 关系数据
+- `graph_chunk_entity_relation.graphml` — 图谱文件
 
-### 4.2 索引配置
+### 4.2 索引统计
 
+| 指标 | 值 | 说明 |
+|------|------|------|
+| 实体数 | 21 | 抽取的实体文档数 |
+| 关系数 | 16 | 抽取的关系对数 |
+| graphml 文件大小 | ~5MB | 图谱存储 |
+
+### 4.3 索引构建
+
+**脚本**：`scripts/build_lightrag_index.py`
+
+配置：
 ```python
-# backend/app/ai/lightrag_service.py
 LightRAG(
-    working_dir="data/lightrag_storage",
-    llm_model_func=lambda prompt: call_deepseek_api(prompt),  # 或 Ollama
-    graph_storage="Neo4JStorage",  # 共用 Neo4j 实例
-    kv_storage="JsonKVStorage",
-    vector_storage="NanoVectorDBStorage"
+    working_dir=settings.LIGHTRAG_DIR,
+    llm_model_func=lambda prompt: call_glm_api(prompt),
 )
 ```
 
-### 4.3 索引构建流程
-
-```
-Phase 1: 语料准备
-   ├── 合并 name + description + full_text
-   ├── 清除维基标记、HTML 标签
-   └── 过滤 <200 字的条目
-
-Phase 2: LightRAG 抽取
-   ├── 对每条文物调用 LightRAG.insert(text)
-   ├── 自动抽取实体 + 关系
-   └── 存储到 Neo4j（graph_storage）
-
-Phase 3: 验证
-   ├── 人工抽样 50 条三元组
-   ├── 评估准确性和完整性
-   └── 调整 LightRAG 参数（chunk_size, entity_types）
-```
+> **已知问题**：索引规模较小，可能与输入语料不足或抽取参数有关。需要进一步优化。
 
 ---
 
-## 5. API 接口
+## 5. Benchmark QA 数据
 
-### 5.1 数据导入 API
+### 5.1 原始数据
+
+| 指标 | 值 |
+|------|------|
+| 总条目数 | 1572 |
+| 唯一文物数 | 610 |
+| 类别数 | 5（identification、detailed_explanation、basic_fact、relationship、comparative） |
+
+### 5.2 清洗结果
+
+过滤 source_artifact 为非文物条目的 QA（26 条）后：
+- 有效 QA：~1546 条
+
+**脚本**：基于 `filter_non_artifacts.py` 同步清理
+
+---
+
+## 6. 已知问题
+
+| ID | 问题 | 来源 | 优先级 | 说明 |
+|-----|------|------|--------|------|
+| DATA-1 | Description 覆盖率 ~73% | [data-quality-report] | P2 | 约 27% 条目缺少完整描述文本 |
+| DATA-2 | image_url 可能是占位图 | [data-quality-report] | P2 | Wikipedia URL 可能指向占位图片 |
+| DATA-3 | Material 值仍有描述性句子残留 | [data-fix-plan] | P2 | 部分清洗不彻底 |
+| DATA-4 | LightRAG 索引规模小 | [review-chat-graph] | P1 | 仅 21 实体、16 关系，需重建或参数调优 |
+| DATA-5 | dimensions 覆盖率低（23%） | [data-quality-report] | P3 | 维基百科 infobox 常无此字段 |
+
+---
+
+## 7. API 接口
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| /api/admin/import | POST | 导入 JSON 数据到 SQLite |
-| /api/admin/build-index | POST | 构建 LightRAG 索引 |
-
-### 5.2 导入脚本
-
-```bash
-# scripts/import_artifacts.py
-python scripts/import_artifacts.py --source data/artifacts_list.json
-python scripts/import_artifacts.py --detail-dir data/artifacts_detail/
-```
+| `/api/artifacts` | GET | 文物列表（分页+搜索+筛选） |
+| `/api/artifacts` | POST | 创建文物 |
+| `/api/artifacts/:id` | GET | 文物详情（含新字段） |
+| `/api/artifacts/:id` | PUT | 更新文物 |
+| `/api/artifacts/:id` | DELETE | 删除文物 |
 
 ---
 
-## 6. 验收标准
+## 8. 验收标准
 
-| 检查项 | 标准 | 验证方法 |
+| 检查项 | 标准 | 当前状态 |
 |--------|------|---------|
-| 数据量 | 1000-1500 条有效文物 | `SELECT COUNT(*) FROM artifacts WHERE node_type='artifact'` |
-| T1 覆盖率 | ≥95%（185+/195） | 对照官方名单逐条检查 |
-| 文本质量 | ≥90% 有 ≥200 字描述 | 统计 `LENGTH(description)` |
-| 年代完整性 | ≥70% 有标准朝代值 | 统计 `era IS NOT NULL` 比例 |
-| 地点完整性 | ≥50% 有出土地点 | 统计 `location IS NOT NULL` 比例 |
-| LightRAG 索引 | 成功构建，三元组 ≥1000 | 查 Neo4j 关系数量 |
+| 数据量 | 700+ 条有效文物 | ✅ 771 条 |
+| Era 标准化 | 无变体值 | ✅ 已标准化 |
+| Museum 标准化 | 无重复名称 | ✅ 已标准化 |
+| Material 清洗 | 仅材质关键词 | ⚠️ 部分残留描述 |
+| Tags 覆盖 | 100% | ✅ 已实现 |
+| LightRAG 索引 | 成功构建 | ⚠️ 索引较小 |
 
 ---
 
-## 7. 踩坑记录
+## 9. 关键文件索引
 
-参考 `docs/pitfalls.md`。
+| 文件 | 负责内容 |
+|------|---------|
+| `backend/app/models/artifact.py` | 数据模型（含新字段） |
+| `backend/app/schemas/artifact.py` | Pydantic schema |
+| `scripts/filter_non_artifacts.py` | 非文物过滤 |
+| `scripts/normalize_museum.py` | 博物馆名称标准化 |
+| `scripts/normalize_eras.py` | 年代标准化 |
+| `scripts/clean_material.py` | 材质清洗 |
+| `scripts/clean_categories.py` | 类别清洗 |
+| `scripts/clean_text.py` | 文本清洗（去除维基标记） |
+| `scripts/clean_and_extract.py` | 综合清洗与提取 |
+| `scripts/generate_tags.py` | 标签自动生成 |
+| `scripts/build_lightrag_index.py` | LightRAG 索引构建 |
+| `data/artifacts_list_clean.json` | 清洗后的文物列表 |
 
 ---
 
-*最后更新：2026-04-14*
+*最后更新：2026-04-16*

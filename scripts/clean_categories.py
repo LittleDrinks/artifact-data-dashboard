@@ -5,7 +5,7 @@ Strategy:
 1. Define standard category taxonomy
 2. Map obvious variants (location-prefixed → standard)
 3. Map grade labels (禁止出境展览文物 etc.) to separate handling
-4. Use GLM-4.7 for remaining non-standard categories
+4. Use local Ollama (qwen2.5:3b) for remaining non-standard categories
 
 Usage:
     cd E:/shared/workplace/ADD_new
@@ -92,37 +92,32 @@ CATEGORY_MAPPING: dict[str, str] = {
 }
 
 
-def _get_glm_client():
-    """Load GLM API credentials from .env and return an OpenAI client."""
+def _get_ollama_client():
+    """Return an OpenAI client configured for local Ollama.
+
+    Ollama exposes an OpenAI-compatible API at http://localhost:11434/v1
+    Uses qwen2.5:3b (2GB VRAM) which is safe for 8GB GPU.
+    """
     try:
         from openai import OpenAI
     except ImportError:
         print("  openai not installed", flush=True)
         return None
 
-    env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
-    api_key = api_base = None
-    with open(env_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("LIGHTRAG_API_KEY="):
-                api_key = line.split("=", 1)[1]
-            elif line.startswith("LIGHTRAG_API_BASE="):
-                api_base = line.split("=", 1)[1]
-
-    if not api_key:
-        print("  No LIGHTRAG_API_KEY found in .env", flush=True)
-        return None
-
-    return OpenAI(api_key=api_key, base_url=api_base, timeout=120.0)
+    # Ollama OpenAI-compatible endpoint
+    return OpenAI(
+        api_key="ollama",  # Ollama accepts any string as api_key
+        base_url="http://localhost:11434/v1",
+        timeout=120.0,
+    )
 
 
-def call_glm_with_retry(client, prompt: str, max_retries: int = 3) -> str | None:
-    """Call GLM with exponential backoff retry. Uses streaming for reliability."""
+def call_ollama_with_retry(client, prompt: str, max_retries: int = 3) -> str | None:
+    """Call Ollama (qwen2.5:3b) with exponential backoff retry. Uses streaming for reliability."""
     for attempt in range(max_retries):
         try:
             stream = client.chat.completions.create(
-                model="glm-4.7",
+                model="qwen2.5:3b",  # 2GB VRAM, safe for 8GB GPU
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=80,
                 temperature=0.1,
@@ -207,14 +202,14 @@ def main():
         for cat, cnt in sorted(category_needs.items(), key=lambda x: -x[1]):
             print(f"    {cnt:4d}  {cat}")
 
-    # ── Phase 2: GLM classification ───────────────────────────────────
+    # ── Phase 2: Ollama classification ───────────────────────────────────
     if needs_glm:
-        print("\n=== Phase 2: GLM category classification ===")
-        client = _get_glm_client()
+        print("\n=== Phase 2: Ollama category classification ===")
+        client = _get_ollama_client()
         if not client:
-            print("  No GLM client, skipping")
+            print("  No Ollama client, skipping")
         else:
-            glm_updated = 0
+            ollama_updated = 0
             batch_size = 10
             for i in range(0, len(needs_glm), batch_size):
                 batch = needs_glm[i:i+batch_size]
@@ -231,7 +226,7 @@ def main():
                     prompt_lines.append(f"{idx+1}. {name} {hint}")
 
                 prompt = "\n".join(prompt_lines)
-                response = call_glm_with_retry(client, prompt)
+                response = call_ollama_with_retry(client, prompt)
                 if not response:
                     continue
 
@@ -243,20 +238,20 @@ def main():
                         cat = answers[idx]
                         if cat != "其他" and cat in STANDARD_CATEGORIES:
                             cursor.execute("UPDATE artifacts SET category = ? WHERE id = ?", (cat, aid))
-                            glm_updated += 1
+                            ollama_updated += 1
                         elif cat != "其他":
                             # Try fuzzy match
                             for std in STANDARD_CATEGORIES:
                                 if std in cat or cat in std:
                                     cursor.execute("UPDATE artifacts SET category = ? WHERE id = ?", (std, aid))
-                                    glm_updated += 1
+                                    ollama_updated += 1
                                     break
 
                 conn.commit()
                 if i + batch_size < len(needs_glm):
                     time.sleep(1)
 
-            print(f"  GLM classified: {glm_updated}/{len(needs_glm)}")
+            print(f"  Ollama classified: {ollama_updated}/{len(needs_glm)}")
 
     # ── Final stats ────────────────────────────────────────────────────
     print("\n=== Final stats ===")

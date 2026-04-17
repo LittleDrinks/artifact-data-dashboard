@@ -5,7 +5,38 @@ import {
   EnvironmentOutlined,
   TagOutlined,
 } from '@ant-design/icons';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import cloud from 'd3-cloud';
+
+// TypeScript declaration for d3-cloud (no official types)
+interface CloudWord {
+  text: string;
+  size: number;
+  x: number;
+  y: number;
+  rotate: number;
+  font: string;
+  style: string;
+  weight: string | number;
+  hasText: boolean;
+  width: number;
+  height: number;
+}
+
+interface CloudInstance {
+  size(size: [number, number]): CloudInstance;
+  words(words: CloudWord[]): CloudInstance;
+  padding(pad: number): CloudInstance;
+  rotate(fn: () => number): CloudInstance;
+  font(font: string): CloudInstance;
+  fontSize(fn: (d: CloudWord) => number): CloudInstance;
+  on(event: string, callback: (words: CloudWord[]) => void): CloudInstance;
+  start(): CloudInstance;
+  stop(): CloudInstance;
+}
+
+// d3-cloud factory function
+declare function cloud(): CloudInstance;
 import {
   getOverview,
   getStatsByEra,
