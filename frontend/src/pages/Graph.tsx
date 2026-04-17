@@ -364,7 +364,7 @@ export default function Graph() {
           .drag<SVGGElement, SimNode>()
           .on('start', (event, d) => {
             isDraggingRef.current = true;
-            if (!event.active) simulationRef.current?.alphaTarget(0.1).restart();
+            if (!event.active) simulationRef.current?.alpha(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
           })
