@@ -1,7 +1,7 @@
 # 文物管理模块规格说明
 
-> 最后更新：2026-04-16
-> 当前实现状态：**核心 CRUD 已完成，搜索筛选已实现**
+> 最后更新：2026-04-17
+> 当前实现状态：**核心 CRUD 已完成，搜索筛选已实现，related_artifacts 字段已添加**
 
 ---
 
@@ -44,7 +44,7 @@
 
 ## 2. 数据模型
 
-### 2.1 artifacts 表（14 字段）
+### 2.1 artifacts 表（15 字段）
 
 | 字段 | 类型 | 说明 | 覆盖率 |
 |------|------|------|--------|
@@ -60,6 +60,7 @@
 | material | VARCHAR(50) | 材质 | 30.9% |
 | source_url | VARCHAR(500) | Wikipedia 来源链接 | ~98% |
 | dimensions | VARCHAR(100) | 尺寸 | ~23% |
+| related_artifacts | TEXT | 关联文物（\| 分隔） | 预留字段 |
 | created_at | DATETIME | 创建时间 | 自动 |
 | updated_at | DATETIME | 更新时间 | 自动 |
 

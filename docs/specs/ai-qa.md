@@ -1,7 +1,7 @@
 # AI 智能问答模块规格说明
 
 > 最后更新：2026-04-17
-> 当前实现状态：**已完成核心功能 + UI 重构**
+> 当前实现状态：**已完成核心功能 + UI 重构 + SQLite fallback**
 
 ---
 
@@ -95,7 +95,7 @@ SYSTEM_PROMPT = (
     "keyword": {"type": "string", "description": "搜索关键词"},
     "era": {"type": "string", "description": "朝代筛选"},
     "category": {"type": "string", "description": "类别筛选"},
-    "limit": {"type": "integer", "default": 10}
+    "limit": {"type": "integer", "default": 20}
   }
 }
 ```
@@ -114,27 +114,44 @@ SYSTEM_PROMPT = (
 }
 ```
 
-### 3.2 query_knowledge_graph 工具 — ✅ 已实现
+### 3.2 query_knowledge_graph 工具 — ✅ 已实现（含 SQLite fallback）
 
-> 工具已在 `backend/app/ai/tools.py` 完整实现，但依赖 Neo4j 有数据才能返回结果。
+> 工具已在 `backend/app/ai/tools.py` 完整实现。优先尝试 Neo4j；如果 Neo4j 不可用或无数据，自动 fallback 到 SQLite 图谱服务（与 `/graph` 页面相同的数据源）。
 
 **实现位置**：
-- 工具定义：`tools.py:83-108`
-- 实现函数：`tools.py:228-273` (`_tool_query_knowledge_graph`)
-- 调度入口：`tools.py:127` (`execute_tool` 分支)
+- 工具定义：`tools.py:83-117`
+- 实现函数：`tools.py:237-406` (`_tool_query_knowledge_graph`)
+- 调度入口：`tools.py:136` (`execute_tool` 分支)
 
 ```json
 {
   "name": "query_knowledge_graph",
-  "description": "查询知识图谱中的语义实体和关系，用于概念性知识查询。",
+  "description": "查询知识图谱中的语义实体和关系。适合概念性问题（如'青铜器有什么特点'）。",
   "parameters": {
     "keyword": {"type": "string", "description": "搜索关键词"},
-    "limit": {"type": "integer", "default": 20}
+    "limit": {"type": "integer", "default": 20},
+    "era": {"type": "string", "description": "朝代筛选（可选）"},
+    "category": {"type": "string", "description": "类别筛选（可选）"}
   }
 }
 ```
 
-**已知限制**：工具依赖 Neo4j 图谱数据。当前 Neo4j 未接入（使用 LightRAG KV Store fallback），因此调用此工具返回空结果（message: "知识图谱暂无数据"）。需运行 `build_lightrag_index.py` 并将数据导入 Neo4j 后才能正常使用。
+**返回格式**：
+```json
+{
+  "entities": [{"name": "后母戊鼎", "type": "文物", "description": "..."}],
+  "relations": [{"source": "后母戊鼎", "target": "商", "relation": "属于朝代"}],
+  "count": 15,
+  "source": "sqlite",
+  "summary": "相关文物（15件）：后母戊鼎、...\\n涉及朝代：商、..."
+}
+```
+
+**关键特性**：
+- SQLite fallback 不依赖 Neo4j，可正常返回结果
+- 实体类型使用中文标签（文物、朝代、类别、地点、标签）
+- 关系的 source/target 使用实体名称而非 ID，可读性强
+- 返回 `summary` 文本摘要，便于 LLM 理解数据
 
 ---
 
@@ -144,6 +161,7 @@ SYSTEM_PROMPT = (
 
 | 事件 | 数据字段 | 说明 |
 |------|---------|------|
+| `session_created` | `{session_id}` | 新会话创建时首先发送，前端可立即设置 sessionId |
 | `thinking_start` | `{}` | 开始推理（仅 deepseek-reasoner） |
 | `thinking_delta` | `{content: string}` | 推理内容增量 |
 | `thinking_end` | `{}` | 推理结束 |
@@ -157,6 +175,7 @@ SYSTEM_PROMPT = (
 ### 4.2 多轮 ReAct 事件流
 
 ```
+session_created（如果是新会话）
 thinking_start → thinking_delta... → thinking_end
 tool_call_start → tool_call_result
 (thinking 可能再次出现)
@@ -283,10 +302,40 @@ const [selectedToolCallIndex, setSelectedToolCallIndex] = useState<number>(-1)
 - 点击标签切换到对应检索的结果列表
 - 与消息流中的工具调用气泡联动（点击气泡也切换面板）
 
-### 5.7 参考来源跳转
+### 5.7 知识图谱结果分组展示
+
+当 `query_knowledge_graph` 工具返回结果时，RAG 面板按实体类型分组显示：
 
 ```typescript
-// frontend/src/pages/Chat.tsx:628-630
+// frontend/src/pages/Chat.tsx:1200-1294
+const typeGroups: Record<string, GraphEntity[]> = {};
+entities.forEach(e => {
+  const t = e.type || '其他';
+  if (!typeGroups[t]) typeGroups[t] = [];
+  typeGroups[t].push(e);
+});
+
+// 每组显示图标、数量、实体列表
+{Object.entries(typeGroups).map(([type, ents]) => (
+  <div key={type}>
+    <span>{typeIcons[type]}</span>
+    <span>{type}（{ents.length}）</span>
+    <div>{ents.slice(0, 12).map(e => <span>{e.name}</span>)}</div>
+  </div>
+))}
+```
+
+实体类型图标映射：
+- 文物 → 🏛️
+- 朝代 → 📅
+- 类别 → 📂
+- 地点 → 📍
+- 标签 → 🏷️
+
+### 5.8 参考来源跳转
+
+```typescript
+// frontend/src/pages/Chat.tsx
 onClick={() => {
   if (s.artifact_id) {
     navigate(`/artifacts/${s.artifact_id}`)
@@ -294,20 +343,7 @@ onClick={() => {
 }}
 ```
 
-后端在构建 sources 时提取 artifact_id：`chat.py:281-285`
-
-### 5.7 参考来源跳转
-
-```typescript
-// frontend/src/pages/Chat.tsx:628-630
-onClick={() => {
-  if (s.artifact_id) {
-    navigate(`/artifacts/${s.artifact_id}`)
-  }
-}}
-```
-
-后端在构建 sources 时提取 artifact_id：`chat.py:281-285`
+后端在构建 sources 时提取 artifact_id：`chat.py:299-304`
 
 ---
 
@@ -315,7 +351,7 @@ onClick={() => {
 
 | ID | 问题 | 来源 | 优先级 | 说明 |
 |-----|------|------|--------|------|
-| P2-CHAT-5 | 历史消息不显示 Thinking | [review-chat-graph] | P2 | `Chat.tsx:171` 历史消息的 thinking 硬编码为空。后端 ChatMessage 模型无 thinking 字段。 |
+| P2-CHAT-5 | ~~历史消息不显示 Thinking~~ | [review-chat-graph] | ~~P2~~ | **2026-04-17 已解决**：thinking 文本已持久化到 DB（`tool_calls` JSON 中 `type: "thinking"` 字段），历史消息可正常显示。 |
 | UX-1 | ~~ReAct reasoning steps 在 UI 中合并展示~~ | [设计] | ~~P2~~ | **2026-04-17 已解决**：每个检索渲染为独立气泡。 |
 | UX-2 | ~~简单问候也会显示 ThinkingBlock 折叠框~~ | [体验] | ~~P3~~ | **2026-04-17 已解决**：思考区块仅在有内容时显示，默认折叠。 |
 
@@ -353,7 +389,7 @@ onClick={() => {
 | 文件 | 负责内容 |
 |------|---------|
 | `backend/app/services/chat.py` | ReAct 循环、SSE 事件发送、会话管理 |
-| `backend/app/ai/tools.py` | 工具定义（search_artifacts、get_artifact_detail） |
+| `backend/app/ai/tools.py` | 工具定义（search_artifacts、get_artifact_detail、query_knowledge_graph） |
 | `backend/app/routers/chat.py` | SSE 端点 |
 | `frontend/src/pages/Chat.tsx` | SSE 处理、消息渲染、AbortController |
 | `frontend/src/api/chat.ts` | sendChatMessage、类型定义 |

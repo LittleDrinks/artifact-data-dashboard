@@ -1,7 +1,7 @@
 # 知识图谱模块规格说明
 
-> 最后更新：2026-04-16
-> 当前实现状态：**三级 fallback 已实现，节点类型过滤已实现**
+> 最后更新：2026-04-17
+> 当前实现状态：**三级 fallback 已实现，节点类型过滤已实现，P0 默认显示问题已修复**
 
 ---
 
@@ -9,14 +9,17 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 三级 fallback 架构 | ✅ 已实现 | Neo4j → LightRAG KV Store → SQLite |
-| LightRAG KV Store 读取 | ✅ 已实现 | `_query_lightrag_kvstore()` 读取 JSON 文件 |
+| 三级 fallback 架构 | ✅ 已实现 | Neo4j → LightRAG KV Store → SQLite（SQLite 为主要数据源） |
+| SQLite 图谱构建 | ✅ 已实现 | 从文物数据动态构建 artifact→era/category/location/tag 关系图 |
 | 节点类型过滤 | ✅ 已实现 | `node_types` 参数，前端 Checkbox 筛选 |
+| 默认显示关系 | ✅ 已修复 | 默认 node_types 包含所有类型，显示 artifact→era/category 关系 |
 | 全图加载 | ✅ 已实现 | `/api/graph/full` |
 | 关键词搜索 | ✅ 已实现 | `/api/graph/search` |
 | 节点详情 | ✅ 已实现 | `/api/graph/node/:node_id` |
+| CSV 导出 | ✅ 已实现 | `/api/graph/export` 导出三元组 |
 | D3.js 力导向图 | ✅ 已实现 | 拖拽、缩放、平移、节点点击 |
-| 类型颜色编码 | ✅ 已实现 | artifact=紫色, era=深蓝, location=绿色等 |
+| 类型颜色编码 | ✅ 已实现 | artifact=紫色, era=橙色, category=绿色, location=蓝色, tag=灰色 |
+| 标签去重 | ✅ 已实现 | 标签名匹配已有 era/category/location 时链接到现有节点 |
 
 ---
 
@@ -36,44 +39,48 @@
 
 ---
 
-## 2. 三级 Fallback 架构
+## 2. 数据源架构
 
-### 2.1 数据源优先级
+### 2.1 实际数据源策略
 
 ```
-Level 1: Neo4j（语义图谱）
-    ↓ 如果无数据或不可用
-Level 2: LightRAG KV Store（JSON 文件）
-    ↓ 如果文件不存在
-Level 3: SQLite（结构化属性关系）
+PRIMARY: SQLite 文物数据（动态构建 artifact→era/category/location/tag 关系图）
+OPTIONAL: Neo4j（语义图谱，可增强 SQLite 基础图）
+SKIPPED: LightRAG KV Store（质量较差，不使用）
 ```
 
-### 2.2 LightRAG KV Store 读取
+> **架构调整**：SQLite 是主要数据源，直接从文物表的 era/category/location/tags 字段构建关系图。Neo4j 数据（如果有）可以增强图谱，但不替代 SQLite 基础图。LightRAG KV Store 被跳过，因为其实体质量较差（均为抽象概念，类型单一）。
 
-**函数位置**：`backend/app/services/graph.py:140-208`
+### 2.2 SQLite 图谱构建
 
-```python
-def _query_lightrag_kvstore(limit, keyword):
-    """Read LightRAG KV Store JSON files."""
-    entities_path = os.path.join(lightrag_dir, "kv_store_full_entities.json")
-    relations_path = os.path.join(lightrag_dir, "kv_store_full_relations.json")
-    # 解析 JSON，构建节点和边
-```
-
-读取文件：
-- `kv_store_full_entities.json` — 实体文档，包含 `entity_names` 数组
-- `kv_store_full_relations.json` — 关系文档，包含 `relation_pairs` 数组
-
-### 2.3 SQLite Fallback
-
-**函数位置**：`backend/app/services/graph.py:221-312`
+**函数位置**：`backend/app/services/graph.py:222-350`
 
 ```python
 def build_graph_from_artifacts(artifacts):
     """从文物列表构建图谱节点和边。"""
-    # 为每个文物创建节点
-    # 创建 era/category/location/tag 关系节点
+    # 为每个文物创建 artifact 节点
+    # 创建 era/category/location 节点（去重）
+    # 创建 artifact→era/category/location 关系边
+    # 处理 tags：同名标签链接到现有 era/category/location 节点
 ```
+
+**去重策略**：预先收集所有 era/category/location 名称，处理 tags 时检查是否与已存在节点同名。如果同名，链接到现有节点而非创建重复的 tag 节点。
+
+### 2.3 Neo4j 增强层
+
+**函数位置**：`backend/app/services/graph.py:53-124`
+
+如果 Neo4j 有数据，会合并到 SQLite 基础图中，增强语义实体覆盖。
+
+### 2.4 默认节点类型
+
+**位置**：`backend/app/services/graph.py:443-444`, `frontend/src/pages/Graph.tsx:114`
+
+```python
+default_types = ["artifact", "era", "category", "location", "tag"]
+```
+
+默认显示所有类型，确保 artifact→era/category/location 关系边可见。
 
 ---
 
@@ -117,19 +124,22 @@ def build_graph_from_artifacts(artifacts):
 
 | 端点 | 方法 | 参数 | 说明 |
 |------|------|------|------|
-| `/api/graph/full` | GET | `limit`, `node_types` | 加载全图数据 |
-| `/api/graph/search` | GET | `keyword`, `node_types` | 搜索图谱 |
+| `/api/graph/full` | GET | `limit`, `offset`, `node_types` | 加载全图数据 |
+| `/api/graph/search` | GET | `keyword`, `node_types`, `depth` | 搜索图谱 |
 | `/api/graph/node/:node_id` | GET | — | 获取节点详情 |
+| `/api/graph/export` | GET | `limit` | 导出三元组 CSV |
 
 ### 4.2 node_types 参数
 
-默认值：`["artifact"]`
+默认值：`["artifact", "era", "category", "location", "tag"]`（全部类型）
+
+> **修复历史**：原默认值 `["artifact"]` 导致图谱无边显示（边连接 artifact→era/category），已修复为默认显示全部类型。
 
 可选值：`artifact`, `era`, `category`, `location`, `tag`
 
 **位置**：
-- 后端：`backend/app/routers/graph.py:19-26`
-- 前端 API：`frontend/src/api/graph.ts:36-39, 48-51`
+- 后端：`backend/app/routers/graph.py:22-25`
+- 前端：`frontend/src/pages/Graph.tsx:114`
 
 ### 4.3 响应格式
 
@@ -139,7 +149,7 @@ def build_graph_from_artifacts(artifacts):
     {"id": "artifact_1", "name": "后母戊鼎", "type": "artifact", "properties": {...}},
     {"id": "era_商", "name": "商", "type": "era"}
   ],
-  "edges": [
+  "links": [
     {"source": "artifact_1", "target": "era_商", "relation": "属于朝代"}
   ],
   "total_nodes": 100,
@@ -167,24 +177,22 @@ const simulation = d3.forceSimulation(nodes)
 
 ```typescript
 const TYPE_COLORS: Record<string, string> = {
-  Artifact: '#533afd',    // 紫色（主色）
-  Era: '#061b31',         // 深蓝
-  Location: '#15be53',    // 绿色
-  Category: '#ea2261',    // 红色
-  Tag: '#f96bee',         // 粉色
+  artifact: '#533afd',  // 紫色（主色）
+  era: '#c45100',       // 橙色
+  category: '#3d8b37',  // 绿色
+  location: '#2874ad',  // 蓝色
+  tag: '#8c8c8c',       // 灰色
 };
 ```
 
 ### 5.3 节点类型筛选控件
 
-**位置**：`frontend/src/pages/Graph.tsx:104-105, 676-724`
+**位置**：`frontend/src/pages/Graph.tsx:114`
 
 ```typescript
-const [visibleTypes, setVisibleTypes] = useState(['artifact'])
-
-// 监听 visibleTypes 变化，重新 fetch 数据
-useEffect(() => {
-  fetchGraph()
+// 默认显示全部类型以呈现关系
+const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
+const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
 }, [visibleTypes])
 ```
 
@@ -224,7 +232,7 @@ def _filter_graph_by_types(nodes_dict, links_dict, node_types):
 
 ### 6.2 前端默认值
 
-默认 `visibleTypes = ['artifact']`，仅显示文物节点。
+默认 `visibleTypes = allTypes`，显示全部类型以呈现关系边。
 
 ---
 
@@ -232,26 +240,11 @@ def _filter_graph_by_types(nodes_dict, links_dict, node_types):
 
 | ID | 问题 | 来源 | 优先级 | 说明 |
 |-----|------|------|--------|------|
-| **P0-GRAPH-DEFAULT** | 默认 node_types=["artifact"] 导致图谱无边显示 | [review-chat-graph] | **P0** | Artifacts 之间无直接边（边连接 artifact→era/category），默认只显示 artifact 时边数为 0。需修改默认值为 `["artifact", "era", "category", "location"]` 或提示用户勾选其他类型。 |
-| P1-GRAPH-INDEX | LightRAG 索引规模小 | [review-chat-graph] | P1 | 仅 21 实体、16 关系，需重建或参数调优 |
-| P2-GRAPH-5 | 图谱统计文案"X个文物"误导 | [review-round-2] | ✅ 已修复 | `Graph.tsx:540-556` 已正确实现：`artCount = nodes.filter(n => n.type === 'artifact').length`，文案为 `{artCount} 个文物 · {attrCount} 个属性`，准确区分文物和属性节点 |
+| **P0-GRAPH-DEFAULT** | ~~默认 node_types=["artifact"] 导致图谱无边显示~~ | [review-chat-graph] | ~~**P0**~~ | **2026-04-17 已修复**：默认值改为全部类型，关系边正常显示。 |
+| P1-GRAPH-INDEX | LightRAG 索引规模小 | [review-chat-graph] | P1 | 仅 21 实体、16 关系，需重建或参数调优（当前已跳过 LightRAG，使用 SQLite） |
+| P2-GRAPH-5 | ~~图谱统计文案"X个文物"误导~~ | [review-round-2] | ~~P2~~ | **已修复**：准确区分文物和属性节点 |
 | P2-GRAPH-10 | 图谱搜索无分页限制 | [review-round-1] | P2 | `search_graph` 对 SQLite fallback 执行 `.all()` 无 limit |
 | UX-GRAPH-1 | 节点详情面板信息较少 | [设计] | P3 | 点击节点仅显示基础属性，缺少关联文物列表 |
-
-### P0-GRAPH-DEFAULT 详细分析
-
-**现象**：默认加载图谱时，只显示 artifact 节点，无任何边连接。视觉效果为散点图。
-
-**根因**：
-- SQLite fallback 的边连接 artifact → era/category/location/tag
-- 默认 node_types=["artifact"] 过滤掉了 era/category 等节点
-- 边的两端节点必须在过滤后的节点集合中才保留
-- 因此所有边都被过滤掉
-
-**修复建议**：
-1. 修改前端默认 visibleTypes 为 `['artifact', 'era', 'category', 'location']`
-2. 或在 UI 中添加提示"勾选其他类型以显示关系"
-3. 或在后端 get_full_graph 中自动包含 artifact 的关联节点
 
 ---
 
@@ -259,12 +252,13 @@ def _filter_graph_by_types(nodes_dict, links_dict, node_types):
 
 | 检查项 | 标准 | 当前状态 |
 |--------|------|---------|
-| 全图加载 | 成功显示节点和边 | ⚠️ 默认只显示 artifact，无边 |
+| 全图加载 | 成功显示节点和边 | ✅ 默认显示全部类型，关系可见 |
 | 搜索功能 | 关键词匹配正确 | ✅ 已实现 |
 | 节点详情 | 点击弹出完整属性 | ✅ 已实现 |
 | 类型过滤 | Checkbox 生效 | ✅ 已实现 |
 | 性能 | 500 节点流畅渲染 | ✅ D3.js 优化 |
-| Neo4j 数据 | 三元组 ≥1000 | ⚠️ Neo4j 未接入，依赖 fallback |
+| CSV 导出 | 导出三元组 | ✅ 已实现 |
+| SQLite 图谱 | 动态构建关系图 | ✅ 主要数据源 |
 
 ---
 

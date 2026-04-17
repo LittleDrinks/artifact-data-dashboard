@@ -1,7 +1,7 @@
 # 数据管道模块规格说明
 
-> 最后更新：2026-04-16
-> 当前实现状态：**数据质量修复完成，771 条有效文物**
+> 最后更新：2026-04-17
+> 当前实现状态：**数据质量修复完成，771 条有效文物，related_artifacts 字段已添加**
 
 ---
 
@@ -64,8 +64,9 @@
 | material | VARCHAR(50) | 材质 | 30.9% |
 | source_url | VARCHAR(500) | Wikipedia 来源链接 | ~98% |
 | dimensions | VARCHAR(100) | 尺寸 | ~23% |
+| related_artifacts | TEXT | 关联文物（\| 分隔） | 预留字段 |
 
-**模型位置**：`backend/app/models/artifact.py:23-27`
+**模型位置**：`backend/app/models/artifact.py:12-39`
 
 新增字段（数据质量修复）：
 ```python
@@ -73,6 +74,7 @@ material: Mapped[Optional[str]] = mapped_column(String(50), index=True)
 museum: Mapped[Optional[str]] = mapped_column(String(100), index=True)
 source_url: Mapped[Optional[str]] = mapped_column(String(500))
 dimensions: Mapped[Optional[str]] = mapped_column(String(100))
+related_artifacts: Mapped[Optional[str]] = mapped_column(Text)  # 预留字段
 ```
 
 ### 2.2 年代归一化规则
