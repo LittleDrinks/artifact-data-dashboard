@@ -48,8 +48,8 @@ interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  // thinking is now visible as collapsible section
-  thinking: string;
+  // thinking rounds — each ReAct round produces a separate thinking entry
+  thinkingRounds: string[];
   thinkingDone: boolean;
   // Support multiple tool calls from ReAct loop
   toolCalls: ToolCallEntry[];
@@ -199,7 +199,7 @@ export default function Chat() {
           id: generateId(),
           role: m.role as 'user' | 'assistant',
           content: m.content || '',
-          thinking: '',
+          thinkingRounds: [],
           thinkingDone: true,
           toolCalls,
           streaming: false,
@@ -299,7 +299,7 @@ export default function Chat() {
       id: generateId(),
       role: 'user',
       content: query,
-      thinking: '',
+      thinkingRounds: [],
       thinkingDone: true,
       toolCalls: [],
       streaming: false,
@@ -309,7 +309,7 @@ export default function Chat() {
       id: generateId(),
       role: 'assistant',
       content: '',
-      thinking: '',
+      thinkingRounds: [],
       thinkingDone: false,
       toolCalls: [],
       streaming: true,
@@ -334,24 +334,28 @@ export default function Chat() {
 
         switch (event.type) {
           case 'thinking_start':
-            // Mark thinking as started (will show loading spinner)
+            // Start a new thinking round — push an empty string as new round
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
-                  ? { ...m, thinkingDone: false }
+                  ? { ...m, thinkingDone: false, thinkingRounds: [...m.thinkingRounds, ''] }
                   : m,
               ),
             );
             break;
 
           case 'thinking_delta':
-            // Accumulate thinking text (visible in collapsible section)
+            // Append to the LATEST thinking round
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId
-                  ? { ...m, thinking: m.thinking + (event.content || '') }
-                  : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const rounds = [...m.thinkingRounds];
+                const lastIdx = rounds.length - 1;
+                if (lastIdx >= 0) {
+                  rounds[lastIdx] = rounds[lastIdx] + (event.content || '');
+                }
+                return { ...m, thinkingRounds: rounds };
+              }),
             );
             break;
 
@@ -474,9 +478,10 @@ export default function Chat() {
     }
   };
 
-  // ── Render thinking section (collapsible) ──
+  // ── Render thinking section (collapsible, with multi-round support) ──
   const renderThinkingSection = (msg: DisplayMessage) => {
-    if (!msg.thinking && msg.thinkingDone) return null;
+    const totalLen = msg.thinkingRounds.reduce((s, r) => s + r.length, 0);
+    if (!totalLen && msg.thinkingDone) return null;
     const isExpanded = expandedThinking.has(msg.id);
     const toggleExpand = () => {
       setExpandedThinking((prev) => {
@@ -486,6 +491,7 @@ export default function Chat() {
         return next;
       });
     };
+    const multiRound = msg.thinkingRounds.filter(r => r.length > 0).length > 1;
 
     return (
       <div
@@ -514,9 +520,9 @@ export default function Chat() {
           {!msg.thinkingDone && (
             <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
           )}
-          {msg.thinkingDone && msg.thinking && (
+          {msg.thinkingDone && totalLen > 0 && (
             <span style={{ fontSize: 11, color: '#94a3b8' }}>
-              ({msg.thinking.length} 字)
+              ({totalLen} 字)
             </span>
           )}
           {isExpanded ? (
@@ -525,18 +531,44 @@ export default function Chat() {
             <RightOutlined style={{ fontSize: 10, marginLeft: 'auto' }} />
           )}
         </div>
-        {isExpanded && msg.thinking && (
+        {isExpanded && totalLen > 0 && (
           <div
             style={{
               padding: '10px 12px',
               fontSize: 12,
               lineHeight: 1.7,
               color: '#64748d',
-              whiteSpace: 'pre-wrap',
               borderTop: '1px solid #e5edf5',
             }}
           >
-            {msg.thinking}
+            {msg.thinkingRounds.map((round, idx) =>
+              round.length > 0 ? (
+                <div key={idx}>
+                  {multiRound && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: '#94a3b8',
+                        fontWeight: 600,
+                        marginBottom: 4,
+                        marginTop: idx > 0 ? 10 : 0,
+                      }}
+                    >
+                      第 {idx + 1} 轮思考
+                    </div>
+                  )}
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{round}</div>
+                  {multiRound && idx < msg.thinkingRounds.length - 1 && (
+                    <div
+                      style={{
+                        borderBottom: '1px dashed #dfe6ee',
+                        margin: '8px 0',
+                      }}
+                    />
+                  )}
+                </div>
+              ) : null,
+            )}
           </div>
         )}
       </div>
