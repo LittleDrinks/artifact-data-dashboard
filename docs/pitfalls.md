@@ -6,6 +6,24 @@
 
 *最后更新：2026-04-17*
 
+### [2026-04-17] 新对话创建后 session_id 未传递给前端，导致后续消息发送到新会话而非当前会话
+- **现象**：用户在无会话状态下发送第一条消息，后端创建新会话并流式返回 SSE，但前端 `activeSessionId` 仍为 null；发送第二条消息时，后端又创建另一个新会话，而非延续上一条消息的会话
+- **原因**：后端在 `/ask` 路由中创建新会话，但 `stream_chat_response()` 未向前端传递新会话的 `session_id`；前端 `sendChatMessage()` 只发送 `session_id: undefined`，无法知道后端创建的会话 ID
+- **解决**：在 `stream_chat_response()` 开始时，先 emit `session_created` SSE 事件（包含 `session_id`），前端收到后立即 `setActiveSessionId(event.session_id)`；同时在 `done` handler 中移除 `loadSessions()` 调用，避免触发 auto-restore race condition
+- **教训**：POST SSE 创建新资源时，必须在流式响应的**最开始** emit 包含新资源 ID 的事件，让前端能立即更新状态
+
+### [2026-04-17] ReAct 循环最后一轮 thinking 未保存到数据库
+- **现象**：3轮 ReAct 循环（工具调用 + 最终回答）中，只有前2轮的 thinking 被保存到数据库，第3轮（最终回答前）的 thinking 文本丢失
+- **原因**：`_react_gen()` 中，thinking_text 只在 `if in_thinking` 条件下保存；最后一轮 thinking 结束后立即进入 content 输出，`in_thinking` 被设为 False，循环结束后 `if in_thinking` 条件不满足，thinking_text 未保存
+- **解决**：将 `thinking_rounds.append(thinking_text)` 移到 `if in_thinking` 条件块之外，确保每轮结束都保存 thinking_text（只要有内容）
+- **教训**：循环中的状态变量（如 `in_thinking`）在循环结束时可能已改变，保存逻辑不应依赖中间状态
+
+### [2026-04-17] get_artifact_detail 返回扁平对象而非 results 数组，前端 tool_call_result 解析失败
+- **现象**：`get_artifact_detail` 工具调用后，右侧面板显示空结果，但后端日志显示确实返回了文物详情
+- **原因**：`get_artifact_detail` 返回 `{id, name, description, ...}`（扁平对象），`tool_call_result` SSE 事件用 `result.get("results", [])` 提取，导致 `results` 为空数组
+- **解决**：在 `_react_gen()` 中根据 `fn_name` 分支：`get_artifact_detail` 发送 `artifact_detail` 字段（完整对象），`query_knowledge_graph` 发送 `entities` 和 `relations` 字段；前端 `ToolCallEntry` 类型增加 `artifactDetail`、`entities`、`relations` 字段，面板根据 tool 类型渲染不同卡片
+- **教训**：不同工具的返回格式不同，SSE event 和前端解析逻辑需按工具类型分支处理
+
 ### [2026-04-17] RTX 4060 8GB VRAM 无法运行 LightRAG 本地实体提取
 - **现象**：qwen2.5:7b (5GB) + nomic-embed-text (0.3GB) = 5.3GB，理论显存足够，但跑 LightRAG entity extraction 时崩溃：`llama runner process has terminated: Error code: 500`
 - **原因**：LightRAG 实体提取需要额外的显存用于 KV cache、中间计算、并行推理；qwen2.5:3b 虽然不崩溃但 600s 内无法完成任务

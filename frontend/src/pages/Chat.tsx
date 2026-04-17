@@ -31,6 +31,9 @@ import {
   type ChatMessageInfo,
   type SSEEventData,
   type SearchResultItem,
+  type ArtifactDetailResult,
+  type GraphEntity,
+  type GraphRelation,
 } from '../api/chat';
 
 /* ── Types ── */
@@ -38,7 +41,13 @@ import {
 interface ToolCallEntry {
   tool: string;
   query: string;
+  // For search_artifacts
   results: SearchResultItem[];
+  // For get_artifact_detail
+  artifactDetail?: ArtifactDetailResult;
+  // For query_knowledge_graph
+  entities?: GraphEntity[];
+  relations?: GraphRelation[];
   count: number;
   elapsed: number;
   done: boolean;
@@ -80,12 +89,7 @@ export default function Chat() {
 
   // RAG side panel
   const [ragVisible, setRagVisible] = useState(false);
-  const [ragToolResults, setRagToolResults] = useState<SearchResultItem[]>([]);
-  const [ragToolQueries, setRagToolQueries] = useState<string[]>([]);
-  const [ragToolElapsed, setRagToolElapsed] = useState(0);
   const [ragToolLoading, setRagToolLoading] = useState(false);
-  // Selected tool call index for RAG panel (which retrieval to show)
-  const [selectedToolCallIndex, setSelectedToolCallIndex] = useState<number>(-1);
   // Thinking section expansion state (per round, format: "msgId:roundIdx")
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
 
@@ -102,34 +106,6 @@ export default function Chat() {
       abortControllerRef.current?.abort();
     };
   }, []);
-
-  // ── Sync RAG panel with last assistant message (for historical / after streaming) ──
-  useEffect(() => {
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-    if (!lastAssistant || lastAssistant.streaming) return;
-    const toolCalls = lastAssistant.toolCalls;
-    if (toolCalls.length > 0) {
-      // Show results from selected tool call (default to latest)
-      const idx = selectedToolCallIndex >= 0 && selectedToolCallIndex < toolCalls.length
-        ? selectedToolCallIndex
-        : toolCalls.length - 1;
-      const selectedTc = toolCalls[idx];
-      setRagToolResults(selectedTc.results);
-      setRagToolQueries([selectedTc.query]);
-      setRagToolElapsed(selectedTc.elapsed);
-      setRagToolLoading(false);
-      // Update selected index if it was out of bounds
-      if (selectedToolCallIndex < 0 || selectedToolCallIndex >= toolCalls.length) {
-        setSelectedToolCallIndex(toolCalls.length - 1);
-      }
-    } else {
-      setRagToolResults([]);
-      setRagToolQueries([]);
-      setRagToolElapsed(0);
-      setRagToolLoading(false);
-      setSelectedToolCallIndex(-1);
-    }
-  }, [messages, selectedToolCallIndex]);
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -215,18 +191,8 @@ export default function Chat() {
       // Auto-show panel if last assistant message has tool calls
       const lastAssistant = [...displayMsgs].reverse().find(m => m.role === 'assistant');
       if (lastAssistant && lastAssistant.toolCalls.length > 0) {
-        // Show the latest retrieval by default
-        const latestIdx = lastAssistant.toolCalls.length - 1;
-        setSelectedToolCallIndex(latestIdx);
-        setRagToolResults(lastAssistant.toolCalls[latestIdx].results);
-        setRagToolQueries([lastAssistant.toolCalls[latestIdx].query]);
-        setRagToolElapsed(lastAssistant.toolCalls[latestIdx].elapsed);
         setRagVisible(true);
       } else {
-        setRagToolResults([]);
-        setRagToolQueries([]);
-        setRagToolElapsed(0);
-        setSelectedToolCallIndex(-1);
         setRagVisible(false);
       }
     } catch {
@@ -250,12 +216,7 @@ export default function Chat() {
       setActiveSessionId(session.id);
       setSelectedIds(new Set());
       setHistoryVisible(false);
-
-      setRagToolResults([]);
-      setRagToolQueries([]);
-      setRagToolElapsed(0);
       setRagToolLoading(false);
-      setSelectedToolCallIndex(-1);
 
       loadSessionMessages(session.id);
     },
@@ -298,11 +259,7 @@ export default function Chat() {
 
     setActiveSessionId(null);
     setMessages([]);
-    setRagToolResults([]);
-    setRagToolQueries([]);
-    setRagToolElapsed(0);
     setRagToolLoading(false);
-    setSelectedToolCallIndex(-1);
     setRagVisible(false);
     inputRef.current?.focus();
   }, []);
@@ -339,11 +296,7 @@ export default function Chat() {
     const assistantId = assistantMsg.id;
 
     // Reset RAG state
-    setRagToolResults([]);
-    setRagToolQueries([]);
-    setRagToolElapsed(0);
     setRagToolLoading(false);
-    setSelectedToolCallIndex(-1);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -353,6 +306,13 @@ export default function Chat() {
         if (controller.signal.aborted) return;
 
         switch (event.type) {
+          case 'session_created':
+            // New session created - set activeSessionId immediately
+            if (event.session_id) {
+              setActiveSessionId(event.session_id);
+            }
+            break;
+
           case 'thinking_start':
             // Start a new thinking round — push an empty string as new round
             setMessages((prev) => {
@@ -411,11 +371,9 @@ export default function Chat() {
             setRagVisible(true);
             setRagToolLoading(true);
             // ADD a new tool call entry (don't replace previous ones)
-            let newToolCallIdx = 0;
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.id === assistantId) {
-                  newToolCallIdx = m.toolCalls.length; // Index of new tool call
                   return {
                     ...m,
                     toolCalls: [
@@ -434,8 +392,6 @@ export default function Chat() {
                 return m;
               }),
             );
-            // Update selected index to the new tool call (will be set after render)
-            setTimeout(() => setSelectedToolCallIndex(newToolCallIdx), 0);
             break;
 
           case 'tool_call_result':
@@ -445,23 +401,32 @@ export default function Chat() {
                 if (m.id !== assistantId || m.toolCalls.length === 0) return m;
                 const lastIdx = m.toolCalls.length - 1;
                 const updatedToolCalls = [...m.toolCalls];
-                updatedToolCalls[lastIdx] = {
+                const toolType = event.tool || 'search_artifacts';
+                const newEntry: ToolCallEntry = {
                   ...updatedToolCalls[lastIdx],
-                  // Use query from event if available, otherwise keep existing
+                  tool: toolType,
                   query: event.query || updatedToolCalls[lastIdx].query,
-                  results: event.results || [],
                   count: event.count || 0,
                   elapsed: event.elapsed || 0,
                   done: true,
                 };
+                // Different tools have different result formats
+                if (toolType === 'get_artifact_detail') {
+                  newEntry.artifactDetail = event.artifactDetail;
+                  newEntry.results = []; // No search results for detail
+                } else if (toolType === 'query_knowledge_graph') {
+                  newEntry.entities = event.entities || [];
+                  newEntry.relations = event.relations || [];
+                  newEntry.results = []; // No search results for graph
+                } else {
+                  // Default: search_artifacts
+                  newEntry.results = event.results || [];
+                }
+                updatedToolCalls[lastIdx] = newEntry;
                 return { ...m, toolCalls: updatedToolCalls };
               }),
             );
-            // Update RAG panel to show this retrieval's results
-            setRagToolResults(event.results || []);
-            // Use query from the SSE event (backend now includes it)
-            setRagToolQueries([event.query || '']);
-            setRagToolElapsed(event.elapsed || 0);
+            // Update RAG panel - show results for the latest tool call
             setRagToolLoading(false);
             break;
 
@@ -487,7 +452,8 @@ export default function Chat() {
               ),
             );
             setRagToolLoading(false);
-            loadSessions();
+            // Don't call loadSessions() here - it triggers auto-restore race condition
+            // Sessions list will be updated when user explicitly opens history drawer
             setLoading(false);
             break;
 
@@ -573,9 +539,6 @@ export default function Chat() {
             >
               <BulbOutlined style={{ fontSize: 12, color: '#533afd' }} />
               <span style={{ fontWeight: 500 }}>思考过程</span>
-              {maxRounds > 1 && (
-                <span style={{ fontSize: 10, color: '#94a3b8' }}>第 {i + 1} 轮</span>
-              )}
               {isStreamingThisRound && (
                 <LoadingOutlined style={{ fontSize: 10, color: '#533afd', marginLeft: 4 }} />
               )}
@@ -610,12 +573,7 @@ export default function Chat() {
 
       // 2. Render tool call i (if exists)
       if (toolCall) {
-        const isSelected = selectedToolCallIndex === i;
         const handleClick = () => {
-          setSelectedToolCallIndex(i);
-          setRagToolResults(toolCall.results);
-          setRagToolQueries([toolCall.query]);
-          setRagToolElapsed(toolCall.elapsed);
           setRagVisible(true);
         };
 
@@ -629,24 +587,20 @@ export default function Chat() {
               alignItems: 'center',
               gap: 8,
               padding: '8px 12px',
-              background: isSelected ? 'rgba(83,58,253,0.08)' : '#f6f9fc',
-              border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
+              background: '#f6f9fc',
+              border: '1px solid #e5edf5',
               borderRadius: 8,
               fontSize: 12,
               cursor: 'pointer',
               transition: 'all 0.15s',
             }}
             onMouseEnter={(e) => {
-              if (!isSelected) {
-                (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
-                (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
-              }
+              (e.currentTarget as HTMLElement).style.borderColor = '#b9b9f9';
+              (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
             }}
             onMouseLeave={(e) => {
-              if (!isSelected) {
-                (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
-                (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
-              }
+              (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
+              (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
             }}
           >
             <span
@@ -738,16 +692,23 @@ export default function Chat() {
               历史记录
             </Button>
           </div>
-          {(ragToolResults.length > 0 || ragToolLoading) && (
-            <Button
-              type="text"
-              size="small"
-              onClick={() => setRagVisible(!ragVisible)}
-              style={{ color: ragVisible ? '#533afd' : '#64748d', fontSize: 12 }}
-            >
-              {ragVisible ? '收起检索结果' : `检索结果 (${ragToolResults.length})`}
-            </Button>
-          )}
+          {(() => {
+            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+            const toolCallCount = lastAssistant?.toolCalls.length || 0;
+            if (toolCallCount > 0 || ragToolLoading) {
+              return (
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={() => setRagVisible(!ragVisible)}
+                  style={{ color: ragVisible ? '#533afd' : '#64748d', fontSize: 12 }}
+                >
+                  {ragVisible ? '收起检索结果' : `检索结果 (${toolCallCount})`}
+                </Button>
+              );
+            }
+            return null;
+          })()}
         </div>
 
         {/* Messages */}
@@ -827,6 +788,7 @@ export default function Chat() {
               style={{
                 display: 'flex',
                 gap: 12,
+                width: msg.role === 'assistant' ? '100%' : undefined,
                 maxWidth: 720,
                 ...(msg.role === 'user'
                   ? { flexDirection: 'row-reverse', marginLeft: 'auto' }
@@ -1017,19 +979,6 @@ export default function Chat() {
               <span style={{ fontSize: 13, fontWeight: 500, color: '#061b31' }}>
                 检索结果
               </span>
-              {ragToolResults.length > 0 && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    background: 'rgba(83,58,253,0.1)',
-                    color: '#533afd',
-                    padding: '1px 8px',
-                    borderRadius: 10,
-                  }}
-                >
-                  {ragToolResults.length}
-                </span>
-              )}
             </div>
             <Button
               type="text"
@@ -1040,161 +989,71 @@ export default function Chat() {
             />
           </div>
 
-          {/* Retrieval tabs (when multiple tool calls exist) */}
-          {/* Get the last assistant message's tool calls */}
-          {(() => {
-            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-            const allToolCalls = lastAssistant?.toolCalls || [];
-            if (allToolCalls.length > 1) {
-              return (
-                <div
-                  style={{
-                    padding: '8px 12px',
-                    borderBottom: '1px solid #f0f4f8',
-                    fontSize: 12,
-                    flexShrink: 0,
-                    display: 'flex',
-                    gap: 6,
-                  }}
-                >
-                  {allToolCalls.map((tc, idx) => {
-                    const isSelected = selectedToolCallIndex === idx;
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          setSelectedToolCallIndex(idx);
-                          setRagToolResults(tc.results);
-                          setRagToolQueries([tc.query]);
-                          setRagToolElapsed(tc.elapsed);
-                        }}
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s',
-                          background: isSelected ? 'rgba(83,58,253,0.1)' : '#fff',
-                          border: isSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
-                          color: isSelected ? '#533afd' : '#64748d',
-                          maxWidth: 100,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        第 {idx + 1} 轮
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            }
-            return null;
-          })()}
-
-          {/* Current retrieval info */}
-          {ragToolQueries.length > 0 && (
-            <div
-              style={{
-                padding: '10px 16px',
-                borderBottom: '1px solid #f0f4f8',
-                fontSize: 12,
-                color: '#64748d',
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <SearchOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>检索关键词</span>
-                {!ragToolLoading && ragToolElapsed > 0 && (
-                  <span style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: 11 }}>
-                    {ragToolElapsed.toFixed(1)}s
-                  </span>
-                )}
-                {ragToolLoading && (
-                  <span style={{ marginLeft: 'auto', color: '#533afd', fontSize: 11 }}>
-                    <LoadingOutlined style={{ marginRight: 4 }} />
-                    检索中
-                  </span>
-                )}
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  marginTop: 4,
-                  paddingLeft: 20,
-                }}
-              >
-                <span style={{ fontSize: 12, color: '#061b31', fontWeight: 500 }}>
-                  "{ragToolQueries[0]}"
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Results list */}
+          {/* All tool calls stacked (no tabs) */}
           <div
             style={{
               flex: 1,
               minHeight: 0,
               overflowY: 'auto',
-              padding: '12px 12px',
+              padding: '12px',
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
+              gap: 16,
             }}
           >
-            {ragToolLoading && ragToolResults.length === 0 ? (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '40px 0',
-                  gap: 12,
-                }}
-              >
-                <LoadingOutlined style={{ fontSize: 24, color: '#533afd' }} />
-                <span style={{ fontSize: 13, color: '#64748d' }}>正在检索文物数据...</span>
-              </div>
-            ) : ragToolResults.length > 0 ? (
-              ragToolResults.map((r, i) => (
-                <div
-                  key={r.id}
-                  style={{
-                    padding: '10px 12px',
-                    background: '#f6f9fc',
-                    border: '1px solid #e5edf5',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}
-                  onClick={() => navigate(`/artifacts/${r.id}`)}
-                  onMouseEnter={(e) => {
-                    const el = e.currentTarget as HTMLElement;
-                    el.style.borderColor = '#b9b9f9';
-                    el.style.background = 'rgba(83,58,253,0.04)';
-                    el.style.transform = 'translateY(-1px)';
-                    el.style.boxShadow = '0 2px 8px rgba(83,58,253,0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    const el = e.currentTarget as HTMLElement;
-                    el.style.borderColor = '#e5edf5';
-                    el.style.background = '#f6f9fc';
-                    el.style.transform = 'translateY(0)';
-                    el.style.boxShadow = 'none';
-                  }}
-                >
+            {(() => {
+              const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+              const allToolCalls = lastAssistant?.toolCalls || [];
+
+              if (ragToolLoading && allToolCalls.length === 0) {
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '40px 0',
+                      gap: 12,
+                    }}
+                  >
+                    <LoadingOutlined style={{ fontSize: 24, color: '#533afd' }} />
+                    <span style={{ fontSize: 13, color: '#64748d' }}>正在检索文物数据...</span>
+                  </div>
+                );
+              }
+
+              if (allToolCalls.length === 0) {
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '40px 0',
+                      gap: 8,
+                    }}
+                  >
+                    <SearchOutlined style={{ fontSize: 24, color: '#e5edf5' }} />
+                    <span style={{ fontSize: 13, color: '#94a3b8' }}>暂无检索结果</span>
+                    <span style={{ fontSize: 11, color: '#c5cdd8', textAlign: 'center', lineHeight: 1.5 }}>
+                      发送消息后，AI 检索的文物将显示在这里
+                    </span>
+                  </div>
+                );
+              }
+
+              return allToolCalls.map((tc, idx) => (
+                <div key={idx} style={{ marginBottom: 8 }}>
+                  {/* Tool call header */}
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      marginBottom: 4,
+                      marginBottom: 8,
+                      fontSize: 12,
                     }}
                   >
                     <span
@@ -1205,78 +1064,241 @@ export default function Chat() {
                         background: 'rgba(83,58,253,0.1)',
                         width: 18,
                         height: 18,
-                        borderRadius: 3,
+                        borderRadius: 4,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
                       }}
                     >
-                      {i + 1}
+                      {idx + 1}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#061b31' }}>
-                      {r.name}
+                    <span style={{ fontSize: 12, fontWeight: 500, color: '#061b31' }}>
+                      {tc.tool === 'search_artifacts' ? '文物搜索' :
+                       tc.tool === 'get_artifact_detail' ? '文物详情' :
+                       tc.tool === 'query_knowledge_graph' ? '知识图谱' : tc.tool}
                     </span>
+                    <span style={{ fontSize: 11, color: '#64748d', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      "{tc.query}"
+                    </span>
+                    {!tc.done ? (
+                      <LoadingOutlined style={{ fontSize: 10, color: '#533afd' }} />
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                        {tc.elapsed > 0 ? `${tc.elapsed.toFixed(1)}s` : ''}
+                      </span>
+                    )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: '#64748d',
-                      lineHeight: 1.6,
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {r.snippet}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#94a3b8',
-                      marginTop: 6,
-                      display: 'flex',
-                      gap: 4,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    {[r.category, r.era, r.location]
-                      .filter(Boolean)
-                      .map((tag) => (
-                        <span
-                          key={tag}
+
+                  {/* Tool-specific content */}
+                  {tc.tool === 'get_artifact_detail' && tc.artifactDetail && (
+                    <div
+                      style={{
+                        padding: '12px',
+                        background: '#f6f9fc',
+                        border: '1px solid #e5edf5',
+                        borderRadius: 8,
+                      }}
+                    >
+                      {tc.artifactDetail.image_url && (
+                        <img
+                          src={tc.artifactDetail.image_url}
+                          alt={tc.artifactDetail.name}
                           style={{
-                            padding: '1px 6px',
-                            background: '#fff',
+                            width: '100%',
+                            height: 120,
+                            objectFit: 'cover',
+                            borderRadius: 6,
+                            marginBottom: 8,
+                          }}
+                          onClick={() => navigate(`/artifacts/${tc.artifactDetail!.id}`)}
+                        />
+                      )}
+                      <div style={{ fontSize: 14, fontWeight: 500, color: '#061b31', marginBottom: 6 }}>
+                        {tc.artifactDetail.name}
+                      </div>
+                      {tc.artifactDetail.description && (
+                        <div style={{ fontSize: 12, color: '#64748d', lineHeight: 1.6, marginBottom: 8 }}>
+                          {tc.artifactDetail.description.slice(0, 200)}{tc.artifactDetail.description.length > 200 ? '...' : ''}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {[tc.artifactDetail.category, tc.artifactDetail.era, tc.artifactDetail.location]
+                          .filter(Boolean)
+                          .map((tag) => (
+                            <span
+                              key={tag}
+                              style={{
+                                padding: '2px 8px',
+                                background: '#fff',
+                                border: '1px solid #e5edf5',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                color: '#64748d',
+                              }}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {tc.tool === 'query_knowledge_graph' && tc.entities && tc.entities.length > 0 && (
+                    <div
+                      style={{
+                        padding: '12px',
+                        background: '#f6f9fc',
+                        border: '1px solid #e5edf5',
+                        borderRadius: 8,
+                      }}
+                    >
+                      {/* Mini D3 graph - simple SVG visualization */}
+                      <svg width="100%" height={180} style={{ marginBottom: 8 }}>
+                        {(() => {
+                          // Simple layout: arrange entities in a grid
+                          const entityCount = Math.min(tc.entities!.length, 8);
+                          const cols = 4;
+                          const rows = Math.ceil(entityCount / cols);
+                          const cellWidth = 300 / cols;
+                          const cellHeight = 160 / rows;
+                          const nodeRadius = 16;
+
+                          return tc.entities!.slice(0, 8).map((entity, i) => {
+                            const col = i % cols;
+                            const row = Math.floor(i / cols);
+                            const x = col * cellWidth + cellWidth / 2 + 20;
+                            const y = row * cellHeight + cellHeight / 2 + 10;
+
+                            // Color by type
+                            const colors: Record<string, string> = {
+                              '文物': '#533afd',
+                              '人物': '#f59e0b',
+                              '地点': '#10b981',
+                              '事件': '#ef4444',
+                              '概念': '#6366f1',
+                            };
+                            const color = colors[entity.type] || '#533afd';
+
+                            return (
+                              <g key={i}>
+                                <circle cx={x} cy={y} r={nodeRadius} fill={color} opacity={0.8} />
+                                <text
+                                  x={x}
+                                  y={y + 4}
+                                  textAnchor="middle"
+                                  fill="#fff"
+                                  fontSize={10}
+                                  fontWeight={500}
+                                >
+                                  {entity.name.slice(0, 4)}
+                                </text>
+                                <text
+                                  x={x}
+                                  y={y + nodeRadius + 12}
+                                  textAnchor="middle"
+                                  fill="#64748d"
+                                  fontSize={9}
+                                >
+                                  {entity.type}
+                                </text>
+                              </g>
+                            );
+                          });
+                        })()}
+                      </svg>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                        共 {tc.entities.length} 个实体，{tc.relations?.length || 0} 条关系
+                      </div>
+                    </div>
+                  )}
+
+                  {tc.tool === 'search_artifacts' && tc.results.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {tc.results.map((r, i) => (
+                        <div
+                          key={r.id}
+                          style={{
+                            padding: '10px 12px',
+                            background: '#f6f9fc',
                             border: '1px solid #e5edf5',
-                            borderRadius: 3,
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                          onClick={() => navigate(`/artifacts/${r.id}`)}
+                          onMouseEnter={(e) => {
+                            const el = e.currentTarget as HTMLElement;
+                            el.style.borderColor = '#b9b9f9';
+                            el.style.background = 'rgba(83,58,253,0.04)';
+                          }}
+                          onMouseLeave={(e) => {
+                            const el = e.currentTarget as HTMLElement;
+                            el.style.borderColor = '#e5edf5';
+                            el.style.background = '#f6f9fc';
                           }}
                         >
-                          {tag}
-                        </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 500,
+                                color: '#533afd',
+                                background: 'rgba(83,58,253,0.1)',
+                                width: 16,
+                                height: 16,
+                                borderRadius: 3,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {i + 1}
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 500, color: '#061b31' }}>
+                              {r.name}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: '#64748d',
+                              lineHeight: 1.5,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {r.snippet}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {[r.category, r.era, r.location].filter(Boolean).map((tag) => (
+                              <span key={tag} style={{ padding: '1px 6px', background: '#fff', border: '1px solid #e5edf5', borderRadius: 3 }}>
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       ))}
-                  </div>
+                    </div>
+                  )}
+
+                  {/* No results for this tool */}
+                  {tc.done && tc.tool === 'search_artifacts' && tc.results.length === 0 && (
+                    <div style={{ padding: '12px', background: '#f6f9fc', borderRadius: 6, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
+                      未找到匹配的文物
+                    </div>
+                  )}
+                  {tc.done && tc.tool === 'query_knowledge_graph' && (!tc.entities || tc.entities.length === 0) && (
+                    <div style={{ padding: '12px', background: '#f6f9fc', borderRadius: 6, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
+                      未找到相关图谱数据
+                    </div>
+                  )}
                 </div>
-              ))
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '40px 0',
-                  gap: 8,
-                }}
-              >
-                <SearchOutlined style={{ fontSize: 24, color: '#e5edf5' }} />
-                <span style={{ fontSize: 13, color: '#94a3b8' }}>暂无检索结果</span>
-                <span style={{ fontSize: 11, color: '#c5cdd8', textAlign: 'center', lineHeight: 1.5 }}>
-                  发送消息后，AI 检索的文物将显示在这里
-                </span>
-              </div>
-            )}
+              ));
+            })()}
           </div>
         </div>
       )}

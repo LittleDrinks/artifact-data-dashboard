@@ -23,6 +23,8 @@ export interface ChatMessageInfo {
 /** SSE 事件数据 */
 export interface SSEEventData {
   type: string;
+  // session_created
+  session_id?: number;
   // thinking
   content?: string;
   // tool call
@@ -31,6 +33,11 @@ export interface SSEEventData {
   results?: SearchResultItem[];
   count?: number;
   elapsed?: number;
+  // artifact_detail (for get_artifact_detail tool)
+  artifactDetail?: ArtifactDetailResult;
+  // knowledge_graph (for query_knowledge_graph tool)
+  entities?: GraphEntity[];
+  relations?: GraphRelation[];
   // error (added for tool execution errors)
   error?: string;
   // done
@@ -45,6 +52,32 @@ export interface SearchResultItem {
   category: string | null;
   era: string | null;
   location: string | null;
+}
+
+/** 文物详情结果 (get_artifact_detail) */
+export interface ArtifactDetailResult {
+  id: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  era: string | null;
+  location: string | null;
+  image_url: string | null;
+  tags: string | null;
+}
+
+/** 知识图谱实体 */
+export interface GraphEntity {
+  name: string;
+  type: string;
+  description: string;
+}
+
+/** 知识图谱关系 */
+export interface GraphRelation {
+  source: string;
+  target: string;
+  relation: string;
 }
 
 /** 引用来源 */

@@ -39,14 +39,16 @@ MAX_REACT_ROUNDS = 5
 SYSTEM_PROMPT = (
     "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。\n"
     "你可以使用以下工具来获取文物数据：\n"
-    "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库\n"
-    "2. **get_artifact_detail** — 获取指定文物的完整信息\n\n"
+    "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库，返回文物列表\n"
+    "2. **get_artifact_detail** — 获取指定文物的完整详细信息（先用 search_artifacts 找到 ID）\n"
+    "3. **query_knowledge_graph** — 查询知识图谱中的实体和关系，适合回答概念性问题（如'青铜器有什么特点'、'商代有哪些重要文物'）\n\n"
     "回答规则：\n"
     "- 【不调用工具的场景】如果用户只是打招呼（你好、嗨、hello）、寒暄、问你的能力（你能做什么/你是谁）、"
     "或者发发表情/闲聊，直接友好回复即可，**绝对不要调用任何工具**\n"
-    "- 用户询问文物相关信息时，务必先调用工具查询数据库，不要凭记忆编造\n"
+    "- 用户询问具体文物信息时，先用 search_artifacts 搜索，再用 get_artifact_detail 获取详情\n"
+    "- 用户询问概念性知识（特点、分类、关系）时，优先使用 query_knowledge_graph 查询图谱\n"
     "- 综合工具返回的数据回答，用编号列表和加粗标题组织内容\n"
-    "- 引用数据时标注来源（如「数据库检索结果 #1」）\n"
+    "- 引用数据时标注来源（如「数据库检索结果 #1」或「知识图谱」）\n"
     "- 如果工具返回为空，如实告知未找到，并建议用户调整搜索条件\n"
     "- 如果问题与文物无关，可以正常闲聊，但礼貌引导用户回到文物话题\n"
     "- 回答要结构清晰、准确、专业\n"
@@ -206,13 +208,24 @@ def _sse_event(event_type: str, data: dict) -> str:
 # Main streaming generator
 # ---------------------------------------------------------------------------
 
-def stream_chat_response(db: Session, query: str, session_id: int):
+def stream_chat_response(db: Session, query: str, session_id: int, new_session: bool = False):
     """Generator that yields SSE events for the chat flow (ReAct Tool Calling).
 
     Uses ``yield from`` to delegate to ``_react_gen`` which handles the
     actual ReAct loop.
+
+    Args:
+        db: Database session
+        query: User's question
+        session_id: Session ID to use (already created)
+        new_session: If True, emit session_created event first
     """
     start_time = time.time()
+
+    # Emit session_created event first if this is a new session
+    # This allows frontend to set activeSessionId before any other events
+    if new_session:
+        yield _sse_event("session_created", {"session_id": session_id})
 
     # Save user message
     save_message(db, session_id, "user", query)
@@ -388,9 +401,10 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
         if in_thinking:
             in_thinking = False
             yield _sse_event("thinking_end", {})
-            # Save this round's thinking text for database persistence
-            if thinking_text:
-                thinking_rounds.append(thinking_text)
+        # Always save thinking text if we have any (not just when in_thinking is True)
+        # This fixes the bug where the last round's thinking was lost when followed by content
+        if thinking_text:
+            thinking_rounds.append(thinking_text)
 
         # --- Tool calls requested ---
         if tc_buffers:
@@ -444,14 +458,33 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                     "result": result,
                 })
 
-                # Emit tool_call_result - include query for frontend RAG panel display
-                yield _sse_event("tool_call_result", {
-                    "tool": fn_name,
-                    "query": fn_args.get("keyword", fn_args_str[:100]),
-                    "results": result.get("results", []),
-                    "count": result.get("count", 0),
-                    "elapsed": round(time.time(), 2),
-                })
+                # Emit tool_call_result - different format based on tool type
+                if fn_name == "get_artifact_detail":
+                    yield _sse_event("tool_call_result", {
+                        "tool": fn_name,
+                        "query": str(fn_args.get("artifact_id", "")),
+                        "artifact_detail": result,  # Send full artifact detail
+                        "count": 1 if "error" not in result else 0,
+                        "elapsed": round(time.time(), 2),
+                    })
+                elif fn_name == "query_knowledge_graph":
+                    yield _sse_event("tool_call_result", {
+                        "tool": fn_name,
+                        "query": fn_args.get("keyword", ""),
+                        "entities": result.get("entities", []),
+                        "relations": result.get("relations", []),
+                        "count": result.get("count", 0),
+                        "elapsed": round(time.time(), 2),
+                    })
+                else:
+                    # Default: search_artifacts and other tools
+                    yield _sse_event("tool_call_result", {
+                        "tool": fn_name,
+                        "query": fn_args.get("keyword", fn_args_str[:100]),
+                        "results": result.get("results", []),
+                        "count": result.get("count", 0),
+                        "elapsed": round(time.time(), 2),
+                    })
 
                 # Append tool result to conversation
                 messages.append({

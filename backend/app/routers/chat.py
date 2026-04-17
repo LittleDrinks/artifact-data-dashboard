@@ -133,6 +133,7 @@ def ask_question(
     _check_ask_rate_limit(client_ip)
 
     session_id = data.session_id
+    new_session = False
 
     # Create a new session if none provided
     if session_id is None:
@@ -141,6 +142,7 @@ def ask_question(
             db, current_user.id, ChatSessionCreate(title=title)
         )
         session_id = session.id
+        new_session = True
     else:
         # Verify session belongs to user
         session = (
@@ -158,7 +160,7 @@ def ask_question(
             )
 
     return StreamingResponse(
-        chat_service.stream_chat_response(db, data.question, session_id),
+        chat_service.stream_chat_response(db, data.question, session_id, new_session),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
