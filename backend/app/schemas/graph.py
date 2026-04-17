@@ -33,3 +33,12 @@ class NodeDetailResponse(BaseModel):
     node: GraphNode
     links: List[GraphLink]
     neighbors: List[GraphNode]
+
+
+class ImportResponse(BaseModel):
+    """CSV 导入响应"""
+    success: bool
+    nodes_imported: int
+    relations_imported: int
+    message: str
+    errors: Optional[List[str]] = None
