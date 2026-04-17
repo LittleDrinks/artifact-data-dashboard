@@ -232,6 +232,12 @@ export default function Chat() {
   // ── Select session ──
   const handleSelectSession = useCallback(
     (session: ChatSessionInfo) => {
+      // Prevent switching while a response is still streaming
+      if (loading) {
+        message.warning('请等待回复完成后再切换');
+        return;
+      }
+
       abortControllerRef.current?.abort();
       abortControllerRef.current = null;
       setLoading(false);
@@ -250,6 +256,15 @@ export default function Chat() {
     },
     [loadSessionMessages],
   );
+
+  // ── Auto-restore session on mount (Bug 1 fix) ──
+  // When navigating back from artifact detail, auto-select the most recent session
+  useEffect(() => {
+    if (sessions.length > 0 && activeSessionId === null && !loading) {
+      // Auto-select the most recent session (first in the list, sorted by created_at desc)
+      handleSelectSession(sessions[0]);
+    }
+  }, [sessions, activeSessionId, loading, handleSelectSession]);
 
   // ── Delete selected sessions ──
   const handleDeleteSelected = useCallback(async () => {
