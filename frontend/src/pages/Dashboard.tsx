@@ -487,67 +487,131 @@ function CategoryPieChart({
   );
 }
 
-/* ── Word Cloud: CSS implementation ── */
+/* ── Word Cloud: d3-cloud SVG implementation ── */
 
 function WordCloud({ data }: { data: WordCloudItem[] }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [cloudWords, setCloudWords] = useState<CloudWord[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 600, height: 180 });
+
+  // Resize observer for responsive layout
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        setDimensions({
+          width: Math.max(entry.contentRect.width, 300),
+          height: Math.max(entry.contentRect.height, 150),
+        });
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  // d3-cloud layout computation
+  useEffect(() => {
+    if (data.length === 0) return;
+
+    const maxWeight = Math.max(...data.map((d) => d.weight));
+    const minWeight = Math.min(...data.map((d) => d.weight));
+    const range = maxWeight - minWeight || 1;
+
+    const fontSize = (d: CloudWord) => {
+      const word = data.find((w) => w.word === d.text);
+      if (!word) return 14;
+      const ratio = (word.weight - minWeight) / range;
+      return 14 + ratio * 46; // 14px to 60px
+    };
+
+    const layout = cloud()
+      .size([dimensions.width, dimensions.height])
+      .words(
+        data.map((d) => ({
+          text: d.word,
+          size: fontSize({ text: d.word } as CloudWord),
+          weight: d.weight,
+        })) as CloudWord[]
+      )
+      .padding(4)
+      .rotate(() => (Math.random() > 0.7 ? 90 : 0)) // occasional vertical words
+      .font('system-ui, -apple-system, sans-serif')
+      .fontSize(fontSize)
+      .on('end', (words: CloudWord[]) => {
+        setCloudWords(words);
+      });
+
+    layout.start();
+  }, [data, dimensions]);
+
   if (data.length === 0) return null;
 
   const maxWeight = Math.max(...data.map((d) => d.weight));
   const minWeight = Math.min(...data.map((d) => d.weight));
   const range = maxWeight - minWeight || 1;
 
-  const GRADIENT_COLORS = [
-    '#533afd', '#6366f1', '#2874ad', '#3d8b37',
-    '#0ea5e9', '#10b981', '#9a6324', '#f59e0b',
-    '#c45100', '#ec4899',
+  // Color gradient based on #533afd
+  const colors = [
+    '#533afd', '#6b5cf6', '#7c3aed', '#8b5cf6',
+    '#a78bfa', '#c4b5fd', '#0ea5e9', '#10b981',
   ];
 
   return (
     <div
+      ref={containerRef}
       style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: '8px 16px',
-        padding: '20px 0',
+        width: '100%',
         minHeight: 180,
+        position: 'relative',
       }}
     >
-      {data.map((item, idx) => {
-        const ratio = (item.weight - minWeight) / range;
-        const fontSize = 13 + ratio * 22;
-        const fontWeight = Math.round(300 + ratio * 400); // 300–700
-        const color = GRADIENT_COLORS[idx % GRADIENT_COLORS.length];
-        return (
-          <AntTooltip key={item.word} title={`词频: ${item.weight}`}>
-            <span
-              style={{
-                fontSize,
-                color,
-                fontWeight,
-                cursor: 'default',
-                transition: 'transform 0.2s, opacity 0.2s',
-                lineHeight: 1.5,
-                padding: '2px 4px',
-                opacity: 0.85,
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLElement;
-                el.style.transform = 'scale(1.18)';
-                el.style.opacity = '1';
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLElement;
-                el.style.transform = 'scale(1)';
-                el.style.opacity = '0.85';
-              }}
-            >
-              {item.word}
-            </span>
-          </AntTooltip>
-        );
-      })}
+      <svg
+        ref={svgRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        style={{ display: 'block', margin: '0 auto' }}
+      >
+        <g transform={`translate(${dimensions.width / 2},${dimensions.height / 2})`}>
+          {cloudWords.map((word, idx) => {
+            const w = data.find((d) => d.word === word.text);
+            const ratio = w ? (w.weight - minWeight) / range : 0;
+            const colorIdx = Math.floor(ratio * (colors.length - 1));
+            const color = colors[colorIdx];
+
+            return (
+              <AntTooltip key={`${word.text}-${idx}`} title={`词频: ${w?.weight ?? 0}`}>
+                <text
+                  textAnchor="middle"
+                  transform={`translate(${word.x},${word.y}) rotate(${word.rotate})`}
+                  style={{
+                    fontSize: word.size,
+                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                    fontWeight: 400 + Math.round(ratio * 300),
+                    fill: color,
+                    cursor: 'default',
+                    opacity: 0.85,
+                    transition: 'opacity 0.2s',
+                  }}
+                  className="wordcloud-word"
+                  data-x={word.x}
+                  data-y={word.y}
+                  data-rotate={word.rotate}
+                >
+                  {word.text}
+                </text>
+              </AntTooltip>
+            );
+          })}
+        </g>
+      </svg>
+      <style>{`
+        .wordcloud-word:hover {
+          opacity: 1 !important;
+          filter: brightness(1.1);
+        }
+      `}</style>
     </div>
   );
 }
