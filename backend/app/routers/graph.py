@@ -206,18 +206,26 @@ async def import_graph_csv(
         nodes_imported = 0
         relations_imported = 0
 
+        def sanitize_label(label: str) -> str:
+            """Sanitize Neo4j label to prevent Cypher injection."""
+            # Only allow alphanumeric and underscore characters
+            import re
+            sanitized = re.sub(r"[^a-zA-Z0-9_]", "", label)
+            return sanitized if sanitized else "Unknown"
+
         with driver.session() as session:
             # Batch import nodes and relations
             for triple in triples:
                 # Generate IDs from name and type
-                src_id = f"{triple['source_type']}:{triple['source_name']}"
-                tgt_id = f"{triple['target_type']}:{triple['target_name']}"
+                src_type_sanitized = sanitize_label(triple["source_type"])
+                tgt_type_sanitized = sanitize_label(triple["target_type"])
+                src_id = f"{src_type_sanitized}:{triple['source_name']}"
+                tgt_id = f"{tgt_type_sanitized}:{triple['target_name']}"
 
-                # MERGE source node
-                src_label = triple["source_type"]
+                # MERGE source node (use sanitized label)
                 session.run(
                     f"""
-                    MERGE (n:{src_label} {{id: $id}})
+                    MERGE (n:`{src_type_sanitized}` {{id: $id}})
                     SET n.name = $name
                     SET n.source = 'csv_import'
                     """,
@@ -227,10 +235,9 @@ async def import_graph_csv(
                 nodes_imported += 1
 
                 # MERGE target node
-                tgt_label = triple["target_type"]
                 session.run(
                     f"""
-                    MERGE (n:{tgt_label} {{id: $id}})
+                    MERGE (n:`{tgt_type_sanitized}` {{id: $id}})
                     SET n.name = $name
                     SET n.source = 'csv_import'
                     """,
@@ -239,13 +246,13 @@ async def import_graph_csv(
                 )
                 nodes_imported += 1
 
-                # MERGE relationship
-                rel_type = triple["relation"].replace(" ", "_").replace("-", "_")
+                # MERGE relationship (sanitize relation type)
+                rel_type_sanitized = sanitize_label(triple["relation"].replace(" ", "_").replace("-", "_"))
                 session.run(
                     f"""
-                    MATCH (s:{src_label} {{id: $src_id}})
-                    MATCH (t:{tgt_label} {{id: $tgt_id}})
-                    MERGE (s)-[r:{rel_type}]->(t)
+                    MATCH (s:`{src_type_sanitized}` {{id: $src_id}})
+                    MATCH (t:`{tgt_type_sanitized}` {{id: $tgt_id}})
+                    MERGE (s)-[r:`{rel_type_sanitized}`]->(t)
                     SET r.source = 'csv_import'
                     """,
                     src_id=src_id,
