@@ -97,7 +97,7 @@ export default function Graph() {
   /* ── State ── */
   const [loading, setLoading] = useState(true);
   const [graphData, setGraphData] = useState<GraphDataResponse | null>(null);
-  const [nodeLimit, setNodeLimit] = useState(50);
+  const [nodeLimit, setNodeLimit] = useState(100);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [activeSearchKeyword, setActiveSearchKeyword] = useState('');
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
@@ -327,15 +327,8 @@ export default function Graph() {
         d3
           .drag<SVGGElement, SimNode>()
           .on('start', (event, d) => {
-            // Set dragging flag and clear any existing hover highlighting
             isDraggingRef.current = true;
-            linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
-            linkLabelSel.style('opacity', 0);
-            // Reset group opacity to 1 (clears hover dimming)
-            // Circle/text inside have their own opacity for search highlighting
-            nodeSel.attr('opacity', 1);
-
-            if (!event.active) simulationRef.current?.alphaTarget(0.3).restart();
+            if (!event.active) simulationRef.current?.alphaTarget(0.1).restart();
             d.fx = d.x;
             d.fy = d.y;
           })
@@ -344,9 +337,11 @@ export default function Graph() {
             d.fy = event.y;
           })
           .on('end', (event, d) => {
-            // Clear dragging flag
             isDraggingRef.current = false;
-
+            // Reset highlighting — mouse position likely changed during drag
+            linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
+            linkLabelSel.style('opacity', 0);
+            nodeSel.attr('opacity', 1);
             if (!event.active) simulationRef.current?.alphaTarget(0);
             d.fx = null;
             d.fy = null;
@@ -449,7 +444,7 @@ export default function Graph() {
       simulation.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData, activeSearchKeyword]);
+  }, [graphData]);
 
   /* ── Update force params without re-rendering the whole graph ── */
   useEffect(() => {
