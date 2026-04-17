@@ -1,9 +1,9 @@
 """Chat router - session management and SSE streaming for AI Q&A."""
 
-import json
-from typing import Optional
+import time
+from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,33 @@ from app.schemas.chat import (
 from app.services import chat as chat_service
 
 router = APIRouter()
+
+# ── Simple in-memory rate limiter for ask endpoint ──
+_ask_attempts: dict[str, list[float]] = defaultdict(list)
+_ASK_RATE_LIMIT_WINDOW = 60  # seconds
+_ASK_RATE_LIMIT_MAX = 10  # attempts per window
+
+
+def _check_ask_rate_limit(client_ip: str) -> None:
+    """Raise 429 if client_ip exceeds ask rate limit."""
+    now = time.time()
+    # Prune ALL expired keys to prevent memory leak
+    expired_keys = [
+        k for k, v in _ask_attempts.items()
+        if not v or now - v[-1] > _ASK_RATE_LIMIT_WINDOW
+    ]
+    for k in expired_keys:
+        del _ask_attempts[k]
+
+    # Prune old entries for this IP
+    attempts = _ask_attempts[client_ip]
+    _ask_attempts[client_ip] = [t for t in attempts if now - t < _ASK_RATE_LIMIT_WINDOW]
+    if len(_ask_attempts[client_ip]) >= _ASK_RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="提问过于频繁，请稍后再试",
+        )
+    _ask_attempts[client_ip].append(now)
 
 
 @router.post("/sessions", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -94,6 +121,7 @@ def delete_sessions(
 @router.post("/ask")
 def ask_question(
     data: ChatAskRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -101,6 +129,9 @@ def ask_question(
     AI 问答（SSE 流式响应）。
     三阶段输出：thinking -> tool_call -> answer -> done
     """
+    client_ip = request.client.host if request.client else "unknown"
+    _check_ask_rate_limit(client_ip)
+
     session_id = data.session_id
 
     # Create a new session if none provided
