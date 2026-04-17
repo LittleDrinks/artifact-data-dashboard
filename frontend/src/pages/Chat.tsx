@@ -159,16 +159,32 @@ export default function Chat() {
                 // Check for thinking rounds entry (persisted from backend)
                 if (tc.type === "thinking" && Array.isArray(tc.rounds)) {
                   thinkingRounds = tc.rounds;
-                } else if (tc.result?.results) {
-                  // Regular tool call entry
-                  toolCalls.push({
-                    tool: tc.tool || 'search_artifacts',
-                    query: tc.args?.keyword || '',
-                    results: tc.result.results as SearchResultItem[],
-                    count: tc.result.count || tc.result.results.length || 0,
+                } else if (tc.tool && tc.result) {
+                  // Regular tool call entry — handle all tool types
+                  const toolName = tc.tool;
+                  const entry: ToolCallEntry = {
+                    tool: toolName,
+                    query: tc.args?.keyword || tc.args?.artifact_id?.toString() || '',
+                    results: [],
+                    count: 0,
                     elapsed: 0,
                     done: true,
-                  });
+                  };
+
+                  if (toolName === 'get_artifact_detail') {
+                    entry.artifactDetail = tc.result;
+                    entry.count = 1;
+                  } else if (toolName === 'query_knowledge_graph') {
+                    entry.entities = tc.result.entities || [];
+                    entry.relations = tc.result.relations || [];
+                    entry.count = tc.result.count || 0;
+                  } else {
+                    // Default: search_artifacts
+                    entry.results = tc.result.results || [];
+                    entry.count = tc.result.count || tc.result.results?.length || 0;
+                  }
+
+                  toolCalls.push(entry);
                 }
               }
             }
@@ -1044,8 +1060,31 @@ export default function Chat() {
                 );
               }
 
-              return allToolCalls.map((tc, idx) => (
-                <div key={idx} style={{ marginBottom: 8 }}>
+              // Only show the LAST tool call in the panel
+              const lastTc = allToolCalls[allToolCalls.length - 1];
+              if (!lastTc) {
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '40px 0',
+                      gap: 8,
+                    }}
+                  >
+                    <SearchOutlined style={{ fontSize: 24, color: '#e5edf5' }} />
+                    <span style={{ fontSize: 13, color: '#94a3b8' }}>暂无检索结果</span>
+                    <span style={{ fontSize: 11, color: '#c5cdd8', textAlign: 'center', lineHeight: 1.5 }}>
+                      发送消息后，AI 检索的文物将显示在这里
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <div>
                   {/* Tool call header */}
                   <div
                     style={{
@@ -1071,27 +1110,27 @@ export default function Chat() {
                         flexShrink: 0,
                       }}
                     >
-                      {idx + 1}
+                      1
                     </span>
                     <span style={{ fontSize: 12, fontWeight: 500, color: '#061b31' }}>
-                      {tc.tool === 'search_artifacts' ? '文物搜索' :
-                       tc.tool === 'get_artifact_detail' ? '文物详情' :
-                       tc.tool === 'query_knowledge_graph' ? '知识图谱' : tc.tool}
+                      {lastTc.tool === 'search_artifacts' ? '文物搜索' :
+                       lastTc.tool === 'get_artifact_detail' ? '文物详情' :
+                       lastTc.tool === 'query_knowledge_graph' ? '知识图谱' : lastTc.tool}
                     </span>
                     <span style={{ fontSize: 11, color: '#64748d', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      "{tc.query}"
+                      "{lastTc.query}"
                     </span>
-                    {!tc.done ? (
+                    {!lastTc.done ? (
                       <LoadingOutlined style={{ fontSize: 10, color: '#533afd' }} />
                     ) : (
                       <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                        {tc.elapsed > 0 ? `${tc.elapsed.toFixed(1)}s` : ''}
+                        {lastTc.elapsed > 0 ? `${lastTc.elapsed.toFixed(1)}s` : ''}
                       </span>
                     )}
                   </div>
 
                   {/* Tool-specific content */}
-                  {tc.tool === 'get_artifact_detail' && tc.artifactDetail && (
+                  {lastTc.tool === 'get_artifact_detail' && lastTc.artifactDetail && (
                     <div
                       style={{
                         padding: '12px',
@@ -1100,10 +1139,10 @@ export default function Chat() {
                         borderRadius: 8,
                       }}
                     >
-                      {tc.artifactDetail.image_url && (
+                      {lastTc.artifactDetail.image_url && (
                         <img
-                          src={tc.artifactDetail.image_url}
-                          alt={tc.artifactDetail.name}
+                          src={lastTc.artifactDetail.image_url}
+                          alt={lastTc.artifactDetail.name}
                           style={{
                             width: '100%',
                             height: 120,
@@ -1111,19 +1150,19 @@ export default function Chat() {
                             borderRadius: 6,
                             marginBottom: 8,
                           }}
-                          onClick={() => navigate(`/artifacts/${tc.artifactDetail!.id}`)}
+                          onClick={() => navigate(`/artifacts/${lastTc.artifactDetail!.id}`)}
                         />
                       )}
                       <div style={{ fontSize: 14, fontWeight: 500, color: '#061b31', marginBottom: 6 }}>
-                        {tc.artifactDetail.name}
+                        {lastTc.artifactDetail.name}
                       </div>
-                      {tc.artifactDetail.description && (
+                      {lastTc.artifactDetail.description && (
                         <div style={{ fontSize: 12, color: '#64748d', lineHeight: 1.6, marginBottom: 8 }}>
-                          {tc.artifactDetail.description.slice(0, 200)}{tc.artifactDetail.description.length > 200 ? '...' : ''}
+                          {lastTc.artifactDetail.description.slice(0, 200)}{lastTc.artifactDetail.description.length > 200 ? '...' : ''}
                         </div>
                       )}
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {[tc.artifactDetail.category, tc.artifactDetail.era, tc.artifactDetail.location]
+                        {[lastTc.artifactDetail.category, lastTc.artifactDetail.era, lastTc.artifactDetail.location]
                           .filter(Boolean)
                           .map((tag) => (
                             <span
@@ -1144,7 +1183,7 @@ export default function Chat() {
                     </div>
                   )}
 
-                  {tc.tool === 'query_knowledge_graph' && tc.entities && tc.entities.length > 0 && (
+                  {lastTc.tool === 'query_knowledge_graph' && lastTc.entities && lastTc.entities.length > 0 && (
                     <div
                       style={{
                         padding: '12px',
@@ -1157,14 +1196,14 @@ export default function Chat() {
                       <svg width="100%" height={180} style={{ marginBottom: 8 }}>
                         {(() => {
                           // Simple layout: arrange entities in a grid
-                          const entityCount = Math.min(tc.entities!.length, 8);
+                          const entityCount = Math.min(lastTc.entities!.length, 8);
                           const cols = 4;
                           const rows = Math.ceil(entityCount / cols);
                           const cellWidth = 300 / cols;
                           const cellHeight = 160 / rows;
                           const nodeRadius = 16;
 
-                          return tc.entities!.slice(0, 8).map((entity, i) => {
+                          return lastTc.entities!.slice(0, 8).map((entity, i) => {
                             const col = i % cols;
                             const row = Math.floor(i / cols);
                             const x = col * cellWidth + cellWidth / 2 + 20;
@@ -1208,14 +1247,14 @@ export default function Chat() {
                         })()}
                       </svg>
                       <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                        共 {tc.entities.length} 个实体，{tc.relations?.length || 0} 条关系
+                        共 {lastTc.entities.length} 个实体，{lastTc.relations?.length || 0} 条关系
                       </div>
                     </div>
                   )}
 
-                  {tc.tool === 'search_artifacts' && tc.results.length > 0 && (
+                  {lastTc.tool === 'search_artifacts' && lastTc.results.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {tc.results.map((r, i) => (
+                      {lastTc.results.map((r, i) => (
                         <div
                           key={r.id}
                           style={{
@@ -1286,18 +1325,18 @@ export default function Chat() {
                   )}
 
                   {/* No results for this tool */}
-                  {tc.done && tc.tool === 'search_artifacts' && tc.results.length === 0 && (
+                  {lastTc.done && lastTc.tool === 'search_artifacts' && lastTc.results.length === 0 && (
                     <div style={{ padding: '12px', background: '#f6f9fc', borderRadius: 6, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
                       未找到匹配的文物
                     </div>
                   )}
-                  {tc.done && tc.tool === 'query_knowledge_graph' && (!tc.entities || tc.entities.length === 0) && (
+                  {lastTc.done && lastTc.tool === 'query_knowledge_graph' && (!lastTc.entities || lastTc.entities.length === 0) && (
                     <div style={{ padding: '12px', background: '#f6f9fc', borderRadius: 6, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
                       未找到相关图谱数据
                     </div>
                   )}
                 </div>
-              ));
+              );
             })()}
           </div>
         </div>
