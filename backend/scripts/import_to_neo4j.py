@@ -250,9 +250,11 @@ def import_to_neo4j(
                 properties = node.get("properties", {})
 
                 # Create node with MERGE to avoid duplicates
+                # All base nodes get source='rule' to distinguish from extracted triples
                 cypher = f"""
                 MERGE (n:{node_type} {{id: $id}})
                 SET n.name = $name
+                SET n.source = 'rule'
                 SET n += $properties
                 """
                 session.run(cypher, {
@@ -280,6 +282,7 @@ def import_to_neo4j(
                 MATCH (s:{source_type} {{id: $source_id}})
                 MATCH (t:{target_type} {{id: $target_id}})
                 MERGE (s)-[r:{relation}]->(t)
+                SET r.source = 'rule'
                 """
                 session.run(cypher, {
                     "source_id": source_id,

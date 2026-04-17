@@ -138,6 +138,354 @@ def _check_neo4j_has_data(driver) -> bool:
         return False
 
 
+def _check_neo4j_has_base_layer(driver) -> bool:
+    """Check if Neo4j has base triple layer nodes (source='rule')."""
+    if driver is None:
+        return False
+    try:
+        with driver.session() as session:
+            result = session.run("MATCH (e) WHERE e.source = 'rule' RETURN count(e) AS cnt LIMIT 1")
+            record = result.single()
+            cnt = record.get("cnt", 0) if record else 0
+            return cnt > 0
+    except Exception:
+        return False
+
+
+def _query_neo4j_base_layer(
+    driver,
+    limit: int = 100,
+    offset: int = 0,
+    node_types: Optional[List[str]] = None,
+) -> Tuple[Dict[str, GraphNode], Dict[str, GraphLink]]:
+    """Query base triple layer from Neo4j (nodes with source='rule').
+
+    This queries Artifact, Era, Category, Location, Tag, Material, Museum nodes
+    and their relationships.
+
+    Returns (nodes_dict, links_dict). Empty dicts if Neo4j unavailable.
+    """
+    if driver is None:
+        return {}, {}
+
+    nodes: Dict[str, GraphNode] = {}
+    links: Dict[str, GraphLink] = {}
+
+    # Default types to query
+    type_filter = node_types or ["artifact", "era", "category", "location", "tag", "material", "museum"]
+
+    try:
+        with driver.session() as session:
+            # Query nodes by label and source='rule'
+            for node_type in type_filter:
+                # Map frontend types to Neo4j labels
+                label_map = {
+                    "artifact": "artifact",
+                    "era": "era",
+                    "category": "category",
+                    "location": "location",
+                    "tag": "tag",
+                    "material": "material",
+                    "museum": "museum",
+                }
+                neo4j_label = label_map.get(node_type)
+                if not neo4j_label:
+                    continue
+
+                # Query nodes with this label
+                node_query = f"""
+                    MATCH (n:{neo4j_label})
+                    WHERE n.source = 'rule'
+                    RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n AS props
+                    SKIP $offset LIMIT $limit
+                """
+                result = session.run(node_query, offset=offset, limit=limit)
+
+                for record in result:
+                    node_id = record.get("id")
+                    name = record.get("name")
+                    node_type_raw = record.get("type", neo4j_label)
+                    props = dict(record.get("props", {}))
+
+                    if node_id and name:
+                        # Build properties dict
+                        properties = {}
+                        if neo4j_label == "artifact":
+                            properties = {
+                                "artifact_id": props.get("artifact_id"),
+                                "description": props.get("description"),
+                                "image_url": props.get("image_url"),
+                                "dimensions": props.get("dimensions"),
+                            }
+                        elif props.get("count"):
+                            properties["count"] = props.get("count")
+
+                        nodes[node_id] = GraphNode(
+                            id=node_id,
+                            name=name,
+                            type=node_type_raw,
+                            properties=properties,
+                        )
+
+            # Query all relationships between matched nodes
+            if nodes:
+                node_ids = list(nodes.keys())
+                rel_query = """
+                    MATCH (a)-[r]->(b)
+                    WHERE a.source = 'rule' AND b.source = 'rule'
+                    AND a.id IN $ids AND b.id IN $ids
+                    RETURN a.id AS src, b.id AS tgt, type(r) AS rel_type
+                """
+                rel_result = session.run(rel_query, ids=node_ids)
+
+                for record in rel_result:
+                    src = record.get("src")
+                    tgt = record.get("tgt")
+                    rel_type = record.get("rel_type", "related")
+
+                    if src and tgt:
+                        link_key = f"{src}->{tgt}"
+                        links[link_key] = GraphLink(
+                            source=src,
+                            target=tgt,
+                            relation=rel_type,
+                        )
+
+        logger.info("_query_neo4j_base_layer: %d nodes, %d links", len(nodes), len(links))
+        return nodes, links
+    except Exception as e:
+        logger.warning("Neo4j base layer query failed: %s", e)
+        return {}, {}
+
+
+def _search_neo4j_base_layer(
+    driver,
+    keyword: str,
+    node_types: Optional[List[str]] = None,
+    depth: int = 1,
+) -> Tuple[List[GraphNode], List[GraphLink], int]:
+    """Search base layer nodes by keyword and expand neighbors.
+
+    Returns (nodes_list, links_list, matched_count).
+    """
+    if driver is None:
+        return [], [], 0
+
+    nodes: Dict[str, GraphNode] = {}
+    matched_ids: Set[str] = set()
+
+    type_filter = node_types or ["artifact", "era", "category", "location", "tag", "material", "museum"]
+    kw = keyword.lower()
+
+    try:
+        with driver.session() as session:
+            # Search nodes by name containing keyword
+            for node_type in type_filter:
+                label_map = {
+                    "artifact": "artifact",
+                    "era": "era",
+                    "category": "category",
+                    "location": "location",
+                    "tag": "tag",
+                    "material": "material",
+                    "museum": "museum",
+                }
+                neo4j_label = label_map.get(node_type)
+                if not neo4j_label:
+                    continue
+
+                search_query = f"""
+                    MATCH (n:{neo4j_label})
+                    WHERE n.source = 'rule' AND toLower(n.name) CONTAINS $keyword
+                    RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n AS props
+                    LIMIT 50
+                """
+                result = session.run(search_query, keyword=kw)
+
+                for record in result:
+                    node_id = record.get("id")
+                    name = record.get("name")
+                    node_type_raw = record.get("type", neo4j_label)
+                    props = dict(record.get("props", {}))
+
+                    if node_id and name:
+                        matched_ids.add(node_id)
+                        properties = {}
+                        if neo4j_label == "artifact":
+                            properties = {
+                                "artifact_id": props.get("artifact_id"),
+                                "description": props.get("description"),
+                                "image_url": props.get("image_url"),
+                            }
+                        elif props.get("count"):
+                            properties["count"] = props.get("count")
+
+                        nodes[node_id] = GraphNode(
+                            id=node_id,
+                            name=name,
+                            type=node_type_raw,
+                            properties=properties,
+                        )
+
+            matched_count = len(matched_ids)
+            if matched_count == 0:
+                return [], [], 0
+
+            # Multi-hop neighbor expansion
+            result_node_ids: Set[str] = set(matched_ids)
+            result_links: List[GraphLink] = []
+
+            for _ in range(depth):
+                # Query relationships from current nodes
+                expand_query = """
+                    MATCH (a)-[r]->(b)
+                    WHERE a.source = 'rule' AND b.source = 'rule'
+                    AND a.id IN $ids
+                    RETURN a.id AS src, b.id AS tgt, type(r) AS rel_type, b.name AS tgt_name, labels(b)[0] AS tgt_type
+                """
+                expand_result = session.run(expand_query, ids=list(result_node_ids))
+
+                new_ids: Set[str] = set()
+                for record in expand_result:
+                    src = record.get("src")
+                    tgt = record.get("tgt")
+                    rel_type = record.get("rel_type", "related")
+                    tgt_name = record.get("tgt_name")
+                    tgt_type = record.get("tgt_type")
+
+                    if src and tgt:
+                        link_key = f"{src}->{tgt}"
+                        # Add link if not already added
+                        existing = False
+                        for l in result_links:
+                            if l.source == src and l.target == tgt:
+                                existing = True
+                                break
+                        if not existing:
+                            result_links.append(GraphLink(
+                                source=src,
+                                target=tgt,
+                                relation=rel_type,
+                            ))
+
+                        # Add target node if new
+                        if tgt not in result_node_ids and tgt not in nodes:
+                            new_ids.add(tgt)
+                            nodes[tgt] = GraphNode(
+                                id=tgt,
+                                name=tgt_name or tgt,
+                                type=tgt_type or "unknown",
+                            )
+
+                result_node_ids.update(new_ids)
+
+            # Apply type filter to final nodes
+            allowed_types = set(type_filter)
+            filtered_nodes = [n for n in nodes.values() if n.type in allowed_types]
+            filtered_links = [l for l in result_links if l.source in nodes and l.target in nodes]
+
+            return filtered_nodes, filtered_links, matched_count
+
+    except Exception as e:
+        logger.warning("Neo4j base layer search failed: %s", e)
+        return [], [], 0
+
+
+def _get_node_detail_from_neo4j(
+    driver,
+    node_id: str,
+) -> Optional[Tuple[GraphNode, List[GraphLink], List[GraphNode]]]:
+    """Get node detail from Neo4j base layer.
+
+    Returns (node, related_links, neighbors) or None if not found.
+    """
+    if driver is None:
+        return None
+
+    try:
+        with driver.session() as session:
+            # Find node by id
+            node_query = """
+                MATCH (n)
+                WHERE n.id = $node_id AND n.source = 'rule'
+                RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n AS props
+            """
+            result = session.run(node_query, node_id=node_id)
+            record = result.single()
+
+            if not record:
+                return None
+
+            node_id_found = record.get("id")
+            name = record.get("name")
+            node_type = record.get("type", "unknown")
+            props = dict(record.get("props", {}))
+
+            properties = {}
+            if node_type == "artifact":
+                properties = {
+                    "artifact_id": props.get("artifact_id"),
+                    "description": props.get("description"),
+                    "image_url": props.get("image_url"),
+                    "dimensions": props.get("dimensions"),
+                }
+            elif props.get("count"):
+                properties["count"] = props.get("count")
+
+            node = GraphNode(
+                id=node_id_found,
+                name=name,
+                type=node_type,
+                properties=properties,
+            )
+
+            # Get related nodes and links
+            rel_query = """
+                MATCH (a)-[r]-(b)
+                WHERE a.id = $node_id AND a.source = 'rule' AND b.source = 'rule'
+                RETURN b.id AS neighbor_id, b.name AS neighbor_name, labels(b)[0] AS neighbor_type,
+                       type(r) AS rel_type, CASE WHEN startNode(r) = a THEN 'out' ELSE 'in' END AS direction
+            """
+            rel_result = session.run(rel_query, node_id=node_id)
+
+            neighbors: List[GraphNode] = []
+            links: List[GraphLink] = []
+
+            for rel_record in rel_result:
+                neighbor_id = rel_record.get("neighbor_id")
+                neighbor_name = rel_record.get("neighbor_name")
+                neighbor_type = rel_record.get("neighbor_type", "unknown")
+                rel_type = rel_record.get("rel_type", "related")
+                direction = rel_record.get("direction", "out")
+
+                if neighbor_id:
+                    neighbors.append(GraphNode(
+                        id=neighbor_id,
+                        name=neighbor_name or neighbor_id,
+                        type=neighbor_type,
+                    ))
+
+                    # Create link based on direction
+                    if direction == "out":
+                        links.append(GraphLink(
+                            source=node_id_found,
+                            target=neighbor_id,
+                            relation=rel_type,
+                        ))
+                    else:
+                        links.append(GraphLink(
+                            source=neighbor_id,
+                            target=node_id_found,
+                            relation=rel_type,
+                        ))
+
+            return node, links, neighbors
+
+    except Exception as e:
+        logger.warning("Neo4j node detail query failed: %s", e)
+        return None
+
+
 def _query_lightrag_kvstore(
     limit: int = 100,
     keyword: Optional[str] = None,
@@ -382,10 +730,9 @@ def get_full_graph(
     """
     获取完整图谱数据。
 
-    数据源策略：
-    1. SQLite 文物数据是主要数据源，构建 artifact→era/category/location/tag 关系图
-    2. Neo4j 数据（如果已导入）可以增强图谱，但不替代 SQLite 基础图
-    3. LightRAG KV Store 被跳过 —— 它产生低质量的抽象概念实体
+    数据源策略（Neo4j primary）：
+    1. Neo4j 基础层优先：查询 source='rule' 的节点和关系
+    2. SQLite fallback：如果 Neo4j 不可用或无数据，从 SQLite 构建
 
     Args:
         db: 数据库会话
@@ -396,13 +743,20 @@ def get_full_graph(
     Returns:
         (nodes_list, links_list)
     """
-    # Build SQLite artifact graph as the PRIMARY base (always)
-    # This produces meaningful typed nodes with real relationships
+    # Try Neo4j first (primary data source)
+    driver = _get_neo4j_driver()
+    if _check_neo4j_has_base_layer(driver):
+        nodes_dict, links_dict = _query_neo4j_base_layer(
+            driver, limit=limit, offset=offset, node_types=node_types
+        )
+        if nodes_dict:
+            logger.info("get_full_graph: using Neo4j primary, %d nodes", len(nodes_dict))
+            return _filter_graph_by_types(nodes_dict, links_dict, node_types)
 
-    # Optimize for demo: prioritize artifacts with rich metadata (era, category, location)
-    # This creates a more impressive graph when showing relationships
+    # SQLite fallback (when Neo4j unavailable or empty)
+    logger.info("get_full_graph: falling back to SQLite")
 
-    # Calculate "richness" score: count non-null attributes
+    # Optimize for demo: prioritize artifacts with rich metadata
     richness_expr = (
         func.coalesce(case((Artifact.era != None, 1), else_=0), 0) +
         func.coalesce(case((Artifact.category != None, 1), else_=0), 0) +
@@ -420,26 +774,7 @@ def get_full_graph(
 
     nodes_dict, links_dict = build_graph_from_artifacts(artifacts)
 
-    # Optionally merge Neo4j entities (if data exists and improves the graph)
-    driver = _get_neo4j_driver()
-    if _check_neo4j_has_data(driver):
-        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=limit)
-        if neo4j_nodes:
-            # Merge Neo4j data into the SQLite base graph
-            for node in neo4j_nodes:
-                if node.id not in nodes_dict:
-                    nodes_dict[node.id] = node
-            for link in neo4j_links:
-                link_key = f"{link.source}->{link.target}"
-                if link_key not in links_dict:
-                    links_dict[link_key] = link
-            logger.info("get_full_graph: merged %d Neo4j nodes into SQLite base", len(neo4j_nodes))
-
-    # Skip LightRAG KV Store - it produces poor quality abstract entities
-    # All entities are type "entity" with no meaningful relationships to artifacts
-
-    # Default to ALL node types to show relationships (artifact→era, etc.)
-    # This is critical for a good demo experience
+    # Default to ALL node types to show relationships
     default_types = ["artifact", "era", "category", "location", "tag"]
     effective_types = node_types if node_types else default_types
 
@@ -455,9 +790,9 @@ def search_graph(
     """
     搜索图谱节点，返回匹配节点及其多跳邻居构成的子图。
 
-    数据源策略：优先 SQLite 文物数据，Neo4j 可增强，跳过 LightRAG KV Store。
-
-    搜索范围：节点名称包含关键词。
+    数据源策略（Neo4j primary）：
+    1. Neo4j 基础层优先：搜索 source='rule' 的节点
+    2. SQLite fallback：如果 Neo4j 不可用或无数据
 
     Args:
         db: 数据库会话
@@ -470,50 +805,20 @@ def search_graph(
     """
     driver = _get_neo4j_driver()
 
-    # Try Neo4j first (if it has data, semantic entities are valuable for search)
-    if _check_neo4j_has_data(driver):
-        neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=50, keyword=keyword)
-        if neo4j_nodes:
-            logger.info("search_graph: found %d nodes in Neo4j for keyword '%s'", len(neo4j_nodes), keyword)
-            # Collect matched node IDs
-            matched_ids = {n.id for n in neo4j_nodes}
-            matched_count = len(matched_ids)
+    # Try Neo4j base layer first (primary)
+    if _check_neo4j_has_base_layer(driver):
+        nodes, links, matched_count = _search_neo4j_base_layer(
+            driver, keyword, node_types=node_types, depth=depth
+        )
+        if nodes:
+            logger.info("search_graph: Neo4j found %d nodes for '%s'", matched_count, keyword)
+            return nodes, links, matched_count
 
-            # Multi-hop neighbor expansion
-            result_node_ids: Set[str] = set(matched_ids)
-            result_links: List[GraphLink] = []
-
-            # Build link lookup for expansion
-            neo4j_link_set = list(neo4j_links)
-
-            for _ in range(depth):
-                new_ids: Set[str] = set()
-                for link in neo4j_link_set:
-                    src_in = link.source in result_node_ids
-                    tgt_in = link.target in result_node_ids
-                    if src_in and not tgt_in:
-                        new_ids.add(link.target)
-                        result_links.append(link)
-                    elif tgt_in and not src_in:
-                        new_ids.add(link.source)
-                        result_links.append(link)
-                    elif src_in and tgt_in:
-                        # Both ends in result, add the link if not already added
-                        if link not in result_links:
-                            result_links.append(link)
-                result_node_ids.update(new_ids)
-
-            nodes_dict = {n.id: n for n in neo4j_nodes}
-            result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
-            return result_nodes, result_links, matched_count
-
-    # Skip LightRAG KV Store — it produces poor quality entities
-
-    # SQLite search — primary fallback
-    logger.info("search_graph: searching SQLite for '%s' (depth=%d)", keyword, depth)
+    # SQLite fallback
+    logger.info("search_graph: falling back to SQLite for '%s' (depth=%d)", keyword, depth)
     default_types = ["artifact", "era", "category", "location", "tag"]
     types = node_types if node_types else default_types
-    # DB-level filtering — only load matching artifacts
+
     search_term = f"%{keyword}%"
     matched_artifacts = (
         db.query(Artifact)
@@ -530,14 +835,12 @@ def search_graph(
     if not matched_artifacts:
         return [], [], 0
 
-    # For multi-hop expansion, we need the full graph to find neighbors
-    # Load all artifacts to build the complete graph structure
+    # For multi-hop expansion, load all artifacts
     all_artifacts = db.query(Artifact).all()
     nodes_dict, links_dict = build_graph_from_artifacts(all_artifacts)
 
     keyword_lower = keyword.lower()
 
-    # Find matched node IDs by name
     matched_node_ids: Set[str] = set()
     for nid, node in nodes_dict.items():
         if keyword_lower in node.name.lower():
@@ -587,51 +890,64 @@ def get_node_detail(
     """
     获取单个节点的详情及其直接关系和邻居。
 
-    只加载与目标节点相关的文物，避免全表扫描。
+    数据源策略（Neo4j primary）：
+    1. Neo4j 基础层优先：查询 source='rule' 的节点
+    2. SQLite fallback：如果 Neo4j 不可用或无数据
     """
+    # Try Neo4j first
+    driver = _get_neo4j_driver()
+    if _check_neo4j_has_base_layer(driver):
+        result = _get_node_detail_from_neo4j(driver, node_id)
+        if result:
+            logger.info("get_node_detail: found node '%s' in Neo4j", node_id)
+            return result
+
+    # SQLite fallback
+    logger.info("get_node_detail: falling back to SQLite for '%s'", node_id)
+
     # Parse node_id to determine type and value
-    if node_id.startswith("artifact_"):
-        # Direct artifact — load just that one
+    # Support both SQLite format (artifact_123) and Neo4j format (artifact:123)
+    if node_id.startswith("artifact:") or node_id.startswith("artifact_"):
         try:
-            art_id = int(node_id.split("_", 1)[1])
+            art_id = int(node_id.split(":", 1)[1] if ":" in node_id else node_id.split("_", 1)[1])
         except (ValueError, IndexError):
             return None
         artifacts = db.query(Artifact).filter(Artifact.id == art_id).all()
-    elif node_id.startswith("era_"):
-        era_val = node_id[4:]
+    elif node_id.startswith("era:") or node_id.startswith("era_"):
+        era_val = node_id.split(":", 1)[1] if ":" in node_id else node_id[4:]
         artifacts = db.query(Artifact).filter(Artifact.era == era_val).all()
-    elif node_id.startswith("cat_"):
-        cat_val = node_id[4:]
+    elif node_id.startswith("category:") or node_id.startswith("cat_"):
+        cat_val = node_id.split(":", 1)[1] if ":" in node_id else node_id[4:]
         artifacts = db.query(Artifact).filter(Artifact.category == cat_val).all()
-    elif node_id.startswith("loc_"):
-        loc_val = node_id[4:]
+    elif node_id.startswith("location:") or node_id.startswith("loc_"):
+        loc_val = node_id.split(":", 1)[1] if ":" in node_id else node_id[4:]
         artifacts = db.query(Artifact).filter(Artifact.location == loc_val).all()
-    elif node_id.startswith("tag_"):
-        tag_val = node_id[4:]
-        artifacts = (
-            db.query(Artifact).filter(Artifact.tags.ilike(f"%{tag_val}%")).all()
-        )
+    elif node_id.startswith("tag:") or node_id.startswith("tag_"):
+        tag_val = node_id.split(":", 1)[1] if ":" in node_id else node_id[4:]
+        artifacts = db.query(Artifact).filter(Artifact.tags.ilike(f"%{tag_val}%")).all()
     else:
         return None
 
     nodes_dict, links_dict = build_graph_from_artifacts(artifacts)
 
-    if node_id not in nodes_dict:
+    # Convert Neo4j-style ID to SQLite-style if needed
+    sqlite_node_id = node_id.replace(":", "_") if ":" in node_id else node_id
+
+    if sqlite_node_id not in nodes_dict:
         return None
 
-    node = nodes_dict[node_id]
+    node = nodes_dict[sqlite_node_id]
 
-    # Collect directly related edges and neighbors
     related_links: List[GraphLink] = []
     neighbor_ids: Set[str] = set()
 
     for link in links_dict.values():
-        if link.source == node_id or link.target == node_id:
+        if link.source == sqlite_node_id or link.target == sqlite_node_id:
             related_links.append(link)
             neighbor_ids.add(link.source)
             neighbor_ids.add(link.target)
 
-    neighbor_ids.discard(node_id)
+    neighbor_ids.discard(sqlite_node_id)
     neighbors = [nodes_dict[nid] for nid in neighbor_ids if nid in nodes_dict]
 
     return node, related_links, neighbors
