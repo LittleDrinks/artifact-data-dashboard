@@ -90,6 +90,8 @@ export default function Chat() {
   // RAG side panel
   const [ragVisible, setRagVisible] = useState(false);
   const [ragToolLoading, setRagToolLoading] = useState(false);
+  // Which tool call index the panel is showing (-1 = auto = last one)
+  const [panelToolCallIdx, setPanelToolCallIdx] = useState<number>(-1);
   // Thinking section expansion state (per round, format: "msgId:roundIdx")
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
 
@@ -281,6 +283,7 @@ export default function Chat() {
     setMessages([]);
     setRagToolLoading(false);
     setRagVisible(false);
+    setPanelToolCallIdx(-1);
     inputRef.current?.focus();
   }, []);
 
@@ -594,7 +597,9 @@ export default function Chat() {
 
       // 2. Render tool call i (if exists)
       if (toolCall) {
+        const isPanelSelected = ragVisible && (panelToolCallIdx === i || (panelToolCallIdx < 0 && i === msg.toolCalls.length - 1));
         const handleClick = () => {
+          setPanelToolCallIdx(i);
           setRagVisible(true);
         };
 
@@ -608,8 +613,8 @@ export default function Chat() {
               alignItems: 'center',
               gap: 8,
               padding: '8px 12px',
-              background: '#f6f9fc',
-              border: '1px solid #e5edf5',
+              background: isPanelSelected ? 'rgba(83,58,253,0.08)' : '#f6f9fc',
+              border: isPanelSelected ? '1px solid #b9b9f9' : '1px solid #e5edf5',
               borderRadius: 8,
               fontSize: 12,
               cursor: 'pointer',
@@ -620,8 +625,10 @@ export default function Chat() {
               (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.04)';
             }}
             onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
-              (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
+              if (!isPanelSelected) {
+                (e.currentTarget as HTMLElement).style.borderColor = '#e5edf5';
+                (e.currentTarget as HTMLElement).style.background = '#f6f9fc';
+              }
             }}
           >
             <span
@@ -1065,8 +1072,10 @@ export default function Chat() {
                 );
               }
 
-              // Only show the LAST tool call in the panel
-              const lastTc = allToolCalls[allToolCalls.length - 1];
+              // Show the tool call selected by user (panelToolCallIdx), or last one if auto
+              const lastTc = panelToolCallIdx >= 0 && panelToolCallIdx < allToolCalls.length
+                ? allToolCalls[panelToolCallIdx]
+                : allToolCalls[allToolCalls.length - 1];
               if (!lastTc) {
                 return (
                   <div
