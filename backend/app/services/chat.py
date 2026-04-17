@@ -442,10 +442,15 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                         fn_args_str[:200],
                     )
 
-                # Emit tool_call_start
+                # Emit tool_call_start with a human-readable query
+                display_query = (
+                    fn_args.get("keyword", "")
+                    or fn_args.get("artifact_id", "")
+                    or fn_args_str[:100]
+                )
                 yield _sse_event("tool_call_start", {
                     "tool": fn_name,
-                    "query": fn_args.get("keyword", fn_args_str[:100]),
+                    "query": str(display_query),
                 })
 
                 # Execute tool
@@ -462,7 +467,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                 if fn_name == "get_artifact_detail":
                     yield _sse_event("tool_call_result", {
                         "tool": fn_name,
-                        "query": str(fn_args.get("artifact_id", "")),
+                        "query": result.get("name", str(fn_args.get("artifact_id", ""))),
                         "artifact_detail": result,  # Send full artifact detail
                         "count": 1 if "error" not in result else 0,
                         "elapsed": round(time.time(), 2),

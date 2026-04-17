@@ -99,6 +99,7 @@ export default function Chat() {
   const isAtBottomRef = useRef(true);
   const prevMsgCountRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const skipAutoRestoreRef = useRef(false);
 
   // Abort any in-flight SSE request on unmount
   useEffect(() => {
@@ -229,6 +230,7 @@ export default function Chat() {
       abortControllerRef.current = null;
       setLoading(false);
 
+      skipAutoRestoreRef.current = false;
       setActiveSessionId(session.id);
       setSelectedIds(new Set());
       setHistoryVisible(false);
@@ -241,9 +243,10 @@ export default function Chat() {
 
   // ── Auto-restore session on mount (Bug 1 fix) ──
   // When navigating back from artifact detail, auto-select the most recent session
+  // But NOT when user explicitly clicked "新对话" (skipAutoRestoreRef)
   useEffect(() => {
+    if (skipAutoRestoreRef.current) return;
     if (sessions.length > 0 && activeSessionId === null && !loading) {
-      // Auto-select the most recent session (first in the list, sorted by created_at desc)
       handleSelectSession(sessions[0]);
     }
   }, [sessions, activeSessionId, loading, handleSelectSession]);
@@ -273,6 +276,7 @@ export default function Chat() {
     abortControllerRef.current = null;
     setLoading(false);
 
+    skipAutoRestoreRef.current = true;
     setActiveSessionId(null);
     setMessages([]);
     setRagToolLoading(false);
@@ -468,8 +472,9 @@ export default function Chat() {
               ),
             );
             setRagToolLoading(false);
-            // Don't call loadSessions() here - it triggers auto-restore race condition
-            // Sessions list will be updated when user explicitly opens history drawer
+            // Refresh sessions list so new conversation appears in history
+            // skipAutoRestoreRef prevents auto-restore race condition
+            loadSessions();
             setLoading(false);
             break;
 
