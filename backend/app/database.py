@@ -51,7 +51,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def _ensure_admin_user():
-    """Create a default admin user if one does not already exist."""
+    """Create a default admin user if one does not already exist, or fix role if wrong."""
     import os
 
     from app.models.user import User
@@ -61,6 +61,7 @@ def _ensure_admin_user():
     try:
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
+            # Create new admin user
             default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
             admin = User(
                 username="admin",
@@ -69,6 +70,10 @@ def _ensure_admin_user():
                 role="admin",
             )
             db.add(admin)
+            db.commit()
+        elif admin.role != "admin":
+            # Fix existing admin user with wrong role
+            admin.role = "admin"
             db.commit()
     finally:
         db.close()
