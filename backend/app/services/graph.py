@@ -413,13 +413,23 @@ def search_graph(
     db: Session,
     keyword: str,
     node_types: Optional[List[str]] = None,
-) -> Tuple[List[GraphNode], List[GraphLink]]:
+    depth: int = 1,
+) -> Tuple[List[GraphNode], List[GraphLink], int]:
     """
-    搜索图谱节点，返回匹配节点及其一跳邻居构成的子图。
+    搜索图谱节点，返回匹配节点及其多跳邻居构成的子图。
 
     数据源策略：优先 SQLite 文物数据，Neo4j 可增强，跳过 LightRAG KV Store。
 
     搜索范围：节点名称包含关键词。
+
+    Args:
+        db: 数据库会话
+        keyword: 搜索关键词
+        node_types: 节点类型过滤列表
+        depth: 邻居扩展层级（1=一跳，2=两跳）
+
+    Returns:
+        (nodes_list, links_list, matched_count) — matched_count 为直接匹配的节点数量
     """
     driver = _get_neo4j_driver()
 
@@ -428,26 +438,42 @@ def search_graph(
         neo4j_nodes, neo4j_links = _query_neo4j_entities(driver, limit=50, keyword=keyword)
         if neo4j_nodes:
             logger.info("search_graph: found %d nodes in Neo4j for keyword '%s'", len(neo4j_nodes), keyword)
-            # Collect one-hop neighbors
+            # Collect matched node IDs
             matched_ids = {n.id for n in neo4j_nodes}
-            result_node_ids: Set[str] = set(matched_ids)
-            result_link_keys: Set[str] = set()
+            matched_count = len(matched_ids)
 
-            for link in neo4j_links:
-                if link.source in matched_ids or link.target in matched_ids:
-                    result_node_ids.add(link.source)
-                    result_node_ids.add(link.target)
-                    result_link_keys.add(link.source + "->" + link.target)
+            # Multi-hop neighbor expansion
+            result_node_ids: Set[str] = set(matched_ids)
+            result_links: List[GraphLink] = []
+
+            # Build link lookup for expansion
+            neo4j_link_set = list(neo4j_links)
+
+            for _ in range(depth):
+                new_ids: Set[str] = set()
+                for link in neo4j_link_set:
+                    src_in = link.source in result_node_ids
+                    tgt_in = link.target in result_node_ids
+                    if src_in and not tgt_in:
+                        new_ids.add(link.target)
+                        result_links.append(link)
+                    elif tgt_in and not src_in:
+                        new_ids.add(link.source)
+                        result_links.append(link)
+                    elif src_in and tgt_in:
+                        # Both ends in result, add the link if not already added
+                        if link not in result_links:
+                            result_links.append(link)
+                result_node_ids.update(new_ids)
 
             nodes_dict = {n.id: n for n in neo4j_nodes}
             result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
-            result_links = [l for l in neo4j_links if l.source + "->" + l.target in result_link_keys]
-            return result_nodes, result_links
+            return result_nodes, result_links, matched_count
 
     # Skip LightRAG KV Store — it produces poor quality entities
 
     # SQLite search — primary fallback
-    logger.info("search_graph: searching SQLite for '%s'", keyword)
+    logger.info("search_graph: searching SQLite for '%s' (depth=%d)", keyword, depth)
     default_types = ["artifact", "era", "category", "location", "tag"]
     types = node_types if node_types else default_types
     # DB-level filtering — only load matching artifacts
@@ -465,32 +491,12 @@ def search_graph(
     )
 
     if not matched_artifacts:
-        return [], []
+        return [], [], 0
 
-    # Also load artifacts that share era/category/location/tags with matches
-    eras = {a.era for a in matched_artifacts if a.era}
-    categories = {a.category for a in matched_artifacts if a.category}
-    locations = {a.location for a in matched_artifacts if a.location}
-
-    related_artifacts = (
-        db.query(Artifact)
-        .filter(
-            (Artifact.era.in_(eras) if eras else False)
-            | (Artifact.category.in_(categories) if categories else False)
-            | (Artifact.location.in_(locations) if locations else False)
-        )
-        .all()
-    ) if (eras or categories or locations) else []
-
-    # Merge and deduplicate
-    all_ids = {a.id for a in matched_artifacts}
-    all_arts = list(matched_artifacts)
-    for a in related_artifacts:
-        if a.id not in all_ids:
-            all_ids.add(a.id)
-            all_arts.append(a)
-
-    nodes_dict, links_dict = build_graph_from_artifacts(all_arts)
+    # For multi-hop expansion, we need the full graph to find neighbors
+    # Load all artifacts to build the complete graph structure
+    all_artifacts = db.query(Artifact).all()
+    nodes_dict, links_dict = build_graph_from_artifacts(all_artifacts)
 
     keyword_lower = keyword.lower()
 
@@ -500,28 +506,41 @@ def search_graph(
         if keyword_lower in node.name.lower():
             matched_node_ids.add(nid)
 
+    matched_count = len(matched_node_ids)
+
     if not matched_node_ids:
-        return _filter_graph_by_types(nodes_dict, links_dict, types)
+        return _filter_graph_by_types(nodes_dict, links_dict, types), 0
 
-    # Collect one-hop neighbors
+    # Multi-hop neighbor expansion
     result_node_ids: Set[str] = set(matched_node_ids)
-    result_link_keys: Set[str] = set()
+    result_links: List[GraphLink] = []
+    all_links_list = list(links_dict.values())
 
-    for link_key, link in links_dict.items():
-        if link.source in matched_node_ids or link.target in matched_node_ids:
-            result_node_ids.add(link.source)
-            result_node_ids.add(link.target)
-            result_link_keys.add(link_key)
+    for _ in range(depth):
+        new_ids: Set[str] = set()
+        for link in all_links_list:
+            src_in = link.source in result_node_ids
+            tgt_in = link.target in result_node_ids
+            if src_in and not tgt_in:
+                new_ids.add(link.target)
+                result_links.append(link)
+            elif tgt_in and not src_in:
+                new_ids.add(link.source)
+                result_links.append(link)
+            elif src_in and tgt_in:
+                # Both ends in result, add the link if not already added
+                if link not in result_links:
+                    result_links.append(link)
+        result_node_ids.update(new_ids)
 
     # Apply type filter
     allowed = set(types)
-    result_node_ids = {nid for nid in result_node_ids if nid in nodes_dict and nodes_dict[nid].type in allowed}
-    result_link_keys = {lk for lk in result_link_keys if links_dict[lk].source in result_node_ids and links_dict[lk].target in result_node_ids}
+    filtered_node_ids = {nid for nid in result_node_ids if nid in nodes_dict and nodes_dict[nid].type in allowed}
+    filtered_links = [l for l in result_links if l.source in filtered_node_ids and l.target in filtered_node_ids]
 
-    result_nodes = [nodes_dict[nid] for nid in result_node_ids if nid in nodes_dict]
-    result_links = [links_dict[lk] for lk in result_link_keys if lk in links_dict]
+    result_nodes = [nodes_dict[nid] for nid in filtered_node_ids if nid in nodes_dict]
 
-    return result_nodes, result_links
+    return result_nodes, filtered_links, matched_count
 
 
 def get_node_detail(

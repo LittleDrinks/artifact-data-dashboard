@@ -15,6 +15,7 @@ import {
   Checkbox,
   message,
   Tooltip,
+  Radio,
 } from 'antd';
 import {
   SearchOutlined,
@@ -102,6 +103,8 @@ export default function Graph() {
   const [nodeLimit, setNodeLimit] = useState(100);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [activeSearchKeyword, setActiveSearchKeyword] = useState('');
+  const [searchDepth, setSearchDepth] = useState(1);
+  const [matchedNodeIds, setMatchedNodeIds] = useState<Set<string>>(new Set());
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -139,21 +142,31 @@ export default function Graph() {
   const handleSearch = useCallback(async () => {
     if (!searchKeyword.trim()) {
       setActiveSearchKeyword('');
+      setMatchedNodeIds(new Set());
       fetchGraph(nodeLimit);
       return;
     }
     setLoading(true);
     setActiveSearchKeyword(searchKeyword.trim());
     try {
-      const data = await searchGraph(searchKeyword.trim(), Array.from(visibleTypes));
+      const data = await searchGraph(searchKeyword.trim(), Array.from(visibleTypes), searchDepth);
       setGraphData(data);
       setSelectedNode(null);
+      // Identify matched nodes (nodes whose name contains the keyword)
+      const kw = searchKeyword.trim().toLowerCase();
+      const matchedIds = new Set<string>();
+      data.nodes.forEach((n) => {
+        if (n.name.toLowerCase().includes(kw)) {
+          matchedIds.add(n.id);
+        }
+      });
+      setMatchedNodeIds(matchedIds);
     } catch {
       message.error('搜索失败');
     } finally {
       setLoading(false);
     }
-  }, [searchKeyword, nodeLimit, fetchGraph, visibleTypes]);
+  }, [searchKeyword, searchDepth, nodeLimit, fetchGraph, visibleTypes]);
 
   const handleNodeClick = useCallback(async (nodeId: string) => {
     setDetailLoading(true);
@@ -174,8 +187,19 @@ export default function Graph() {
       setSearchKeyword(searchParam);
       setActiveSearchKeyword(searchParam);
       setLoading(true);
-      searchGraph(searchParam, Array.from(visibleTypes))
-        .then(setGraphData)
+      searchGraph(searchParam, Array.from(visibleTypes), searchDepth)
+        .then((data) => {
+          setGraphData(data);
+          // Identify matched nodes
+          const kw = searchParam.toLowerCase();
+          const matchedIds = new Set<string>();
+          data.nodes.forEach((n) => {
+            if (n.name.toLowerCase().includes(kw)) {
+              matchedIds.add(n.id);
+            }
+          });
+          setMatchedNodeIds(matchedIds);
+        })
         .catch(() => message.error('搜索失败'))
         .finally(() => setLoading(false));
     } else {
@@ -360,30 +384,26 @@ export default function Graph() {
       .attr('fill', (d) => resolveColor(d.type))
       .attr('stroke', (d) => {
         if (!activeSearchKeyword) return '#fff';
-        const kw = activeSearchKeyword.toLowerCase();
-        const match = d.name.toLowerCase().includes(kw) ||
-          (d.properties && Object.values(d.properties).some(
-            (v) => v != null && String(v).toLowerCase().includes(kw)
-          ));
-        return match ? '#533afd' : '#fff';
+        // Matched nodes get red border, neighbors get normal border
+        if (matchedNodeIds.has(d.id)) {
+          return '#ff6b6b'; // Red for matched nodes
+        }
+        return '#fff';
       })
       .attr('stroke-width', (d) => {
         if (!activeSearchKeyword) return 2;
-        const kw = activeSearchKeyword.toLowerCase();
-        const match = d.name.toLowerCase().includes(kw) ||
-          (d.properties && Object.values(d.properties).some(
-            (v) => v != null && String(v).toLowerCase().includes(kw)
-          ));
-        return match ? 3 : 2;
+        if (matchedNodeIds.has(d.id)) {
+          return 4; // Thicker border for matched nodes
+        }
+        return 2;
       })
       .attr('opacity', (d) => {
         if (!activeSearchKeyword) return 1;
-        const kw = activeSearchKeyword.toLowerCase();
-        const match = d.name.toLowerCase().includes(kw) ||
-          (d.properties && Object.values(d.properties).some(
-            (v) => v != null && String(v).toLowerCase().includes(kw)
-          ));
-        return match ? 1 : 0.3;
+        // Matched nodes fully visible, neighbors slightly dimmed
+        if (matchedNodeIds.has(d.id)) {
+          return 1;
+        }
+        return 0.6;
       });
 
     // Node labels
@@ -397,12 +417,10 @@ export default function Graph() {
       .attr('font-weight', 400)
       .attr('opacity', (d) => {
         if (!activeSearchKeyword) return 1;
-        const kw = activeSearchKeyword.toLowerCase();
-        const match = d.name.toLowerCase().includes(kw) ||
-          (d.properties && Object.values(d.properties).some(
-            (v) => v != null && String(v).toLowerCase().includes(kw)
-          ));
-        return match ? 1 : 0.3;
+        if (matchedNodeIds.has(d.id)) {
+          return 1;
+        }
+        return 0.6;
       })
       .style('pointer-events', 'none')
       .style('user-select', 'none');
@@ -449,7 +467,7 @@ export default function Graph() {
       simulation.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData]);
+  }, [graphData, activeSearchKeyword, matchedNodeIds]);
 
   /* ── Update force params without re-rendering the whole graph ── */
   useEffect(() => {
@@ -665,6 +683,45 @@ export default function Graph() {
             enterButton
             allowClear
           />
+          <div
+            style={{
+              marginTop: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              展开层级:
+            </span>
+            <Radio.Group
+              value={searchDepth}
+              onChange={(e) => setSearchDepth(e.target.value)}
+              size="small"
+              optionType="button"
+              buttonStyle="solid"
+            >
+              <Radio.Button value={1}>1级</Radio.Button>
+              <Radio.Button value={2}>2级</Radio.Button>
+            </Radio.Group>
+          </div>
+          {activeSearchKeyword && graphData && (
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: 'var(--text-muted)',
+              }}
+            >
+              找到 <strong style={{ color: '#ff6b6b' }}>{matchedNodeIds.size}</strong> 个匹配
+              {graphData.nodes.length - matchedNodeIds.size > 0 && (
+                <span>
+                  ，<strong>{graphData.nodes.length - matchedNodeIds.size}</strong> 个关联节点
+                </span>
+              )}
+              ，<strong>{graphData.total_links}</strong> 条关系
+            </div>
+          )}
           <Button
             type="link"
             size="small"
@@ -672,6 +729,7 @@ export default function Graph() {
             onClick={() => {
               setSearchKeyword('');
               setActiveSearchKeyword('');
+              setMatchedNodeIds(new Set());
               fetchGraph(nodeLimit);
             }}
           >

@@ -41,13 +41,14 @@ export async function getFullGraph(
   return res.data;
 }
 
-/** 搜索图谱节点（返回匹配节点及一跳邻居子图） */
+/** 搜索图谱节点（返回匹配节点及多跳邻居子图） */
 export async function searchGraph(
   keyword: string,
   nodeTypes: string[] = ['artifact'],
+  depth: number = 1,
 ): Promise<GraphDataResponse> {
   const res = await client.get<GraphDataResponse>('/graph/search', {
-    params: { keyword, node_types: nodeTypes.join(',') },
+    params: { keyword, node_types: nodeTypes.join(','), depth },
   });
   return res.data;
 }

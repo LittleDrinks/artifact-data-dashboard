@@ -43,11 +43,12 @@ def search_graph(
         "artifact,era,category,location,tag",
         description="逗号分隔的节点类型",
     ),
+    depth: int = Query(1, ge=1, le=2, description="邻居扩展层级（1=一跳，2=两跳）"),
     db: Session = Depends(get_db),
 ):
-    """搜索图谱节点，返回匹配节点及其一跳邻居构成的子图"""
+    """搜索图谱节点，返回匹配节点及其多跳邻居构成的子图"""
     types = [t.strip() for t in node_types.split(",") if t.strip()] if node_types else ["artifact"]
-    nodes, links = graph_service.search_graph(db, keyword=keyword, node_types=types)
+    nodes, links, matched_count = graph_service.search_graph(db, keyword=keyword, node_types=types, depth=depth)
     return GraphDataResponse(
         nodes=nodes,
         links=links,
