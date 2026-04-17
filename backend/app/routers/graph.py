@@ -1,8 +1,10 @@
 """知识图谱路由 — 图谱数据查询 API"""
 
+import asyncio
 import csv
 import io
 import logging
+import threading
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -12,8 +14,12 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.schemas.graph import GraphDataResponse, NodeDetailResponse, ImportResponse
+from app.schemas.graph import (
+    GraphDataResponse, NodeDetailResponse, ImportResponse,
+    ExtractRequest, ExtractResponse, ExtractedEntity, ExtractedRelation,
+)
 from app.services import graph as graph_service
+from app.ai.lightrag_service import get_lightrag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -262,4 +268,131 @@ async def import_graph_csv(
         raise HTTPException(
             status_code=500,
             detail=f"Neo4j 导入失败: {str(e)}"
+        )
+
+
+@router.post("/extract", response_model=ExtractResponse)
+def extract_triples(
+    request: ExtractRequest,
+):
+    """LightRAG 增量提取 API — 从文本中提取实体和关系并存入 Neo4j
+
+    流程：
+    1. 初始化 LightRAG 服务
+    2. 调用 rag.ainsert(text) 进行提取
+    3. 查询 Neo4j 获取新提取的实体和关系
+    4. 返回结构化结果
+
+    超时：120 秒
+    """
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="文本内容不能为空")
+
+    # Get LightRAG service
+    rag_service = get_lightrag_service()
+    if rag_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LightRAG 服务不可用 — 请检查 Ollama 是否运行"
+        )
+
+    # Run LightRAG insert in background thread with timeout
+    result_container = {"success": False, "error": None}
+    thread_started = threading.Event()
+    thread_completed = threading.Event()
+
+    def run_insert():
+        try:
+            thread_started.set()
+            asyncio.run(rag_service.ainsert([request.text]))
+            result_container["success"] = True
+        except Exception as e:
+            result_container["error"] = str(e)
+        thread_completed.set()
+
+    insert_thread = threading.Thread(target=run_insert)
+    insert_thread.start()
+
+    # Wait for thread to start (gives us confidence it's running)
+    thread_started.wait(timeout=5)
+
+    # Wait for completion with timeout
+    if not thread_completed.wait(timeout=120):
+        # Timeout
+        raise HTTPException(
+            status_code=504,
+            detail="LightRAG 提取超时（120秒）— 文本可能过长"
+        )
+
+    if not result_container["success"]:
+        error_msg = result_container["error"] or "未知错误"
+        raise HTTPException(
+            status_code=500,
+            detail=f"LightRAG 提取失败: {error_msg}"
+        )
+
+    # Query Neo4j for newly added entities (LightRAG stores with entity_name property)
+    try:
+        driver = GraphDatabase.driver(
+            settings.NEO4J_URI,
+            auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+        )
+
+        entities: List[ExtractedEntity] = []
+        relations: List[ExtractedRelation] = []
+
+        with driver.session() as session:
+            # Query entities (LightRAG uses entity_name, entity_type properties)
+            entity_query = """
+                MATCH (e)
+                WHERE e.entity_name IS NOT NULL AND e.entity_type IS NOT NULL
+                AND NOT e.source IN ['rule', 'csv_import']
+                RETURN e.entity_name AS name, e.entity_type AS type, e.description AS desc
+                ORDER BY e.entity_name
+                LIMIT 100
+            """
+            entity_result = session.run(entity_query)
+            for record in entity_result:
+                entities.append(ExtractedEntity(
+                    entity_name=record.get("name", ""),
+                    entity_type=record.get("type", "unknown"),
+                    description=record.get("desc"),
+                ))
+
+            # Query relations (LightRAG stores relations between entity_name nodes)
+            rel_query = """
+                MATCH (a)-[r]->(b)
+                WHERE a.entity_name IS NOT NULL AND b.entity_name IS NOT NULL
+                AND NOT r.source IN ['rule', 'csv_import']
+                RETURN a.entity_name AS src, b.entity_name AS tgt, type(r) AS rel
+                ORDER BY a.entity_name
+                LIMIT 100
+            """
+            rel_result = session.run(rel_query)
+            for record in rel_result:
+                relations.append(ExtractedRelation(
+                    src_name=record.get("src", ""),
+                    tgt_name=record.get("tgt", ""),
+                    relation=record.get("rel", "related"),
+                ))
+
+        driver.close()
+
+        return ExtractResponse(
+            success=True,
+            entities=entities,
+            relations=relations,
+            count=len(entities) + len(relations),
+            message=f"提取完成，获得 {len(entities)} 个实体和 {len(relations)} 个关系",
+        )
+
+    except Exception as e:
+        logger.warning("Neo4j query for extracted entities failed: %s", e)
+        # LightRAG insert succeeded, but Neo4j query failed
+        return ExtractResponse(
+            success=True,
+            entities=[],
+            relations=[],
+            count=0,
+            message=f"LightRAG 提取成功，但无法从 Neo4j 查询结果: {str(e)}",
         )
