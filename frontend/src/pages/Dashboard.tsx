@@ -5,7 +5,8 @@ import {
   EnvironmentOutlined,
   TagOutlined,
 } from '@ant-design/icons';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import * as d3 from 'd3';
 import {
   getOverview,
   getStatsByEra,
@@ -456,67 +457,146 @@ function CategoryPieChart({
   );
 }
 
-/* ── Word Cloud: CSS implementation ── */
+/* ── Word Cloud: D3 Force-based implementation ── */
+
+interface WordNode {
+  word: string;
+  weight: number;
+  x: number;
+  y: number;
+  fontSize: number;
+  color: string;
+  width: number;
+  height: number;
+  placed: boolean;
+}
+
+const WORD_COLORS = [
+  '#533afd', '#6366f1', '#2874ad', '#3d8b37',
+  '#0ea5e9', '#10b981', '#9a6324', '#f59e0b',
+  '#c45100', '#ec4899',
+];
 
 function WordCloud({ data }: { data: WordCloudItem[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 180 });
+  const [words, setWords] = useState<WordNode[]>([]);
+  const [hoveredWord, setHoveredWord] = useState<string | null>(null);
+
+  // Measure container dimensions
+  useEffect(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setDimensions({ width: rect.width || 600, height: 180 });
+    }
+  }, []);
+
+  // Compute word layout using force simulation
+  const computeLayout = useCallback((inputData: WordCloudItem[], width: number, height: number) => {
+    if (inputData.length === 0 || width === 0) return [];
+
+    const maxWeight = Math.max(...inputData.map(d => d.weight));
+    const minWeight = Math.min(...inputData.map(d => d.weight));
+    const range = maxWeight - minWeight || 1;
+
+    // Create initial nodes with font sizes
+    const nodes: WordNode[] = inputData.map((item, idx) => {
+      const ratio = (item.weight - minWeight) / range;
+      const fontSize = 12 + ratio * 36; // 12px to 48px
+      return {
+        word: item.word,
+        weight: item.weight,
+        x: width / 2 + (Math.random() - 0.5) * width * 0.8,
+        y: height / 2 + (Math.random() - 0.5) * height * 0.6,
+        fontSize,
+        color: WORD_COLORS[idx % WORD_COLORS.length],
+        width: item.word.length * fontSize * 0.6,
+        height: fontSize * 1.2,
+        placed: false,
+      };
+    });
+
+    // Use D3 force simulation for collision-free layout
+    const simulation = d3.forceSimulation(nodes)
+      .force('collision', d3.forceCollide<WordNode>()
+        .radius(d => Math.max(d.width, d.height) / 2 + 4)
+        .strength(1)
+      )
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('x', d3.forceX(width / 2).strength(0.05))
+      .force('y', d3.forceY(height / 2).strength(0.05))
+      .stop();
+
+    // Run simulation for fixed iterations
+    for (let i = 0; i < 300; i++) {
+      simulation.tick();
+    }
+
+    // Clamp positions within bounds
+    nodes.forEach(node => {
+      node.x = Math.max(node.width / 2, Math.min(width - node.width / 2, node.x));
+      node.y = Math.max(node.height / 2, Math.min(height - node.height / 2, node.y));
+      node.placed = true;
+    });
+
+    return nodes;
+  }, []);
+
+  useEffect(() => {
+    if (data.length > 0 && dimensions.width > 0) {
+      const layout = computeLayout(data, dimensions.width, dimensions.height);
+      setWords(layout);
+    }
+  }, [data, dimensions, computeLayout]);
+
+  // Handle resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDimensions({ width: rect.width || 600, height: 180 });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   if (data.length === 0) return null;
-
-  const maxWeight = Math.max(...data.map((d) => d.weight));
-  const minWeight = Math.min(...data.map((d) => d.weight));
-  const range = maxWeight - minWeight || 1;
-
-  const GRADIENT_COLORS = [
-    '#533afd', '#6366f1', '#2874ad', '#3d8b37',
-    '#0ea5e9', '#10b981', '#9a6324', '#f59e0b',
-    '#c45100', '#ec4899',
-  ];
 
   return (
     <div
+      ref={containerRef}
       style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: '8px 16px',
-        padding: '20px 0',
-        minHeight: 180,
+        position: 'relative',
+        width: '100%',
+        height: dimensions.height,
+        overflow: 'hidden',
       }}
     >
-      {data.map((item, idx) => {
-        const ratio = (item.weight - minWeight) / range;
-        const fontSize = 13 + ratio * 22;
-        const fontWeight = Math.round(300 + ratio * 400); // 300–700
-        const color = GRADIENT_COLORS[idx % GRADIENT_COLORS.length];
-        return (
-          <AntTooltip key={item.word} title={`词频: ${item.weight}`}>
-            <span
-              style={{
-                fontSize,
-                color,
-                fontWeight,
-                cursor: 'default',
-                transition: 'transform 0.2s, opacity 0.2s',
-                lineHeight: 1.5,
-                padding: '2px 4px',
-                opacity: 0.85,
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLElement;
-                el.style.transform = 'scale(1.18)';
-                el.style.opacity = '1';
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLElement;
-                el.style.transform = 'scale(1)';
-                el.style.opacity = '0.85';
-              }}
-            >
-              {item.word}
-            </span>
-          </AntTooltip>
-        );
-      })}
+      {words.map((node) => (
+        <AntTooltip key={node.word} title={`词频: ${node.weight}`}>
+          <span
+            style={{
+              position: 'absolute',
+              left: node.x - node.width / 2,
+              top: node.y - node.height / 2,
+              fontSize: node.fontSize,
+              fontWeight: node.fontSize > 24 ? 600 : 400,
+              color: node.color,
+              cursor: 'default',
+              transition: 'transform 0.2s ease, opacity 0.2s ease',
+              transform: hoveredWord === node.word ? 'scale(1.2)' : 'scale(1)',
+              opacity: hoveredWord === node.word ? 1 : 0.85,
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+            }}
+            onMouseEnter={() => setHoveredWord(node.word)}
+            onMouseLeave={() => setHoveredWord(null)}
+          >
+            {node.word}
+          </span>
+        </AntTooltip>
+      ))}
     </div>
   );
 }
