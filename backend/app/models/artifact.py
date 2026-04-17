@@ -25,6 +25,7 @@ class Artifact(Base):
     museum: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # 馆藏
     source_url: Mapped[Optional[str]] = mapped_column(String(500))  # Wikipedia 来源链接
     dimensions: Mapped[Optional[str]] = mapped_column(String(100))  # 尺寸
+    related_artifacts: Mapped[Optional[str]] = mapped_column(Text)  # 关联文物（用 | 分隔）
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),
