@@ -3,6 +3,8 @@ FastAPI application entry point.
 Configures CORS, includes routers, and sets up startup/shutdown events.
 """
 
+import logging
+import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -13,6 +15,8 @@ from app.config import settings
 from app.database import init_db
 from app.routers import health, auth, artifacts, stats, graph, chat, repair
 from app.services.graph import _close_neo4j_driver
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -55,6 +59,27 @@ app.include_router(repair.router, prefix="/api/artifacts", tags=["repair"])
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch-all handler for unhandled exceptions — return 500, not traceback."""
+    # Log exception details to console
+    logger.error(
+        "Unhandled exception: %s %s - %s: %s\n%s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        str(exc),
+        traceback.format_exc(),
+    )
+    # In DEBUG mode, return exception details for debugging
+    if settings.DEBUG:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "traceback": traceback.format_exc(),
+            },
+        )
+    # Production: return generic error message (no internal info leaked)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},
