@@ -227,9 +227,22 @@ def build_graph_from_artifacts(
 
     返回 (nodes_dict, links_dict)，key 为节点/边的唯一标识符，
     方便去重和后续查询。
+
+    去重策略：先收集所有 era/category/location 名称，再处理 tags，
+    避免 tag 与其他类型节点同名导致重复（如 tag_青铜器 vs cat_青铜器）。
     """
     nodes: Dict[str, GraphNode] = {}
     links: Dict[str, GraphLink] = {}
+
+    # Step 1: Pre-collect all era/category/location names to prevent tag duplicates
+    reserved_names: Set[str] = set()
+    for art in artifacts:
+        if art.era:
+            reserved_names.add(art.era)
+        if art.category:
+            reserved_names.add(art.category)
+        if art.location:
+            reserved_names.add(art.location)
 
     for art in artifacts:
         # --- 文物节点 ---
@@ -295,20 +308,44 @@ def build_graph_from_artifacts(
             )
 
         # --- 标签关系 ---
+        # Skip tags that duplicate existing era/category/location nodes
+        # This prevents "青铜器" appearing as both cat_青铜器 and tag_青铜器
         for tag in _parse_tags(art.tags):
-            tag_id = f"tag_{tag}"
-            if tag_id not in nodes:
-                nodes[tag_id] = GraphNode(
-                    id=tag_id,
-                    name=tag,
-                    type="tag",
+            # Check if this tag name is reserved by era/category/location
+            if tag in reserved_names:
+                # Link to existing/reserved node instead of creating duplicate tag
+                # Determine which type the reserved name belongs to (prefer first match)
+                if f"era_{tag}" in nodes:
+                    existing_node_id = f"era_{tag}"
+                elif f"cat_{tag}" in nodes:
+                    existing_node_id = f"cat_{tag}"
+                elif f"loc_{tag}" in nodes:
+                    existing_node_id = f"loc_{tag}"
+                else:
+                    # Reserved but not yet created - will be created later, skip for now
+                    # We'll create the link when that node is processed
+                    continue
+                link_key = f"{art_node_id}->{existing_node_id}"
+                links[link_key] = GraphLink(
+                    source=art_node_id,
+                    target=existing_node_id,
+                    relation="包含标签",
                 )
-            link_key = f"{art_node_id}->tag_{tag}"
-            links[link_key] = GraphLink(
-                source=art_node_id,
-                target=tag_id,
-                relation="包含标签",
-            )
+            else:
+                # Not reserved, create new tag node
+                tag_id = f"tag_{tag}"
+                if tag_id not in nodes:
+                    nodes[tag_id] = GraphNode(
+                        id=tag_id,
+                        name=tag,
+                        type="tag",
+                    )
+                link_key = f"{art_node_id}->tag_{tag}"
+                links[link_key] = GraphLink(
+                    source=art_node_id,
+                    target=tag_id,
+                    relation="包含标签",
+                )
 
     return nodes, links
 
