@@ -16,7 +16,7 @@
 | 工具调用气泡 | ✅ 已重构 | **每个检索单独渲染为一个气泡**，显示查询关键词和结果数，可点击选中 |
 | RAG 面板选择 | ✅ 已重构 | **右侧面板专注显示某一轮检索结果**，多轮时顶部有切换标签 |
 | 参考来源跳转 | ✅ 已实现 | sources 包含 artifact_id，点击跳转 `/artifacts/:id` |
-| AbortController | ✅ 已实现 | 组件卸载/切换会话时取消 SSE 请求 |
+| AbortController | ✅ 已实现 | 切换会话/发送新消息时取消 SSE 请求（不在组件卸载时 abort） |
 | SSE 401 处理 | ✅ 已实现 | fetch 检测 401 后清除 token 跳转登录页 |
 
 ---
@@ -67,14 +67,18 @@
 SYSTEM_PROMPT = (
     "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。\n"
     "你可以使用以下工具来获取文物数据：\n"
-    "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库\n"
-    "2. **get_artifact_detail** — 获取指定文物的完整信息\n\n"
+    "1. **search_artifacts** — 按关键词、朝代、类别搜索文物数据库，返回文物列表\n"
+    "2. **get_artifact_detail** — 获取指定文物的完整详细信息（先用 search_artifacts 找到 ID）\n"
+    "3. **query_knowledge_graph** — 查询知识图谱中的实体和关系，适合回答概念性问题（如'青铜器有什么特点'、'商代有哪些重要文物'）\n\n"
     "回答规则：\n"
-    "- 【不调用工具的场景】如果用户只是打招呼、寒暄、问你的能力，直接友好回复，**绝对不要调用任何工具**\n"
-    "- 用户询问文物相关信息时，务必先调用工具查询数据库\n"
+    "- 【不调用工具的场景】如果用户只是打招呼（你好、嗨、hello）、寒暄、问你的能力（你能做什么/你是谁）、"
+    "或者发发表情/闲聊，直接友好回复即可，**绝对不要调用任何工具**\n"
+    "- 用户询问具体文物信息时，先用 search_artifacts 搜索，再用 get_artifact_detail 获取详情\n"
+    "- 用户询问概念性知识（特点、分类、关系）时，优先使用 query_knowledge_graph 查询图谱\n"
     "- 综合工具返回的数据回答，用编号列表和加粗标题组织内容\n"
-    "- 引用数据时标注来源\n"
-    "- 如果工具返回为空，如实告知未找到\n"
+    "- 引用数据时标注来源（如「数据库检索结果 #1」或「知识图谱」）\n"
+    "- 如果工具返回为空，如实告知未找到，并建议用户调整搜索条件\n"
+    "- 如果问题与文物无关，可以正常闲聊，但礼貌引导用户回到文物话题\n"
     "- 回答要结构清晰、准确、专业\n"
 )
 ```
@@ -166,7 +170,7 @@ SYSTEM_PROMPT = (
 | `thinking_delta` | `{content: string}` | 推理内容增量 |
 | `thinking_end` | `{}` | 推理结束 |
 | `tool_call_start` | `{tool, query}` | 工具调用开始 |
-| `tool_call_result` | `{results, count, elapsed}` | 工具调用返回 |
+| `tool_call_result` | `{tool, query, results?, artifactDetail?, entities?, relations?, count, elapsed}` | 工具调用返回（格式因工具而异） |
 | `answer_start` | `{}` | 开始生成回答 |
 | `answer_delta` | `{content: string}` | 回答内容增量 |
 | `answer_end` | `{}` | 回答结束 |
@@ -184,6 +188,46 @@ done
 ```
 
 最多 5 轮 ReAct 循环（`MAX_REACT_ROUNDS = 5`）。
+
+### 4.3 tool_call_result 事件格式（因工具而异）
+
+`tool_call_result` 的数据字段根据工具类型不同：
+
+**search_artifacts**:
+```json
+{
+  "tool": "search_artifacts",
+  "query": "青铜鼎",
+  "results": [{"id": 1, "name": "后母戊鼎", ...}],
+  "count": 5,
+  "elapsed": 0.12
+}
+```
+
+**get_artifact_detail**:
+```json
+{
+  "tool": "get_artifact_detail",
+  "query": "后母戊鼎",
+  "artifactDetail": {"id": 1, "name": "后母戊鼎", ...},
+  "count": 1,
+  "elapsed": 0.05
+}
+```
+
+**query_knowledge_graph**:
+```json
+{
+  "tool": "query_knowledge_graph",
+  "query": "青铜器",
+  "entities": [{"name": "后母戊鼎", "type": "文物"}],
+  "relations": [{"source": "后母戊鼎", "target": "商", "relation": "属于朝代"}],
+  "count": 15,
+  "elapsed": 0.08
+}
+```
+
+**位置**：`backend/app/services/chat.py:466-492`
 
 ---
 
@@ -218,36 +262,37 @@ export function sendChatMessage(
 // frontend/src/pages/Chat.tsx
 const abortControllerRef = useRef<AbortController | null>(null)
 
-// 组件卸载时 abort
-useEffect(() => {
-  return () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-  }
-}, [])
-
 // 切换会话时 abort
 const handleSelectSession = async (sessionId: number) => {
-  if (abortControllerRef.current) {
-    abortControllerRef.current.abort()
-  }
+  abortControllerRef.current?.abort()
+  abortControllerRef.current = null
+  // ...
+}
+
+// 发送新消息时 abort 上一次请求
+const handleSend = async () => {
+  abortControllerRef.current?.abort()
+  const controller = new AbortController()
+  abortControllerRef.current = controller
   // ...
 }
 ```
 
-位置：`Chat.tsx:88, 91-95, 188-189, 229-230`
+> **注意**：当前实现**不在组件卸载时 abort**。SSE 请求在用户离开 Chat 页面后仍会继续运行至完成，不会因导航而中断。这是有意为之的设计选择，避免回答未生成完时切出导致数据丢失。
+
+位置：`Chat.tsx:104, 226-227, 272-273, 319-320`
 
 ### 5.4 Thinking 展示（2026-04-17 重构）
 
-Thinking 以**可折叠区块**形式展示：
+Thinking 以**可折叠区块**形式展示，集成在 `renderReActRounds` 函数中：
 
 ```typescript
 // frontend/src/pages/Chat.tsx
 const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set())
 
-const renderThinkingSection = (msg: DisplayMessage) => {
-  // 显示"思考过程 ▸"折叠标题
+const renderReActRounds = (msg: DisplayMessage) => {
+  // 按轮次编号(roundIndex)分组渲染 thinking 和 tool call
+  // Thinking 显示为"思考过程 ▸"可折叠标题
   // 展开后显示 reasoning_content 文本
   // 思考进行中显示 LoadingOutlined
 }
@@ -261,13 +306,14 @@ const renderThinkingSection = (msg: DisplayMessage) => {
 
 ### 5.5 工具调用气泡（2026-04-17 重构）
 
-每个检索单独渲染为一个**可点击气泡**：
+每个检索单独渲染为一个**可点击气泡**，在 `renderReActRounds` 中按 `roundIndex` 分组：
 
 ```typescript
-const renderToolCallBubbles = (msg: DisplayMessage) => {
+const renderReActRounds = (msg: DisplayMessage) => {
+  // 按 roundIndex 分组 thinking 和 tool calls
   // 为每个 ToolCallEntry 渲染独立卡片
   // 卡片显示：轮次编号、🔍图标、查询关键词、结果数
-  // 点击卡片切换 RAG 面板到对应检索
+  // 点击卡片切换 RAG 面板到对应检索（setPanelToolCallIdx）
 }
 ```
 
@@ -282,13 +328,13 @@ const renderToolCallBubbles = (msg: DisplayMessage) => {
 右侧面板**专注显示某一轮检索结果**：
 
 ```typescript
-const [selectedToolCallIndex, setSelectedToolCallIndex] = useState<number>(-1)
+const [panelToolCallIdx, setPanelToolCallIdx] = useState<number>(-1)
 
 // 多轮时顶部显示切换标签
 {allToolCalls.length > 1 && (
   <div style={{ display: 'flex', gap: 6 }}>
     {allToolCalls.map((tc, idx) => (
-      <div onClick={() => setSelectedToolCallIndex(idx)}>
+      <div onClick={() => setPanelToolCallIdx(idx)}>
         第 {idx + 1} 轮
       </div>
     ))}
@@ -361,7 +407,7 @@ onClick={() => {
 
 | 标准 | 状态 | 验证方法 |
 |------|------|---------|
-| SSE 流中途断开不泄漏资源 | ✅ Pass | AbortController 实现，组件卸载/切换会话时 abort |
+| SSE 流中途断开不泄漏资源 | ✅ Pass | AbortController 实现，切换会话/发送新消息时 abort |
 | 连续发送消息不竞态 | ✅ Pass | loading 状态禁用发送按钮 |
 | 流式响应切换会话后 UI 不残留旧数据 | ✅ Pass | 切换会话时 abort + 清空 messages |
 | 用户消息和 AI 回复成对保存 | ✅ Pass | save_message 在 done 前执行 |
@@ -397,4 +443,4 @@ onClick={() => {
 
 ---
 
-*最后更新：2026-04-16*
+*最后更新：2026-04-18*

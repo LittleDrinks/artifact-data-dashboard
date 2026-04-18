@@ -246,4 +246,4 @@ class ArtifactResponse(ArtifactBase):
 
 ---
 
-*最后更新：2026-04-16*
+*最后更新：2026-04-18*

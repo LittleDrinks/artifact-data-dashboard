@@ -1,13 +1,10 @@
 """LightRAG service — singleton wrapper for building and querying the artifact knowledge graph.
 
-Supports two LLM backends:
-  - Ollama (qwen2.5:7b) — default, fully local, faster
-  - GLM-4.7 API (mydamoxing.cn) — fallback when Ollama runs out of VRAM
-
-Embedding always uses Ollama bge-m3 (~1.2 GB VRAM, stable).
+LLM: user-configured OpenAI-compatible API (base_url + api_key + model_name).
+Embedding: sentence-transformers with BAAI/bge-m3 (pure Python, no external service).
 
 IMPORTANT: LightRAG v1.4+ requires ``await rag.initialize_storages()`` before
-any insert or query.  This service handles that transparently.
+any insert or query.  This service handles that transparently via lazy init.
 """
 
 import asyncio
@@ -17,12 +14,27 @@ from functools import partial
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Module-level singleton
 _instance: Optional["LightRAGService"] = None
+
+# Lazy-loaded embedding model (shared across calls)
+_embed_model: Optional[SentenceTransformer] = None
+
+
+def _get_embed_model() -> SentenceTransformer:
+    global _embed_model
+    if _embed_model is None:
+        logger.info("Loading sentence-transformers model: BAAI/bge-m3 ...")
+        _embed_model = SentenceTransformer("BAAI/bge-m3")
+        logger.info("bge-m3 model loaded successfully")
+    return _embed_model
 
 
 def _run_async(coro):
@@ -39,21 +51,21 @@ def _run_async(coro):
 
     t = threading.Thread(target=_target)
     t.start()
-    t.join(timeout=300)  # 5 min timeout for heavy operations
+    t.join(timeout=300)
     if exc is not None:
         raise exc
     return result
 
 
-def make_deepseek_llm_func():
-    """Create an async LLM completion function using GLM API (OpenAI-compatible) for LightRAG."""
+def make_llm_func():
+    """Create an async LLM completion function using user-configured OpenAI-compatible API."""
     from lightrag.llm.openai import openai_complete_if_cache
 
     api_key = settings.LIGHTRAG_API_KEY
     base_url = settings.LIGHTRAG_API_BASE
     model = settings.LIGHTRAG_MODEL_NAME
 
-    async def deepseek_complete(
+    async def llm_complete(
         prompt,
         system_prompt=None,
         history_messages=None,
@@ -72,56 +84,48 @@ def make_deepseek_llm_func():
             api_key=api_key,
         )
 
-    return deepseek_complete
+    return llm_complete
 
 
 class LightRAGService:
     """Thin wrapper around lightrag.LightRAG tailored to this project."""
 
-    def __init__(self, use_deepseek_llm: bool = False) -> None:
+    def __init__(self) -> None:
         from lightrag import LightRAG
-        from lightrag.llm.ollama import ollama_embed, ollama_model_complete
+        from lightrag.utils import EmbeddingFunc
 
         working_dir = settings.LIGHTRAG_DIR
         Path(working_dir).mkdir(parents=True, exist_ok=True)
 
-        embed_model = settings.LIGHTRAG_EMBEDDING_MODEL
-        llm_model = settings.LIGHTRAG_LLM_MODEL
+        # LLM via user-configured API
+        llm_func = make_llm_func()
+        llm_name = settings.LIGHTRAG_MODEL_NAME
+        logger.info(
+            "Initializing LightRAG — working_dir=%s, llm=%s (API: %s), embed=BAAI/bge-m3 (sentence-transformers)",
+            working_dir, llm_name, settings.LIGHTRAG_API_BASE,
+        )
 
-        if use_deepseek_llm:
-            llm_func = make_deepseek_llm_func()
-            # DeepSeek model name for logging
-            llm_name = f"deepseek:{settings.AI_MODEL_NAME}"
-            logger.info(
-                "Initializing LightRAG — working_dir=%s, llm=%s (DeepSeek API), embed=%s (Ollama)",
-                working_dir,
-                llm_name,
-                embed_model,
-            )
-        else:
-            llm_func = ollama_model_complete
-            llm_name = llm_model
-            logger.info(
-                "Initializing LightRAG — working_dir=%s, llm=%s (Ollama), embed=%s (Ollama)",
-                working_dir,
-                llm_name,
-                embed_model,
-            )
+        # Embedding via sentence-transformers
+        embed_model = _get_embed_model()
+
+        async def embedding_func(texts: list[str]) -> np.ndarray:
+            return embed_model.encode(texts, convert_to_numpy=True)
 
         self._rag = LightRAG(
             working_dir=working_dir,
             llm_model_func=llm_func,
-            llm_model_name=llm_name if use_deepseek_llm else llm_model,
-            embedding_func=ollama_embed,
-            # Local Ollama with bge-m3 is slower than cloud APIs;
-            # increase timeouts to avoid worker timeouts during index build.
-            default_embedding_timeout=300,   # 5 min per embedding batch
-            default_llm_timeout=300,         # 5 min per LLM call
+            llm_model_name=llm_name,
+            embedding_func=EmbeddingFunc(
+                embedding_dim=1024,
+                max_token_size=8192,
+                model_name="BAAI/bge-m3",
+                func=embedding_func,
+            ),
+            default_embedding_timeout=300,
+            default_llm_timeout=300,
         )
 
-        # LightRAG v1.4+ requires explicit storage initialization
         self._initialized = False
-        _run_async(self._initialize_storages())
 
     async def _initialize_storages(self) -> None:
         """Initialize LightRAG storages (required before insert/query in v1.4+)."""
@@ -134,10 +138,7 @@ class LightRAGService:
     # ── public helpers ──────────────────────────────────────────────
 
     async def aquery(self, question: str) -> str:
-        """Run a hybrid query against the LightRAG knowledge graph.
-
-        Returns the answer string, or an empty string on failure.
-        """
+        """Run a hybrid query against the LightRAG knowledge graph."""
         from lightrag.lightrag import QueryParam
 
         try:
@@ -148,10 +149,8 @@ class LightRAGService:
                 question,
                 param=QueryParam(mode="hybrid", only_need_context=False),
             )
-            # aquery may return a string or an async iterator
             if isinstance(result, str):
                 return result
-            # consume async iterator
             chunks: list[str] = []
             async for chunk in result:
                 chunks.append(chunk)
@@ -183,18 +182,28 @@ class LightRAGService:
 
 
 def get_lightrag_service() -> Optional[LightRAGService]:
-    """Return the singleton LightRAGService, or *None* if initialisation fails.
+    """Return the singleton LightRAGService.
 
-    This is intentionally forgiving so that the chat service can gracefully
-    fall back to keyword-only search when LightRAG is not available.
+    Requires LIGHTRAG_API_KEY to be configured. Returns None if unavailable.
     """
     global _instance
     if _instance is not None:
         return _instance
 
+    if not settings.LIGHTRAG_API_KEY:
+        logger.warning("LIGHTRAG_API_KEY not configured — LightRAG disabled")
+        return None
+
     try:
         _instance = LightRAGService()
+        logger.info("LightRAG initialized with API LLM + sentence-transformers embedding")
         return _instance
     except Exception:
-        logger.exception("Failed to initialise LightRAGService — LightRAG will be disabled")
+        logger.exception("LightRAG initialization failed — LightRAG disabled")
         return None
+
+
+def reset_lightrag_service() -> None:
+    """Reset singleton so next call to get_lightrag_service() re-checks availability."""
+    global _instance
+    _instance = None

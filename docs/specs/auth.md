@@ -14,7 +14,7 @@
 | Token 验证 | ✅ 已实现 | Bearer header 解析 |
 | 当前用户信息 | ✅ 已实现 | `/api/auth/me` |
 | 登录限流 | ✅ 已实现 | 60s 内最多 5 次尝试 |
-| 路由守卫 | ✅ 已实现 | ProtectedRoute 组件 |
+| 路由守卫 | ✅ 已实现 | PrivateRoute 组件（App.tsx 内联） |
 | 管理员默认密码 | ✅ 已改进 | 从环境变量读取 |
 
 ---
@@ -115,8 +115,8 @@ Authorization: Bearer eyJhbG...
 **位置**：`backend/app/services/auth.py`
 
 使用：
-- `python-jose` — JWT 编解码
-- `passlib[bcrypt]` — 密码哈希
+- `PyJWT` — JWT 编解码
+- `bcrypt` — 密码哈希
 
 Token 配置：
 - 算法：HS256
@@ -233,24 +233,26 @@ client.interceptors.response.use(
 )
 ```
 
-### 4.4 ProtectedRoute 组件
+### 4.4 PrivateRoute 组件
 
-**位置**：`frontend/src/router/ProtectedRoute.tsx`
+**位置**：`frontend/src/App.tsx:33-39`（内联定义）
 
 ```tsx
-function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth()
-  
-  if (loading) return <Spin />
-  if (!user) return <Navigate to="/login" />
-  
-  return children
+function PrivateRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
 }
+```
+
+> **注意**：路由守卫基于 `localStorage.getItem('token')` 检查，非 `useAuth` hook 的 `user` 状态。组件直接定义在 `App.tsx` 中，没有独立的 `ProtectedRoute.tsx` 文件。
 ```
 
 ### 4.5 SSE 401 处理
 
-**位置**：`frontend/src/api/chat.ts:107-110`
+**位置**：`frontend/src/api/chat.ts:142-147`
 
 ```typescript
 // SSE fetch 需手动处理 401（不经过 axios 拦截器）
@@ -335,4 +337,4 @@ CREATE TABLE users (
 
 ---
 
-*最后更新：2026-04-16*
+*最后更新：2026-04-18*

@@ -212,4 +212,4 @@ const response = await fetch(`/api/artifacts/${artifactId}/repair-image`, {
 
 ---
 
-*最后更新：2026-04-16*
+*最后更新：2026-04-18*

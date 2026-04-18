@@ -1,7 +1,7 @@
 # 知识图谱模块规格说明
 
 > 最后更新：2026-04-17
-> 当前实现状态：**三级 fallback 已实现，节点类型过滤已实现，P0 默认显示问题已修复**
+> 当前实现状态：**三级 fallback 已实现，节点类型过滤已实现，P0 默认显示问题已修复，CSV 导入/导出和知识抽取已实现**
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 三级 fallback 架构 | ✅ 已实现 | Neo4j → LightRAG KV Store → SQLite（SQLite 为主要数据源） |
+| 三级 fallback 架构 | ✅ 已实现 | Neo4j primary → LightRAG KV Store → SQLite fallback |
 | SQLite 图谱构建 | ✅ 已实现 | 从文物数据动态构建 artifact→era/category/location/tag 关系图 |
 | 节点类型过滤 | ✅ 已实现 | `node_types` 参数，前端 Checkbox 筛选 |
 | 默认显示关系 | ✅ 已修复 | 默认 node_types 包含所有类型，显示 artifact→era/category 关系 |
@@ -17,6 +17,8 @@
 | 关键词搜索 | ✅ 已实现 | `/api/graph/search` |
 | 节点详情 | ✅ 已实现 | `/api/graph/node/:node_id` |
 | CSV 导出 | ✅ 已实现 | `/api/graph/export` 导出三元组 |
+| CSV 导入 | ✅ 已实现 | `/api/graph/import` 导入三元组到 Neo4j |
+| 文本知识抽取 | ✅ 已实现 | `/api/graph/extract` LightRAG 增量提取 |
 | D3.js 力导向图 | ✅ 已实现 | 拖拽、缩放、平移、节点点击 |
 | 类型颜色编码 | ✅ 已实现 | artifact=紫色, era=橙色, category=绿色, location=蓝色, tag=灰色 |
 | 标签去重 | ✅ 已实现 | 标签名匹配已有 era/category/location 时链接到现有节点 |
@@ -44,12 +46,12 @@
 ### 2.1 实际数据源策略
 
 ```
-PRIMARY: SQLite 文物数据（动态构建 artifact→era/category/location/tag 关系图）
-OPTIONAL: Neo4j（语义图谱，可增强 SQLite 基础图）
-SKIPPED: LightRAG KV Store（质量较差，不使用）
+PRIMARY: Neo4j（语义图谱，优先使用）
+FALLBACK 1: LightRAG KV Store（质量较差，通常跳过）
+FALLBACK 2: SQLite 文物数据（动态构建 artifact→era/category/location/tag 关系图）
 ```
 
-> **架构调整**：SQLite 是主要数据源，直接从文物表的 era/category/location/tags 字段构建关系图。Neo4j 数据（如果有）可以增强图谱，但不替代 SQLite 基础图。LightRAG KV Store 被跳过，因为其实体质量较差（均为抽象概念，类型单一）。
+> **架构说明**：Neo4j 是主要数据源（优先级最高）。如果 Neo4j 不可用或无数据，fallback 到 SQLite 从文物表的 era/category/location/tags 字段构建关系图。LightRAG KV Store 作为中间 fallback，但质量较差通常被跳过。优先级定义在 `backend/app/services/graph.py` 文档字符串中。
 
 ### 2.2 SQLite 图谱构建
 
@@ -128,6 +130,8 @@ default_types = ["artifact", "era", "category", "location", "tag"]
 | `/api/graph/search` | GET | `keyword`, `node_types`, `depth` | 搜索图谱 |
 | `/api/graph/node/:node_id` | GET | — | 获取节点详情 |
 | `/api/graph/export` | GET | `limit` | 导出三元组 CSV |
+| `/api/graph/import` | POST | `file`（CSV） | 导入三元组到 Neo4j |
+| `/api/graph/extract` | POST | `{text}` | LightRAG 文本知识抽取 |
 
 ### 4.2 node_types 参数
 
@@ -167,10 +171,10 @@ default_types = ["artifact", "era", "category", "location", "tag"]
 
 ```typescript
 const simulation = d3.forceSimulation(nodes)
-  .force("link", d3.forceLink(edges).distance(100))
-  .force("charge", d3.forceManyBody().strength(-300))
+  .force("link", d3.forceLink(edges).distance(linkDistance))  // 默认 120
+  .force("charge", d3.forceManyBody().strength(chargeStrength))  // 默认 -400
   .force("center", d3.forceCenter(width/2, height/2))
-  .force("collision", d3.forceCollide().radius(30));
+  .force("collision", d3.forceCollide().radius((d) => d.r + collisionPadding))  // 默认 6
 ```
 
 ### 5.2 节点类型颜色映射
@@ -197,14 +201,14 @@ const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes))
 ```
 
 Checkbox 控件：
-- 默认只勾选"文物"
-- 可勾选 era/category/location/tag
+- 默认全部勾选（显示所有类型以呈现关系边）
+- 可取消勾选 era/category/location/tag 进行过滤
 
 ### 5.4 交互功能
 
 | 功能 | 实现方式 |
 |------|---------|
-| 节点拖拽 | `d3.drag()` + `simulation.alphaTarget(0.3)` |
+| 节点拖拽 | `d3.drag()` + `simulation.alpha(0.3).restart()`（drag start），`alphaTarget(0)` + 清除 fx/fy（drag end） |
 | 缩放平移 | `d3.zoom()` + SVG transform |
 | 节点点击 | 弹出详情面板 |
 | 节点高亮 | 搜索匹配节点 `stroke: '#533afd'` |
@@ -248,7 +252,93 @@ def _filter_graph_by_types(nodes_dict, links_dict, node_types):
 
 ---
 
-## 8. 验收标准
+## 8. CSV 导入端点
+
+### 8.1 导入 API
+
+**端点**：`POST /api/graph/import`
+
+上传 CSV 文件导入三元组到 Neo4j。CSV 格式与导出一致：
+
+```csv
+source_name,relation,target_name,source_type,target_type
+后母戊鼎,属于朝代,商,artifact,era
+```
+
+- 必需列：`source_name`, `relation`, `target_name`
+- 可选列：`source_type`, `target_type`（默认 "unknown"）
+- 导入的三元组添加 `source='csv_import'` 属性
+- Neo4j label 经过 sanitize 防止 Cypher 注入
+
+**位置**：`backend/app/routers/graph.py:126-278`
+
+### 8.2 导出 API
+
+**端点**：`GET /api/graph/export`
+
+流式响应（`text/csv`），文件名 `graph_triples_export.csv`。
+
+**位置**：`backend/app/routers/graph.py:87-123`
+
+---
+
+## 9. 文本知识抽取端点
+
+### 9.1 抽取 API
+
+**端点**：`POST /api/graph/extract`
+
+请求体：
+```json
+{
+  "text": "后母戊鼎是商代晚期的青铜礼器..."
+}
+```
+
+流程：
+1. 初始化 LightRAG 服务
+2. 调用 `rag.ainsert(text)` 进行增量提取
+3. 查询 Neo4j 获取新提取的实体和关系
+4. 返回结构化结果（实体列表 + 关系列表）
+
+超时：120 秒。
+
+**位置**：`backend/app/routers/graph.py:281-405`
+
+---
+
+## 10. 知识抽取页面
+
+### 10.1 页面路由
+
+**路由**：`/knowledge`
+**组件**：`frontend/src/pages/Knowledge.tsx`
+**菜单标签**：知识抽取（ExperimentOutlined 图标）
+
+### 10.2 功能
+
+| 功能 | 说明 |
+|------|------|
+| 文本知识抽取 | 输入文本 → LightRAG 提取实体和关系 → 展示 Tag 标签 |
+| CSV 导入 | 上传 CSV 文件 → 预览前 5 行 → 导入 Neo4j |
+| CSV 导出 | 导出当前知识图谱三元组（下载 CSV 文件） |
+
+### 10.3 实体类型颜色
+
+```typescript
+const ENTITY_COLORS: Record<string, string> = {
+  文物: '#533afd',
+  朝代: '#f59e0b',
+  类别: '#10b981',
+  地点: '#ef4444',
+  标签: '#6366f1',
+  其他: '#64748b',
+};
+```
+
+---
+
+## 11. 验收标准
 
 | 检查项 | 标准 | 当前状态 |
 |--------|------|---------|
@@ -258,20 +348,23 @@ def _filter_graph_by_types(nodes_dict, links_dict, node_types):
 | 类型过滤 | Checkbox 生效 | ✅ 已实现 |
 | 性能 | 500 节点流畅渲染 | ✅ D3.js 优化 |
 | CSV 导出 | 导出三元组 | ✅ 已实现 |
-| SQLite 图谱 | 动态构建关系图 | ✅ 主要数据源 |
+| CSV 导入 | 导入三元组到 Neo4j | ✅ 已实现 |
+| 文本知识抽取 | LightRAG 增量提取 | ✅ 已实现 |
+| SQLite 图谱 | 动态构建关系图 | ✅ fallback 数据源 |
 
 ---
 
-## 9. 关键文件索引
+## 12. 关键文件索引
 
 | 文件 | 负责内容 |
 |------|---------|
 | `backend/app/services/graph.py` | 三级 fallback、节点类型过滤、图谱构建 |
-| `backend/app/routers/graph.py` | API 端点 |
+| `backend/app/routers/graph.py` | API 端点（含 import/extract） |
 | `frontend/src/pages/Graph.tsx` | D3.js 力导向图、Checkbox 筛选 |
+| `frontend/src/pages/Knowledge.tsx` | 知识抽取页面（文本抽取、CSV 导入导出） |
 | `frontend/src/api/graph.ts` | 图谱 API 调用 |
 | `backend/data/lightrag/` | LightRAG KV Store 文件 |
 
 ---
 
-*最后更新：2026-04-16*
+*最后更新：2026-04-18*

@@ -300,7 +300,7 @@ def extract_triples(
     if rag_service is None:
         raise HTTPException(
             status_code=503,
-            detail="LightRAG 服务不可用 — 请检查 Ollama 是否运行"
+            detail="LightRAG 服务不可用 — 请检查 LIGHTRAG_API_KEY 是否配置"
         )
 
     # Run LightRAG insert in background thread with timeout

@@ -230,6 +230,9 @@ CREATE TABLE attachments (
 1. 读 CLAUDE.md 获取项目上下文
 2. 实现功能代码
 3. 本地验证（启动 dev server，确认无报错）
-4. git commit
-5. 自我 review：是否所有 user story 都覆盖了？异步操作是否正常？边界情况是否处理？
+4. **自我 review**（强制，不可跳过）：
+   - 通读自己改动的每一行代码，检查逻辑错误、边界情况、安全漏洞
+   - 是否所有 user story 都覆盖了？异步操作是否正常？
+   - 前端改动必须在浏览器中实际操作验证，不能只看 TypeScript 编译通过
+5. git commit
 6. 汇报完成状态和可改进点

@@ -14,7 +14,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
-from app.services.graph import _get_neo4j_driver, _check_neo4j_has_data, _query_neo4j_entities
+from app.services import graph as graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ TOOL_DEFINITIONS = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回数量上限，默认10",
-                        "default": 10,
+                        "description": "返回数量上限，默认20",
+                        "default": 20,
                     },
                 },
                 "required": ["keyword"],
@@ -88,6 +88,7 @@ TOOL_DEFINITIONS = [
                 "查询知识图谱中的语义实体和关系。"
                 "当用户询问概念性的知识（如'青铜器有什么特点'、'商代有哪些重要文物'）时，"
                 "使用此工具获取图谱中的实体关系信息，比结构化文物数据更适合回答概念性问题。"
+                "支持按朝代、类别筛选，返回相关实体及其关联关系。"
             ),
             "parameters": {
                 "type": "object",
@@ -98,8 +99,16 @@ TOOL_DEFINITIONS = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回实体数量上限，默认20",
+                        "description": "返回数量上限，默认20",
                         "default": 20,
+                    },
+                    "era": {
+                        "type": "string",
+                        "description": "朝代筛选，如'商'、'唐'、'宋'、'明'",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "类别筛选，如'青铜器'、'陶瓷'、'玉器'",
                     },
                 },
                 "required": ["keyword"],
@@ -124,7 +133,7 @@ def execute_tool(name: str, arguments: dict[str, Any], db: Session) -> dict[str,
         elif name == "get_artifact_detail":
             return _tool_get_artifact_detail(db, arguments)
         elif name == "query_knowledge_graph":
-            return _tool_query_knowledge_graph(arguments)
+            return _tool_query_knowledge_graph(arguments, db)
         else:
             return {"error": f"Unknown tool: {name}"}
     except Exception as exc:
@@ -141,7 +150,7 @@ def _tool_search_artifacts(db: Session, args: dict[str, Any]) -> dict[str, Any]:
     era: Optional[str] = args.get("era")
     category: Optional[str] = args.get("category")
     location: Optional[str] = args.get("location")
-    limit: int = min(int(args.get("limit", 10)), 50)
+    limit: int = min(int(args.get("limit", 20)), 50)
 
     if not keyword:
         return {"results": [], "count": 0}
@@ -225,52 +234,176 @@ def _tool_get_artifact_detail(db: Session, args: dict[str, Any]) -> dict[str, An
 # query_knowledge_graph implementation
 # ---------------------------------------------------------------------------
 
-def _tool_query_knowledge_graph(args: dict[str, Any]) -> dict[str, Any]:
-    """Query Neo4j knowledge graph for semantic entities and relations."""
+def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, Any]:
+    """Query knowledge graph for semantic entities and relations.
+
+    Strategy: try Neo4j first; if unavailable, fall back to SQLite-based
+    graph service (same data that powers the /graph page).
+    """
     keyword: str = args.get("keyword", "")
     limit: int = min(int(args.get("limit", 20)), 50)
+    era: Optional[str] = args.get("era")
+    category: Optional[str] = args.get("category")
 
     if not keyword:
-        return {"entities": [], "relations": [], "count": 0, "source": "neo4j"}
+        return {"entities": [], "relations": [], "count": 0, "source": "none"}
 
-    driver = _get_neo4j_driver()
+    # --- Try Neo4j first ---
+    driver = graph_service._get_neo4j_driver()
+    if graph_service._check_neo4j_has_data(driver):
+        try:
+            nodes, links = graph_service._query_neo4j_entities(driver, limit=limit, keyword=keyword)
+            entities = [
+                {"name": n.name, "type": n.type, "description": n.properties.get("description", "")}
+                for n in nodes
+            ]
+            relations = [
+                {"source": l.source.replace("neo4j_", ""), "target": l.target.replace("neo4j_", ""), "relation": l.relation}
+                for l in links
+            ]
+            return {"entities": entities, "relations": relations, "count": len(entities), "source": "neo4j"}
+        except Exception as exc:
+            logger.warning("Neo4j query failed, falling back to SQLite: %s", str(exc)[:200])
 
-    # Check Neo4j availability
-    if not _check_neo4j_has_data(driver):
+    # --- SQLite fallback: use graph_service.search_graph ---
+    try:
+        # If era/category filters provided, incorporate into keyword for better matching
+        search_keyword = keyword
+        if era and era not in keyword:
+            search_keyword = keyword  # Keep original keyword; era/category are handled by graph structure
+        if category and category not in keyword:
+            search_keyword = keyword
+
+        # First try searching by the main keyword
+        nodes, links, matched_count = graph_service.search_graph(
+            db, keyword=search_keyword, node_types=["artifact", "era", "category", "location", "tag"], depth=1
+        )
+
+        # If era/category filters provided, also search by those to expand the subgraph
+        if era and era not in search_keyword:
+            era_nodes, era_links, _ = graph_service.search_graph(
+                db, keyword=era, node_types=["era", "artifact"], depth=1
+            )
+            # Merge: only keep nodes that appear in both result sets (intersection via links)
+            existing_ids = {n.id for n in nodes}
+            existing_links_set = {(l.source, l.target) for l in links}
+            for n in era_nodes:
+                if n.id not in existing_ids:
+                    # Only add if connected to existing nodes
+                    for l in era_links:
+                        if (l.source == n.id and l.target in existing_ids) or (l.target == n.id and l.source in existing_ids):
+                            nodes.append(n)
+                            existing_ids.add(n.id)
+                            break
+            for l in era_links:
+                if (l.source, l.target) not in existing_links_set and l.source in existing_ids and l.target in existing_ids:
+                    links.append(l)
+                    existing_links_set.add((l.source, l.target))
+
+        if category and category not in search_keyword:
+            cat_nodes, cat_links, _ = graph_service.search_graph(
+                db, keyword=category, node_types=["category", "artifact"], depth=1
+            )
+            existing_ids = {n.id for n in nodes}
+            existing_links_set = {(l.source, l.target) for l in links}
+            for n in cat_nodes:
+                if n.id not in existing_ids:
+                    for l in cat_links:
+                        if (l.source == n.id and l.target in existing_ids) or (l.target == n.id and l.source in existing_ids):
+                            nodes.append(n)
+                            existing_ids.add(n.id)
+                            break
+            for l in cat_links:
+                if (l.source, l.target) not in existing_links_set and l.source in existing_ids and l.target in existing_ids:
+                    links.append(l)
+                    existing_links_set.add((l.source, l.target))
+
+        # Build name lookup for human-readable relations
+        node_name_map = {n.id: n.name for n in nodes}
+
+        # Type labels for Chinese display
+        type_labels = {
+            "artifact": "文物",
+            "era": "朝代",
+            "category": "类别",
+            "location": "地点",
+            "tag": "标签",
+        }
+
+        # Build entity list with type labels and descriptions from node properties
+        entities = []
+        for n in nodes[:limit]:
+            desc = n.properties.get("description", "")
+            type_label = type_labels.get(n.type, n.type)
+            entity_info = {"name": n.name, "type": type_label}
+            if desc:
+                entity_info["description"] = desc
+            entities.append(entity_info)
+
+        # Build relation list with human-readable names
+        relations = []
+        for l in links:
+            src_name = node_name_map.get(l.source, l.source)
+            tgt_name = node_name_map.get(l.target, l.target)
+            relations.append({
+                "source": src_name,
+                "target": tgt_name,
+                "relation": l.relation,
+            })
+
+        # Build a text summary for the LLM to easily understand the data
+        summary_parts = []
+        # Group artifacts
+        artifact_names = [n.name for n in nodes if n.type == "artifact"][:15]
+        era_names = [n.name for n in nodes if n.type == "era"]
+        cat_names = [n.name for n in nodes if n.type == "category"]
+        loc_names = [n.name for n in nodes if n.type == "location"]
+        tag_names = [n.name for n in nodes if n.type == "tag"][:10]
+
+        if artifact_names:
+            summary_parts.append(f"相关文物（{len(artifact_names)}件）：{'、'.join(artifact_names)}")
+        if era_names:
+            summary_parts.append(f"涉及朝代：{'、'.join(era_names)}")
+        if cat_names:
+            summary_parts.append(f"所属类别：{'、'.join(cat_names)}")
+        if loc_names:
+            summary_parts.append(f"出土地点：{'、'.join(loc_names)}")
+        if tag_names:
+            summary_parts.append(f"关联标签：{'、'.join(tag_names)}")
+
+        # Group relations by type for readability
+        rel_groups: dict[str, list[str]] = {}
+        for r in relations:
+            key = r["relation"]
+            rel_groups.setdefault(key, []).append(f"{r['source']} → {r['target']}")
+
+        summary_text = "\n".join(summary_parts)
+        if rel_groups:
+            summary_text += "\n\n关系摘要："
+            for rel_type, examples in rel_groups.items():
+                # Show at most 5 examples per relation type
+                shown = examples[:5]
+                remaining = len(examples) - len(shown)
+                summary_text += f"\n  · {rel_type}（{len(examples)}条）：{'; '.join(shown)}"
+                if remaining > 0:
+                    summary_text += f" 等{remaining}条"
+
+        return {
+            "entities": entities,
+            "relations": relations,
+            "count": len(entities),
+            "source": "sqlite",
+            "summary": summary_text,
+        }
+    except Exception as exc:
+        logger.error("SQLite graph search also failed: %s", str(exc)[:200])
         return {
             "entities": [],
             "relations": [],
             "count": 0,
-            "source": "neo4j",
-            "message": "知识图谱暂无数据，请先运行 build_lightrag_index.py 构建索引",
+            "source": "none",
+            "message": "知识图谱查询失败",
         }
-
-    # Query entities and relations
-    nodes, links = _query_neo4j_entities(driver, limit=limit, keyword=keyword)
-
-    # Format results
-    entities = []
-    for node in nodes:
-        entities.append({
-            "name": node.name,
-            "type": node.type,
-            "description": node.properties.get("description", ""),
-        })
-
-    relations = []
-    for link in links:
-        relations.append({
-            "source": link.source.replace("neo4j_", ""),
-            "target": link.target.replace("neo4j_", ""),
-            "relation": link.relation,
-        })
-
-    return {
-        "entities": entities,
-        "relations": relations,
-        "count": len(entities),
-        "source": "neo4j",
-    }
 
 
 # ---------------------------------------------------------------------------

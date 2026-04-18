@@ -37,22 +37,22 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost"]
 
-    # AI / LLM — Chat Q&A (DeepSeek)
+    # AI / LLM — Chat Q&A
+    # User-configured OpenAI-compatible API
     AI_API_KEY: str = ""
-    AI_API_BASE: str = "https://api.deepseek.com"
-    AI_MODEL_NAME: str = "deepseek-reasoner"
+    AI_API_BASE: str = ""
+    AI_MODEL_NAME: str = ""
 
-    # AI / LLM — LightRAG index build & query (GLM via mydamoxing)
+    # AI / LLM — LightRAG index build & query
+    # User-configured OpenAI-compatible API (can be same or different from Chat Q&A)
     LIGHTRAG_API_KEY: str = ""
-    LIGHTRAG_API_BASE: str = "https://mydamoxing.cn/v1"
-    LIGHTRAG_MODEL_NAME: str = "glm-4.7"
+    LIGHTRAG_API_BASE: str = ""
+    LIGHTRAG_MODEL_NAME: str = ""
 
-    # LightRAG — models
+    # LightRAG — storage path
     LIGHTRAG_DIR: str = ""
-    LIGHTRAG_LLM_MODEL: str = "qwen2.5:7b"
-    LIGHTRAG_EMBEDDING_MODEL: str = "bge-m3"
 
     # Data paths
     DATA_DIR: str = ""

@@ -69,10 +69,34 @@ export default function Knowledge() {
 
     try {
       const res = await extractTriples(extractText);
-      setExtractionResult(res.data as ExtractionResult);
-      message.success('抽取完成');
-    } catch (error) {
-      message.error('抽取失败，请检查后端服务');
+      const data = res.data as {
+        success: boolean;
+        entities: { entity_name: string; entity_type: string; description?: string }[];
+        relations: { src_name: string; tgt_name: string; relation: string }[];
+        count: number;
+        message: string;
+      };
+
+      if (data.success) {
+        // Map backend field names to frontend format
+        const mappedEntities: Entity[] = (data.entities || []).map((e) => ({
+          name: e.entity_name || '',
+          type: e.entity_type || '其他',
+        }));
+        const mappedRelations: Relation[] = (data.relations || []).map((r) => ({
+          source: r.src_name || '',
+          relation: r.relation || '',
+          target: r.tgt_name || '',
+        }));
+        setExtractionResult({ entities: mappedEntities, relations: mappedRelations });
+        message.success(data.message || `抽取完成，${data.count} 个结果`);
+      } else {
+        message.error(data.message || '抽取失败');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = err?.response?.data?.detail || err?.message || '未知错误';
+      message.error(`抽取失败：${detail}`);
     } finally {
       setExtracting(false);
     }

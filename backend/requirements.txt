@@ -8,5 +8,5 @@ PyJWT==2.10.1
 jieba==0.42.1
 openai>=1.0.0
 lightrag-hku>=1.4.0
-ollama>=0.4.0
 neo4j>=5.0.0
+sentence-transformers>=3.0.0

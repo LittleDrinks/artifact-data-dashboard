@@ -171,6 +171,8 @@ def make_openai_llm():
         openai_api_key=settings.LIGHTRAG_API_KEY,
         openai_api_base=settings.LIGHTRAG_API_BASE,
         temperature=0.1,
+        request_timeout=30,
+        max_retries=2,
     )
 
 
@@ -178,12 +180,15 @@ def make_openai_llm():
 
 
 async def call_llm_async(llm, prompt: str, max_retries: int = 3) -> str:
-    """Call LLM with retry logic and rate limiting."""
+    """Call LLM with retry logic, rate limiting, and per-call timeout."""
     for attempt in range(max_retries):
         try:
-            # LangChain LLMs are synchronous, run in thread pool
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: llm.invoke(prompt)
+            # LangChain LLMs are synchronous, run in thread pool with timeout
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None, lambda: llm.invoke(prompt)
+                ),
+                timeout=45,  # per-call timeout
             )
             # Handle AIMessage object from ChatOpenAI vs string from Ollama
             if hasattr(result, 'content'):
@@ -191,6 +196,10 @@ async def call_llm_async(llm, prompt: str, max_retries: int = 3) -> str:
             # Rate limiting: 1s delay between API calls
             await asyncio.sleep(1)
             return result
+        except asyncio.TimeoutError:
+            logger.warning("LLM call timed out (attempt %d/%d)", attempt + 1, max_retries)
+            if attempt == max_retries - 1:
+                raise
         except Exception as e:
             error_msg = str(e)
             if attempt < max_retries - 1:

@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+__pycache__
+*.pyc
+.venv
+.env
+*.db
+demo/
+docs/
+data/
+.pytest_cache
+test-screenshots
+.playwright-mcp
+*.egg-info
