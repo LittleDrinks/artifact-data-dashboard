@@ -96,7 +96,11 @@ def get_overview_stats(db: Session) -> OverviewStats:
     total = db.query(func.count(Artifact.id)).scalar() or 0
     total_categories = (
         db.query(func.count(func.distinct(Artifact.category)))
-        .filter(Artifact.category.isnot(None), Artifact.category != "")
+        .filter(
+            Artifact.category.isnot(None),
+            Artifact.category != "",
+            Artifact.category.notin_(JUNK_CATEGORIES),
+        )
         .scalar()
         or 0
     )
