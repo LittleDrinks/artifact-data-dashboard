@@ -9,20 +9,22 @@ test.describe('Login Page', () => {
 
   test('注册后登录成功', async ({ page }) => {
     // 切换到注册 tab
-    await page.click('text=注册');
+    await page.getByRole('tab', { name: '注册' }).click();
     await screenshot(page, 'login', 'register-tab');
 
     // 填写注册表单
     const timestamp = Date.now();
     const username = `testuser_${timestamp}`;
-    await page.fill('input[placeholder="用户名"]', username);
-    await page.fill('input[placeholder="邮箱"]', `${username}@test.com`);
-    await page.fill('input[placeholder="密码"]', 'testpass123');
-    await page.fill('input[placeholder="确认密码"]', 'testpass123');
+    // Use visible() filter to target only the register tab's inputs
+    const form = page.locator('[role="tabpanel"]:not([aria-hidden="true"])');
+    await form.locator('input[placeholder="用户名"]').fill(username);
+    await form.locator('input[placeholder="邮箱"]').fill(`${username}@test.com`);
+    await form.locator('input[placeholder="密码"]').fill('testpass123');
+    await form.locator('input[placeholder="确认密码"]').fill('testpass123');
     await screenshot(page, 'login', 'register-filled');
 
     // 提交注册
-    await page.click('button:has-text("注册")');
+    await form.getByRole('button', { name: '注 册' }).click();
 
     // 等待注册成功消息或直接跳转
     await page.waitForURL('/', { timeout: 10000 });
@@ -34,16 +36,22 @@ test.describe('Login Page', () => {
   });
 
   test('登录失败显示错误提示', async ({ page }) => {
-    // 填写错误密码
-    await page.fill('input[placeholder="用户名"]', 'nonexistent');
-    await page.fill('input[placeholder="密码"]', 'wrongpassword');
+    // 登录 tab 是默认活跃的
+    const form = page.locator('[role="tabpanel"]:not([aria-hidden="true"])');
+    await form.locator('input[placeholder="用户名"]').fill('nonexistent');
+    await form.locator('input[placeholder="密码"]').fill('wrongpassword');
     await screenshot(page, 'login', 'wrong-credentials');
 
-    // 提交登录
-    await page.click('button:has-text("登录")');
+    // 提交登录并等待 API 响应
+    const responsePromise = page.waitForResponse(resp =>
+      resp.url().includes('/api/auth/login')
+    );
+    await form.getByRole('button', { name: '登 录' }).click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(401);
 
-    // 等待错误消息出现（Ant Design message）
-    await page.waitForSelector('.ant-message-error', { timeout: 5000 });
+    // 等待错误 Alert 出现
+    await page.waitForSelector('.ant-alert-error', { timeout: 5000 });
     await screenshot(page, 'login', 'login-error');
 
     // 验证还在登录页
@@ -81,15 +89,16 @@ test.describe('Login Page', () => {
 
   test('表单验证：空表单提交显示错误', async ({ page }) => {
     // 不填写任何内容，直接点击登录
-    await page.click('button:has-text("登录")');
+    const form = page.locator('[role="tabpanel"]:not([aria-hidden="true"])');
+    await form.getByRole('button', { name: '登 录' }).click();
     await screenshot(page, 'login', 'empty-submit');
 
     // 等待验证错误提示
     await page.waitForSelector('.ant-form-item-explain-error', { timeout: 3000 });
 
-    // 应该看到"请输入用户名"或类似提示
-    const errorVisible = await page.locator('.ant-form-item-explain-error').isVisible();
-    expect(errorVisible).toBe(true);
+    // 应该看到验证错误（至少一个）
+    const errorCount = await page.locator('.ant-form-item-explain-error').count();
+    expect(errorCount).toBeGreaterThanOrEqual(1);
     await screenshot(page, 'login', 'validation-error');
   });
 });

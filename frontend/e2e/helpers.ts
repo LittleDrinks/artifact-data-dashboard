@@ -15,7 +15,7 @@ export async function login(
 ): Promise<void> {
   // 尝试注册
   const registerRes = await page.request.post(`${API_BASE}/auth/register`, {
-    data: { username, email: `${username}@test.com`, password },
+    data: { username, email: `${username}@test.com`, password, confirm_password: password },
     failOnStatusCode: false,
   });
 

@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Spin } from 'antd';
+import { Spin, App as AntApp } from 'antd';
 import MainLayout from './layouts/MainLayout';
 
 /* ── Lazy-loaded pages ── */
@@ -41,33 +41,35 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 /** 应用路由配置 */
 export default function App() {
   return (
-    <BrowserRouter>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          {/* 登录页 — 无侧边栏 */}
-          <Route path="/login" element={<Login />} />
+    <AntApp>
+      <BrowserRouter>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* 登录页 — 无侧边栏 */}
+            <Route path="/login" element={<Login />} />
 
-          {/* 主布局路由 — 需要登录 */}
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <MainLayout />
-              </PrivateRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="artifacts" element={<Artifacts />} />
-            <Route path="artifacts/:id" element={<ArtifactDetail />} />
-            <Route path="graph" element={<Graph />} />
-            <Route path="chat" element={<Chat />} />
-            <Route path="knowledge" element={<Knowledge />} />
-          </Route>
+            {/* 主布局路由 — 需要登录 */}
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <MainLayout />
+                </PrivateRoute>
+              }
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="artifacts" element={<Artifacts />} />
+              <Route path="artifacts/:id" element={<ArtifactDetail />} />
+              <Route path="graph" element={<Graph />} />
+              <Route path="chat" element={<Chat />} />
+              <Route path="knowledge" element={<Knowledge />} />
+            </Route>
 
-          {/* 未匹配路由重定向 */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+            {/* 未匹配路由重定向 */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </AntApp>
   );
 }

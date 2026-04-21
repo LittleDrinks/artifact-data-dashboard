@@ -20,13 +20,16 @@ client.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// 响应拦截器：401 时跳转登录页
+// 响应拦截器：401 时跳转登录页（但不在登录页本身触发）
 client.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      // Don't redirect if already on login page — the login form handles its own errors
+      if (window.location.pathname !== '/login') {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   },

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Input, Button, Card, message, Tabs } from 'antd';
+import { Form, Input, Button, Card, Tabs, Alert } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
 import { useAuth } from '../hooks/useAuth';
 
@@ -10,17 +10,19 @@ export default function Login() {
   const { login, register } = useAuth();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const onLogin = async (values: { username: string; password: string }) => {
     setLoading(true);
+    setErrorMsg('');
     try {
       await login(values.username, values.password);
-      message.success('登录成功');
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '登录失败';
-      message.error(msg);
+      setErrorMsg(msg);
     } finally {
       setLoading(false);
     }
@@ -33,14 +35,15 @@ export default function Login() {
     confirm_password: string;
   }) => {
     setLoading(true);
+    setErrorMsg('');
     try {
       await register(values.username, values.email, values.password);
-      message.success('注册成功');
+      setSuccessMsg('注册成功，正在跳转...');
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '注册失败';
-      message.error(msg);
+      setErrorMsg(msg);
     } finally {
       setLoading(false);
     }
@@ -110,6 +113,25 @@ export default function Login() {
             人机协作的文化遗产数据平台
           </p>
         </div>
+
+        {errorMsg && (
+          <Alert
+            message={errorMsg}
+            type="error"
+            showIcon
+            closable
+            style={{ marginBottom: 16 }}
+            onClose={() => setErrorMsg('')}
+          />
+        )}
+        {successMsg && (
+          <Alert
+            message={successMsg}
+            type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
 
         <Tabs
           activeKey={activeTab}
