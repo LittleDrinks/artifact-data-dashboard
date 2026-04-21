@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import UserRegister, UserLogin, TokenResponse, UserResponse
 from app.services import auth as auth_service
+from app.config import settings
 
 router = APIRouter()
 security = HTTPBearer()
@@ -23,6 +24,8 @@ _RATE_LIMIT_MAX = 5  # attempts per window
 
 def _check_rate_limit(client_ip: str) -> None:
     """Raise 429 if client_ip exceeds login rate limit."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
     now = time.time()
     # Prune ALL expired keys to prevent memory leak
     expired_keys = [

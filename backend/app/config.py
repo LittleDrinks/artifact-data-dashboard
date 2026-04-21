@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # Data paths
     DATA_DIR: str = ""
 
+    # Rate limiting
+    RATE_LIMIT_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

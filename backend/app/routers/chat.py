@@ -19,6 +19,7 @@ from app.schemas.chat import (
     ChatMessageResponse,
 )
 from app.services import chat as chat_service
+from app.config import settings
 
 router = APIRouter()
 
@@ -30,6 +31,8 @@ _ASK_RATE_LIMIT_MAX = 10  # attempts per window
 
 def _check_ask_rate_limit(client_ip: str) -> None:
     """Raise 429 if client_ip exceeds ask rate limit."""
+    if not settings.RATE_LIMIT_ENABLED:
+        return
     now = time.time()
     # Prune ALL expired keys to prevent memory leak
     expired_keys = [

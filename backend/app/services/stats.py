@@ -52,6 +52,19 @@ STOP_WORDS = set(
     .split()
 )
 
+# Wikipedia maintenance / non-artifact categories to exclude from stats
+JUNK_CATEGORIES = {
+    "中国文物", "禁止出境展览文物", "中国博物馆船", "中國國家博物館藏品",
+    "山西博物院藏品", "河北博物院藏品", "浙江省博物館藏品",
+    "晋宁区", "新和县",
+    "引文格式1错误：日期", "使用了两种注音方式的页面", "使用过时图像语法的页面",
+    "维基共享资源分类链接使用了维基数据上的匹配项",
+    "自2018年10月带有失效链接的条目", "自2019年11月带有失效链接的条目",
+    "战国文物", "滇国", "方国", "晚清政治",
+    "祥云县历史", "红河哈尼族彝族自治州文物", "玉溪文物", "运城文化",
+    "聂耳", "突厥语铭文",
+}
+
 # ── TTL Cache (60s) ──
 _cache: dict = {}
 _CACHE_TTL = 60  # seconds
@@ -141,7 +154,7 @@ def get_category_stats(db: Session) -> List[CategoryStat]:
         .order_by(func.count(Artifact.id).desc())
         .all()
     )
-    value = [CategoryStat(category=r[0], count=r[1]) for r in results]
+    value = [CategoryStat(category=r[0], count=r[1]) for r in results if r[0] not in JUNK_CATEGORIES]
     _set_cached("category", value)
     return value
 
