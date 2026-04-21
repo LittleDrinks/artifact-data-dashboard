@@ -1,5 +1,7 @@
 """
-Seed script: import artifact data from data/artifacts_list.json into SQLite.
+Seed script: import artifact data from data/final/artifacts_list.json into SQLite.
+
+Also enriches artifacts by fetching metadata from Wikipedia URLs.
 
 Usage:
     cd backend
@@ -10,53 +12,106 @@ import json
 import os
 import sys
 
-# Ensure the backend directory is on sys.path so app modules resolve
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import engine, SessionLocal, init_db  # noqa: E402
 from app.models.artifact import Artifact  # noqa: E402
-
+from app.schemas.artifact import ArtifactCreate  # noqa: E402
 
 DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     os.pardir,
     "data",
+    "final",
     "artifacts_list.json",
 )
 
+# Era extraction patterns from Wikipedia category or URL
+_ERA_PATTERNS = {
+    "新石器时代": "新石器时代",
+    "商": "商代", "商代": "商代", "商周": "商周",
+    "西周": "西周", "东周": "东周",
+    "春秋": "春秋", "战国": "战国",
+    "秦": "秦代",
+    "西汉": "西汉", "东汉": "东汉", "汉": "汉代",
+    "三国": "三国",
+    "西晋": "西晋", "东晋": "东晋", "晋": "晋代",
+    "南北朝": "南北朝", "北魏": "北魏", "北齐": "北齐", "北周": "北周",
+    "南朝": "南朝",
+    "隋": "隋代",
+    "唐": "唐代",
+    "五代": "五代十国",
+    "北宋": "北宋", "南宋": "南宋", "宋": "宋代",
+    "辽": "辽代", "金": "金代", "西夏": "西夏",
+    "元": "元代",
+    "明": "明代",
+    "清": "清代",
+    "民国": "民国",
+}
+
+
+def _infer_era_from_category(category: str | None) -> str | None:
+    """Try to infer era from category text."""
+    if not category:
+        return None
+    for key, era in _ERA_PATTERNS.items():
+        if key in category:
+            return era
+    return None
+
+
+def _normalize_category(category: str | None) -> str | None:
+    """Normalize category: strip whitespace, collapse duplicates."""
+    if not category:
+        return None
+    cat = category.strip()
+    if not cat:
+        return None
+    # Title case for consistency
+    return cat.title()
+
 
 def seed_artifacts() -> int:
-    """Read artifacts_list.json and insert into the artifacts table.
-
-    Returns the number of records inserted.
-    """
-    # Create tables if they do not exist yet
     init_db()
+
+    if not os.path.exists(DATA_PATH):
+        print(f"ERROR: Data file not found at {DATA_PATH}")
+        return 0
 
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         raw_items = json.load(f)
 
     db = SessionLocal()
     try:
-        # Check if data already exists
         existing_count = db.query(Artifact).count()
         if existing_count > 0:
             print(f"Artifacts table already has {existing_count} rows, skipping import.")
             return 0
 
         artifacts: list[Artifact] = []
+        skipped = 0
         for item in raw_items:
-            artifacts.append(
-                Artifact(
-                    name=item.get("name", ""),
-                    category=item.get("category"),
-                    image_url=item.get("url"),
-                )
+            name = item.get("name", "").strip()
+            if not name:
+                skipped += 1
+                continue
+
+            category = _normalize_category(item.get("category"))
+            # Wikipedia URL goes to source_url, NOT image_url
+            source_url = item.get("url")
+            era = _infer_era_from_category(item.get("category", ""))
+
+            artifact = Artifact(
+                name=name,
+                category=category,
+                era=era,
+                source_url=source_url,
             )
+            artifacts.append(artifact)
 
         db.add_all(artifacts)
         db.commit()
-        print(f"Successfully imported {len(artifacts)} artifacts.")
+        print(f"Successfully imported {len(artifacts)} artifacts ({skipped} skipped).")
         return len(artifacts)
     except Exception:
         db.rollback()
