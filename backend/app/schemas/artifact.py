@@ -37,7 +37,7 @@ class ArtifactBase(BaseModel):
     category: Optional[str] = Field(None, max_length=50, description="类别")
     era: Optional[str] = Field(None, max_length=50, description="年代")
     location: Optional[str] = Field(None, max_length=100, description="出土地点")
-    image_url: Optional[str] = Field(None, max_length=500, description="图片链接")
+    image_url: Optional[str] = Field(None, max_length=2000, description="图片链接")
     tags: Optional[str] = Field(None, description="标签（逗号分隔）")
     # 新增字段
     material: Optional[str] = Field(None, max_length=50, description="材质")
