@@ -21,6 +21,7 @@ import {
   DownOutlined,
   RightOutlined,
   BulbOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
@@ -64,6 +65,10 @@ interface DisplayMessage {
   // Support multiple tool calls from ReAct loop
   toolCalls: ToolCallEntry[];
   streaming: boolean;
+  // Error state: if true, show retry button
+  error: boolean;
+  // The original user query for retry
+  retryQuery?: string;
 }
 
 /* ── Helpers ── */
@@ -198,6 +203,7 @@ export default function Chat() {
           thinkingDone: true,
           toolCalls,
           streaming: false,
+          error: false,
         };
       });
       setMessages(displayMsgs);
@@ -298,6 +304,7 @@ export default function Chat() {
       thinkingDone: true,
       toolCalls: [],
       streaming: false,
+      error: false,
     };
 
     const assistantMsg: DisplayMessage = {
@@ -308,6 +315,7 @@ export default function Chat() {
       thinkingDone: false,
       toolCalls: [],
       streaming: true,
+      error: false,
     };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -489,9 +497,18 @@ export default function Chat() {
         setLoading(false);
         return;
       }
-      const msg = err instanceof Error ? err.message : '发送失败';
-      message.error(msg);
-      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      const errMsg = err instanceof Error ? err.message : '发送失败';
+      // Check for timeout
+      const isTimeout = errMsg.includes('timeout') || errMsg.includes('Timeout') || errMsg.includes('timed out');
+      const displayErr = isTimeout ? '请求超时，请稍后重试' : errMsg;
+      // Show inline error in the assistant message with retry option
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, streaming: false, error: true, content: displayErr, retryQuery: query }
+            : m,
+        ),
+      );
       setLoading(false);
     } finally {
       if (abortControllerRef.current === controller) {
@@ -499,6 +516,223 @@ export default function Chat() {
       }
     }
   }, [inputValue, loading, activeSessionId, loadSessions]);
+
+  // ── Retry a failed message ──
+  const handleRetry = useCallback((retryQuery: string) => {
+    // Remove the error assistant message, then re-send the query
+    setMessages((prev) => prev.slice(0, -1));
+    setInputValue(retryQuery);
+    // Use setTimeout to ensure state updates before sending
+    setTimeout(() => {
+      // Trigger send programmatically by setting the input and calling handleSend
+      // We need to work around the stale closure, so we directly invoke with the query
+      setInputValue('');
+      // Create the message flow manually
+      const query = retryQuery;
+      setLoading(true);
+
+      const userMsg: DisplayMessage = {
+        id: generateId(),
+        role: 'user',
+        content: query,
+        thinkingRounds: [],
+        thinkingDone: true,
+        toolCalls: [],
+        streaming: false,
+        error: false,
+      };
+
+      const assistantMsg: DisplayMessage = {
+        id: generateId(),
+        role: 'assistant',
+        content: '',
+        thinkingRounds: [],
+        thinkingDone: false,
+        toolCalls: [],
+        streaming: true,
+        error: false,
+      };
+
+      setMessages((prev) => [...prev.slice(0, -1), userMsg, assistantMsg]);
+      const assistantId = assistantMsg.id;
+
+      setRagToolLoading(false);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      sendChatMessage(query, activeSessionId, (event: SSEEventData) => {
+        if (controller.signal.aborted) return;
+
+        switch (event.type) {
+          case 'session_created':
+            if (event.session_id) {
+              setActiveSessionId(event.session_id);
+            }
+            break;
+
+          case 'thinking_start':
+            setMessages((prev) => {
+              const msg = prev.find(m => m.id === assistantId);
+              const currentRoundCount = msg?.thinkingRounds.length ?? 0;
+              const newRoundIdx = currentRoundCount;
+
+              setExpandedThinking((prevExp) => {
+                const next = new Set(prevExp);
+                next.add(`${assistantId}:${newRoundIdx}`);
+                return next;
+              });
+
+              return prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, thinkingDone: false, thinkingRounds: [...m.thinkingRounds, ''] }
+                  : m,
+              );
+            });
+            break;
+
+          case 'thinking_delta':
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const rounds = [...m.thinkingRounds];
+                const lastIdx = rounds.length - 1;
+                if (lastIdx >= 0) {
+                  rounds[lastIdx] = rounds[lastIdx] + (event.content || '');
+                }
+                return { ...m, thinkingRounds: rounds };
+              }),
+            );
+            break;
+
+          case 'thinking_end':
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId) return m;
+                const currentRoundIdx = m.thinkingRounds.length - 1;
+                setExpandedThinking((prevExp) => {
+                  const next = new Set(prevExp);
+                  next.delete(`${assistantId}:${currentRoundIdx}`);
+                  return next;
+                });
+                return { ...m, thinkingDone: true };
+              }),
+            );
+            break;
+
+          case 'tool_call_start':
+            setRagVisible(true);
+            setRagToolLoading(true);
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id === assistantId) {
+                  const roundIdx = m.thinkingRounds.length > 0 ? m.thinkingRounds.length - 1 : 0;
+                  return {
+                    ...m,
+                    toolCalls: [
+                      ...m.toolCalls,
+                      {
+                        tool: event.tool || 'search_artifacts',
+                        query: event.query || query,
+                        results: [],
+                        count: 0,
+                        elapsed: 0,
+                        done: false,
+                        roundIndex: roundIdx,
+                      },
+                    ],
+                  };
+                }
+                return m;
+              }),
+            );
+            break;
+
+          case 'tool_call_result':
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantId || m.toolCalls.length === 0) return m;
+                const lastIdx = m.toolCalls.length - 1;
+                const updatedToolCalls = [...m.toolCalls];
+                const toolType = event.tool || 'search_artifacts';
+                const newEntry: ToolCallEntry = {
+                  ...updatedToolCalls[lastIdx],
+                  tool: toolType,
+                  query: event.query || updatedToolCalls[lastIdx].query,
+                  count: event.count || 0,
+                  elapsed: event.elapsed || 0,
+                  done: true,
+                };
+                if (toolType === 'get_artifact_detail') {
+                  newEntry.artifactDetail = event.artifactDetail;
+                  newEntry.results = [];
+                } else if (toolType === 'query_knowledge_graph') {
+                  newEntry.entities = event.entities || [];
+                  newEntry.relations = event.relations || [];
+                  newEntry.results = [];
+                } else {
+                  newEntry.results = event.results || [];
+                }
+                updatedToolCalls[lastIdx] = newEntry;
+                return { ...m, toolCalls: updatedToolCalls };
+              }),
+            );
+            setRagToolLoading(false);
+            break;
+
+          case 'answer_delta':
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, content: m.content + (event.content || '') }
+                  : m,
+              ),
+            );
+            break;
+
+          case 'answer_end':
+            break;
+
+          case 'done':
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, streaming: false }
+                  : m,
+              ),
+            );
+            setRagToolLoading(false);
+            loadSessions();
+            setLoading(false);
+            break;
+
+          default:
+            break;
+        }
+      }, controller.signal).catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          setLoading(false);
+          return;
+        }
+        const errMsg = err instanceof Error ? err.message : '发送失败';
+        const isTimeout = errMsg.includes('timeout') || errMsg.includes('Timeout') || errMsg.includes('timed out');
+        const displayErr = isTimeout ? '请求超时，请稍后重试' : errMsg;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, streaming: false, error: true, content: displayErr, retryQuery: query }
+              : m,
+          ),
+        );
+        setLoading(false);
+      }).finally(() => {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+      });
+    }, 0);
+  }, [activeSessionId, loadSessions]);
 
   // ── Keyboard shortcut ──
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -764,7 +998,7 @@ export default function Chat() {
                 gap: 16,
               }}
             >
-              <RobotOutlined style={{ fontSize: 48, color: '#94a3b8' }} />
+              <RobotOutlined data-testid="robot-icon" style={{ fontSize: 48, color: '#94a3b8' }} />
               <div style={{ fontSize: 16, color: '#061b31', fontWeight: 400 }}>
                 AI 智能问答
               </div>
@@ -902,6 +1136,37 @@ export default function Chat() {
                         animation: 'blink 1s infinite',
                       }}
                     />
+                  )}
+                  {msg.error && msg.retryQuery && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 10,
+                        padding: '8px 12px',
+                        background: '#fff1f0',
+                        border: '1px solid #ffa39e',
+                        borderRadius: 6,
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{ color: '#cf1322', flex: 1 }}>{msg.content}</span>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleRetry(msg.retryQuery!)}
+                        style={{
+                          background: '#533afd',
+                          borderColor: '#533afd',
+                          borderRadius: 4,
+                          fontSize: 12,
+                        }}
+                      >
+                        重试
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>

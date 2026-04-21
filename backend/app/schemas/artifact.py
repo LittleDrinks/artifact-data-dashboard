@@ -1,9 +1,33 @@
 """Artifact schemas."""
 
+import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _normalize_text(value: str | None) -> str | None:
+    """Strip leading/trailing whitespace and collapse internal whitespace."""
+    if value is None:
+        return None
+    # Strip outer whitespace
+    stripped = value.strip()
+    if not stripped:
+        return None
+    # Collapse multiple spaces/tabs/newlines into a single space
+    return re.sub(r'\s+', ' ', stripped)
+
+
+def _normalize_category(value: str | None) -> str | None:
+    """Normalize category: strip whitespace, apply title case."""
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    # Title case: first letter of each word uppercased
+    return stripped.title()
 
 
 class ArtifactBase(BaseModel):
@@ -21,10 +45,57 @@ class ArtifactBase(BaseModel):
     source_url: Optional[str] = Field(None, max_length=500, description="来源链接")
     dimensions: Optional[str] = Field(None, max_length=100, description="尺寸")
 
+    @field_validator('name', mode='before')
+    @classmethod
+    def normalize_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError('文物名称不能为空')
+        # Collapse whitespace but do not change casing (Chinese names)
+        return re.sub(r'\s+', ' ', v.strip())
+
+    @field_validator('category', mode='before')
+    @classmethod
+    def normalize_category(cls, v: str | None) -> str | None:
+        return _normalize_category(v)
+
+    @field_validator('era', mode='before')
+    @classmethod
+    def normalize_era(cls, v: str | None) -> str | None:
+        return _normalize_text(v)
+
+    @field_validator('location', mode='before')
+    @classmethod
+    def normalize_location(cls, v: str | None) -> str | None:
+        return _normalize_text(v)
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def normalize_tags(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        # Normalize whitespace around commas, collapse multiple commas
+        parts = [p.strip() for p in stripped.split(',')]
+        parts = [p for p in parts if p]
+        return ','.join(parts)
+
 
 class ArtifactCreate(ArtifactBase):
     """Schema for creating a new artifact."""
-    pass
+
+    @model_validator(mode='after')
+    def validate_required_fields(self) -> 'ArtifactCreate':
+        """Ensure name, category, and era are provided for creation."""
+        # name is already required by Field, but double-check after normalization
+        if not self.name or not self.name.strip():
+            raise ValueError('文物名称不能为空')
+        if not self.category:
+            raise ValueError('文物类别不能为空')
+        if not self.era:
+            raise ValueError('文物年代不能为空')
+        return self
 
 
 class ArtifactUpdate(BaseModel):
@@ -41,6 +112,42 @@ class ArtifactUpdate(BaseModel):
     museum: Optional[str] = Field(None, max_length=100)
     source_url: Optional[str] = Field(None, max_length=500)
     dimensions: Optional[str] = Field(None, max_length=100)
+
+    @field_validator('name', mode='before')
+    @classmethod
+    def normalize_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError('文物名称不能为空')
+        return re.sub(r'\s+', ' ', v.strip())
+
+    @field_validator('category', mode='before')
+    @classmethod
+    def normalize_category(cls, v: str | None) -> str | None:
+        return _normalize_category(v)
+
+    @field_validator('era', mode='before')
+    @classmethod
+    def normalize_era(cls, v: str | None) -> str | None:
+        return _normalize_text(v)
+
+    @field_validator('location', mode='before')
+    @classmethod
+    def normalize_location(cls, v: str | None) -> str | None:
+        return _normalize_text(v)
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def normalize_tags(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        parts = [p.strip() for p in stripped.split(',')]
+        parts = [p for p in parts if p]
+        return ','.join(parts)
 
 
 class ArtifactResponse(ArtifactBase):

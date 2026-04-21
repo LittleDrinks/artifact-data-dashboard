@@ -59,7 +59,7 @@ def create_artifact(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """创建文物（需要认证）"""
+    """创建文物（需要认证，name/category/era 必填）"""
     artifact = artifact_service.create_artifact(db, data)
     return artifact
 

@@ -338,6 +338,7 @@ export default function Knowledge() {
 
         <Button
           type="primary"
+          data-testid="csv-import-btn"
           onClick={handleImport}
           loading={importing}
           disabled={!csvFile}

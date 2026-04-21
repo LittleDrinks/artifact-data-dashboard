@@ -1,6 +1,7 @@
 """Artifact service - handles CRUD operations for artifacts."""
 
 import math
+import re
 from typing import Optional
 
 from sqlalchemy import func, or_
@@ -9,6 +10,11 @@ from sqlalchemy.orm import Session
 from app.models.artifact import Artifact
 from app.schemas.artifact import ArtifactCreate, ArtifactUpdate
 from app.services.stats import clear_stats_cache
+
+
+def _normalize_category_for_query(category: str) -> str:
+    """Normalize category for query matching: title case + strip."""
+    return category.strip().title()
 
 
 def get_artifacts(
@@ -41,7 +47,9 @@ def get_artifacts(
             )
         )
     if category:
-        query = query.filter(Artifact.category == category)
+        # Normalize category for matching: use exact match with title-cased value
+        normalized_cat = _normalize_category_for_query(category)
+        query = query.filter(Artifact.category == normalized_cat)
     if era:
         query = query.filter(Artifact.era == era)
     if location:

@@ -1,11 +1,12 @@
-import { Card, Row, Col, Statistic, Spin, Empty, Tooltip as AntTooltip } from 'antd';
+import { Card, Row, Col, Statistic, Spin, Empty, Tooltip as AntTooltip, Skeleton } from 'antd';
 import {
   AppstoreOutlined,
   CalendarOutlined,
   EnvironmentOutlined,
   TagOutlined,
 } from '@ant-design/icons';
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+// @ts-expect-error d3-cloud has no type declarations
 import cloud from 'd3-cloud';
 
 // TypeScript declaration for d3-cloud (no official types)
@@ -103,12 +104,32 @@ function StatCards({
     },
   ];
 
+  if (loading) {
+    return (
+      <Row gutter={20} style={{ marginBottom: 24 }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Col span={6} key={i}>
+            <Card
+              style={{
+                borderRadius: 'var(--r-card)',
+                boxShadow: 'var(--shadow-sm)',
+                border: '1px solid var(--border)',
+              }}
+              styles={{ body: { padding: '20px 24px' } }}
+            >
+              <Skeleton active title={{ width: '40%' }} paragraph={{ rows: 1, width: ['60%'] }} />
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    );
+  }
+
   return (
     <Row gutter={20} style={{ marginBottom: 24 }}>
       {cards.map((item) => (
         <Col span={6} key={item.title}>
           <Card
-            loading={loading}
             style={{
               borderRadius: 'var(--r-card)',
               boxShadow: 'var(--shadow-sm)',
@@ -329,8 +350,8 @@ function EraBarChart({ data, loading }: { data: EraStat[]; loading: boolean }) {
       styles={{ body: { padding: '16px 12px 12px' } }}
     >
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <Spin />
+        <div style={{ padding: '16px 24px' }}>
+          <Skeleton active title={{ width: '30%' }} paragraph={{ rows: 6 }} />
         </div>
       ) : sortedData.length === 0 ? (
         <Empty description="暂无年代数据" style={{ padding: '40px 0' }} />
@@ -437,8 +458,8 @@ function CategoryPieChart({
       styles={{ body: { padding: '16px 12px 12px' } }}
     >
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 40 }}>
-          <Spin />
+        <div style={{ padding: '16px 24px' }}>
+          <Skeleton active title={{ width: '30%' }} paragraph={{ rows: 4 }} />
         </div>
       ) : (
         <>
