@@ -171,6 +171,10 @@ class TestCreateArtifact:
         assert data["category"] == "玉器"
         assert "id" in data
         assert "created_at" in data
+        # Teardown: delete created artifact
+        created_id = data["id"]
+        db_session.query(Artifact).filter(Artifact.id == created_id).delete()
+        db_session.commit()
 
     def test_create_unauthorized(self, client: TestClient):
         """Test artifact creation without auth."""

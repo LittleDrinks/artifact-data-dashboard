@@ -1,7 +1,6 @@
 """
 Seed script: import artifact data from data/final/artifacts_list.json into SQLite.
-
-Also enriches artifacts by fetching metadata from Wikipedia URLs.
+Also enriches artifacts by loading detail data from data/final/artifacts_detail/*.json.
 
 Usage:
     cd backend
@@ -24,6 +23,14 @@ DATA_PATH = os.path.join(
     "data",
     "final",
     "artifacts_list.json",
+)
+
+DETAIL_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    os.pardir,
+    "data",
+    "final",
+    "artifacts_detail",
 )
 
 # Era extraction patterns from Wikipedia category or URL
@@ -71,6 +78,37 @@ def _normalize_category(category: str | None) -> str | None:
     return cat.title()
 
 
+def _load_detail_data(name: str) -> dict:
+    """Load detail JSON file for a given artifact name."""
+    if not os.path.exists(DETAIL_DIR):
+        return {}
+    detail_path = os.path.join(DETAIL_DIR, f"{name}.json")
+    if not os.path.exists(detail_path):
+        return {}
+    try:
+        with open(detail_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _clean_location(location: str | None) -> str | None:
+    """Clean location field: remove description text, keep only place name."""
+    if not location:
+        return None
+    # If location contains sentence-ending punctuation, it's likely description text
+    if "。" in location or len(location) > 80:
+        # Try to extract just the place name (before first comma or period)
+        for sep in ["。", "，", ",", "（", "("]:
+            if sep in location:
+                loc = location.split(sep)[0].strip()
+                if loc and len(loc) < 50:
+                    return loc
+        # If still too long, return None (discard)
+        return None
+    return location.strip()
+
+
 def seed_artifacts() -> int:
     init_db()
 
@@ -90,6 +128,7 @@ def seed_artifacts() -> int:
 
         artifacts: list[Artifact] = []
         skipped = 0
+        enriched = 0
         for item in raw_items:
             name = item.get("name", "").strip()
             if not name:
@@ -97,21 +136,35 @@ def seed_artifacts() -> int:
                 continue
 
             category = _normalize_category(item.get("category"))
-            # Wikipedia URL goes to source_url, NOT image_url
             source_url = item.get("url")
             era = _infer_era_from_category(item.get("category", ""))
+
+            # Load detail data from separate JSON file
+            detail = _load_detail_data(name)
+            if detail:
+                enriched += 1
+                # Detail file may override/extend fields
+                era = detail.get("era") or era
+                category = _normalize_category(detail.get("category")) or category
+                source_url = detail.get("url") or source_url
 
             artifact = Artifact(
                 name=name,
                 category=category,
                 era=era,
                 source_url=source_url,
+                # Detail fields
+                material=detail.get("material") if detail else None,
+                museum=detail.get("museum") if detail else None,
+                dimensions=detail.get("dimensions") if detail else None,
+                location=_clean_location(detail.get("location")) if detail else None,
+                description=detail.get("summary") if detail else None,
             )
             artifacts.append(artifact)
 
         db.add_all(artifacts)
         db.commit()
-        print(f"Successfully imported {len(artifacts)} artifacts ({skipped} skipped).")
+        print(f"Successfully imported {len(artifacts)} artifacts ({skipped} skipped, {enriched} enriched).")
         return len(artifacts)
     except Exception:
         db.rollback()

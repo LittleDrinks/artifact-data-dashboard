@@ -454,7 +454,9 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                 })
 
                 # Execute tool
+                tool_start_time = time.time()
                 result = execute_tool(fn_name, fn_args, db)
+                tool_elapsed = round(time.time() - tool_start_time, 2)
 
                 # Log for DB storage
                 tool_calls_log.append({
@@ -470,7 +472,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                         "query": result.get("name", str(fn_args.get("artifact_id", ""))),
                         "artifactDetail": result,  # Send full artifact detail (camelCase for frontend)
                         "count": 1 if "error" not in result else 0,
-                        "elapsed": round(time.time(), 2),
+                        "elapsed": tool_elapsed,
                     })
                 elif fn_name == "query_knowledge_graph":
                     yield _sse_event("tool_call_result", {
@@ -479,7 +481,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                         "entities": result.get("entities", []),
                         "relations": result.get("relations", []),
                         "count": result.get("count", 0),
-                        "elapsed": round(time.time(), 2),
+                        "elapsed": tool_elapsed,
                     })
                 else:
                     # Default: search_artifacts and other tools
@@ -488,7 +490,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                         "query": fn_args.get("keyword", fn_args_str[:100]),
                         "results": result.get("results", []),
                         "count": result.get("count", 0),
-                        "elapsed": round(time.time(), 2),
+                        "elapsed": tool_elapsed,
                     })
 
                 # Append tool result to conversation

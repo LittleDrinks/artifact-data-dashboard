@@ -354,7 +354,7 @@ def extract_triples(
             entity_query = """
                 MATCH (e)
                 WHERE e.entity_name IS NOT NULL AND e.entity_type IS NOT NULL
-                AND NOT e.source IN ['rule', 'csv_import']
+                AND (e.source IS NULL OR NOT e.source IN ['rule', 'csv_import'])
                 RETURN e.entity_name AS name, e.entity_type AS type, e.description AS desc
                 ORDER BY e.entity_name
                 LIMIT 100
@@ -371,7 +371,7 @@ def extract_triples(
             rel_query = """
                 MATCH (a)-[r]->(b)
                 WHERE a.entity_name IS NOT NULL AND b.entity_name IS NOT NULL
-                AND NOT r.source IN ['rule', 'csv_import']
+                AND (r.source IS NULL OR NOT r.source IN ['rule', 'csv_import'])
                 RETURN a.entity_name AS src, b.entity_name AS tgt, type(r) AS rel
                 ORDER BY a.entity_name
                 LIMIT 100
