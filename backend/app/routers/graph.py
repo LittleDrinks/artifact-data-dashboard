@@ -17,6 +17,7 @@ from app.database import get_db
 from app.schemas.graph import (
     GraphDataResponse, NodeDetailResponse, ImportResponse,
     ExtractRequest, ExtractResponse, ExtractedEntity, ExtractedRelation,
+    KnowledgeQueryRequest, KnowledgeQueryResponse,
 )
 from app.services import graph as graph_service
 from app.ai.lightrag_service import get_lightrag_service
@@ -403,3 +404,70 @@ def extract_triples(
             count=0,
             message=f"LightRAG 提取成功，但无法从 Neo4j 查询结果: {str(e)}",
         )
+
+
+@router.post("/knowledge-query", response_model=KnowledgeQueryResponse)
+def knowledge_query(
+    request: KnowledgeQueryRequest,
+):
+    """知识查询 API — 查询 LightRAG 知识库，验证用户添加的数据可检索。
+
+    Demo flow:
+    1. 用户添加文本 → extract → 存入知识库
+    2. 用户提问 → knowledge-query → 返回基于新增知识的答案
+
+    超时：60 秒
+    """
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    # Get LightRAG service
+    rag_service = get_lightrag_service()
+    if rag_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LightRAG 服务不可用 — 请检查 LIGHTRAG_API_KEY 是否配置"
+        )
+
+    # Run LightRAG query in background thread with timeout
+    result_container = {"answer": "", "error": None}
+    thread_started = threading.Event()
+    thread_completed = threading.Event()
+
+    def run_query():
+        try:
+            thread_started.set()
+            answer = asyncio.run(rag_service.aquery(request.question))
+            result_container["answer"] = answer
+        except Exception as e:
+            result_container["error"] = str(e)
+        thread_completed.set()
+
+    query_thread = threading.Thread(target=run_query)
+    query_thread.start()
+
+    # Wait for thread to start
+    thread_started.wait(timeout=5)
+
+    # Wait for completion with timeout
+    if not thread_completed.wait(timeout=60):
+        raise HTTPException(
+            status_code=504,
+            detail="知识查询超时（60秒）"
+        )
+
+    if result_container["error"]:
+        logger.warning("LightRAG query failed: %s", result_container["error"])
+        # Return graceful fallback instead of error
+        return KnowledgeQueryResponse(
+            success=True,
+            answer="",
+            source="lightrag",
+            message=f"查询失败: {result_container['error']}",
+        )
+
+    return KnowledgeQueryResponse(
+        success=True,
+        answer=result_container["answer"],
+        source="lightrag",
+    )

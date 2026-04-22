@@ -87,6 +87,14 @@ export async function extractTriples(text: string): Promise<{ data: unknown }> {
   return res;
 }
 
+/** 知识查询 — 查询 LightRAG 知识库 */
+export async function knowledgeQuery(question: string): Promise<{
+  data: { success: boolean; answer: string; source: string; message?: string };
+}> {
+  const res = await client.post('/graph/knowledge-query', { question });
+  return res;
+}
+
 /** CSV 导入（multipart/form-data） */
 export async function importGraphCSV(file: File): Promise<{ data: { count: number } }> {
   const formData = new FormData();

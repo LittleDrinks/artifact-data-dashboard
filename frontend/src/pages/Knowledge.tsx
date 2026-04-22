@@ -15,9 +15,9 @@ import {
   Result,
   Tooltip,
 } from 'antd';
-import { ExperimentOutlined, UploadOutlined, DownloadOutlined, QuestionCircleOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { ExperimentOutlined, UploadOutlined, DownloadOutlined, QuestionCircleOutlined, CheckCircleOutlined, LoadingOutlined, SearchOutlined, PlusCircleOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { extractTriples, importGraphCSV, exportGraphCSV } from '../api/graph';
+import { extractTriples, importGraphCSV, exportGraphCSV, knowledgeQuery } from '../api/graph';
 
 const { TextArea } = Input;
 
@@ -54,6 +54,12 @@ export default function Knowledge() {
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
   const [extractionStep, setExtractionStep] = useState(0); // 0=idle, 1=analyzing, 2=extracting, 3=done
 
+  // Knowledge query state
+  const [queryQuestion, setQueryQuestion] = useState('');
+  const [queryAnswer, setQueryAnswer] = useState('');
+  const [querying, setQuerying] = useState(false);
+  const [hasQueried, setHasQueried] = useState(false);
+
   // CSV import state
   const [csvFile, setCsvFile] = useState<UploadFile | null>(null);
   const [csvPreview, setCsvPreview] = useState<string[][]>([]);
@@ -61,6 +67,32 @@ export default function Knowledge() {
 
   // CSV export state
   const [exporting, setExporting] = useState(false);
+
+  // Handle knowledge query
+  const handleKnowledgeQuery = async () => {
+    if (!queryQuestion.trim()) {
+      message.warning('请输入问题');
+      return;
+    }
+    setQuerying(true);
+    setQueryAnswer('');
+    try {
+      const res = await knowledgeQuery(queryQuestion);
+      const data = res.data;
+      if (data.success) {
+        setQueryAnswer(data.answer || '（知识库中暂无相关信息，请先通过"文本知识抽取"添加数据）');
+        setHasQueried(true);
+      } else {
+        message.error(data.message || '查询失败');
+      }
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      const detail = err?.response?.data?.detail || err?.message || '未知错误';
+      message.error(`查询失败：${detail}`);
+    } finally {
+      setQuerying(false);
+    }
+  };
 
   // Handle text extraction
   const handleExtract = async () => {
@@ -339,7 +371,95 @@ export default function Knowledge() {
         {renderExtractionResult()}
       </Card>
 
-      {/* Card 2: CSV Import */}
+      {/* Card 2: Knowledge Query — the core demo */}
+      <Card
+        title={
+          <Space>
+            <SearchOutlined style={{ color: '#10b981' }} />
+            <span style={{ fontWeight: 510, color: 'var(--text-heading)' }}>
+              知识检索验证
+            </span>
+            <Tooltip title="查询 LightRAG 知识库，验证添加的数据可以被检索到">
+              <QuestionCircleOutlined style={{ color: 'var(--text-muted)', cursor: 'help' }} />
+            </Tooltip>
+          </Space>
+        }
+        style={{
+          borderRadius: 'var(--r-card)',
+          boxShadow: 'var(--shadow-sm)',
+          border: '1px solid var(--border)',
+          marginBottom: 24,
+        }}
+        styles={{ body: { padding: '20px 24px' } }}
+      >
+        <Alert
+          type="success"
+          showIcon
+          icon={<PlusCircleOutlined />}
+          style={{ marginBottom: 16, borderRadius: 6 }}
+          message="数据不足？没关系 — 输入文本抽取知识后，在这里验证检索效果"
+        />
+
+        <Input.Search
+          placeholder="输入问题验证知识库，如：曾侯乙编钟是什么？"
+          value={queryQuestion}
+          onChange={(e) => {
+            setQueryQuestion(e.target.value);
+            if (queryAnswer) setQueryAnswer('');
+          }}
+          onSearch={handleKnowledgeQuery}
+          enterButton={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <SearchOutlined />
+              查询知识库
+            </span>
+          }
+          loading={querying}
+          size="large"
+          style={{ borderRadius: 8 }}
+        />
+
+        {querying && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <Spin tip="正在查询知识库..." />
+          </div>
+        )}
+
+        {hasQueried && !querying && queryAnswer && (
+          <div style={{
+            marginTop: 16,
+            padding: 16,
+            background: 'var(--bg-canvas, #f9fafb)',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>
+              知识库回答
+            </div>
+            <div style={{ color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+              {queryAnswer || '（暂无相关信息 — 请先通过上方"文本知识抽取"添加数据）'}
+            </div>
+          </div>
+        )}
+
+        {hasQueried && !querying && !queryAnswer && (
+          <div style={{
+            marginTop: 16,
+            padding: 16,
+            background: '#fffbeb',
+            borderRadius: 8,
+            border: '1px solid #fde68a',
+            color: '#92400e',
+          }}>
+            <strong>知识库暂无相关信息</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#a16207' }}>
+              请在上方"文本知识抽取"中输入相关文本，提取后再次查询即可验证扩展效果。
+            </p>
+          </div>
+        )}
+      </Card>
+
+      {/* Card 3: CSV Import */}
       <Card
         title={
           <Space>

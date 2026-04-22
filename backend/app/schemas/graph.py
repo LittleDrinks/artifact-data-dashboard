@@ -71,3 +71,16 @@ class ExtractResponse(BaseModel):
     relations: List[ExtractedRelation]
     count: int
     message: str
+
+
+class KnowledgeQueryRequest(BaseModel):
+    """知识查询请求 — 用户查询 LightRAG 知识库"""
+    question: str
+
+
+class KnowledgeQueryResponse(BaseModel):
+    """知识查询响应"""
+    success: bool
+    answer: str
+    source: str  # "lightrag" or "fallback"
+    message: Optional[str] = None
