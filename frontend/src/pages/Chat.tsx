@@ -22,7 +22,6 @@ import {
   RightOutlined,
   BulbOutlined,
   ReloadOutlined,
-  LinkOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
