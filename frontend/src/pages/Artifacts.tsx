@@ -212,7 +212,7 @@ export default function Artifacts() {
       dataIndex: 'era',
       key: 'era',
       width: 120,
-      render: (era: string | null) => era || <span style={{ color: 'var(--text-muted)' }}>—</span>,
+      render: (era: string | null) => era || <span style={{ color: 'var(--text-muted)' }}>未知</span>,
     },
     {
       title: '出土地点',
@@ -220,7 +220,7 @@ export default function Artifacts() {
       key: 'location',
       width: 160,
       ellipsis: true,
-      render: (loc: string | null) => loc || <span style={{ color: 'var(--text-muted)' }}>—</span>,
+      render: (loc: string | null) => loc || <span style={{ color: 'var(--text-muted)' }}>未知</span>,
     },
     {
       title: '操作',

@@ -1,280 +1,204 @@
-# 项目指南 — 文物大数据与人工智能集成系统
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
 
 ## 项目概述
 
-大创项目：文物大数据与人工智能集成系统。一个人机协作的文化遗产数据平台，核心是数据管理、知识图谱、AI智能问答。
+**文物大数据与人工智能集成系统** — 大创项目，人机协作的文化遗产数据平台。核心功能：数据管理、知识图谱、AI智能问答。
 
-## 技术栈（已确认，不可更改）
+**技术债务**: 详见 `docs/technical-debt.md`，包含 Neo4j 未真正发挥作用、知识抽取页面伪实现、数据质量问题等。
+
+---
+
+## 技术栈
 
 | 层级 | 技术 | 版本 |
 |------|------|------|
-| 前端 | Vite + React + TypeScript + Ant Design Pro | React 19, AntD 5 |
-| 后端 | Python FastAPI | 3.12（最低3.10，需用虚拟环境） |
+| 前端 | Vite + React + TypeScript + Ant Design | React 19, AntD 5 |
+| 后端 | Python FastAPI | 3.12（最低 3.10） |
 | AI | LangChain + LightRAG | LangChain 0.3 |
 | 关系数据库 | SQLite（WAL模式） | - |
 | 图数据库 | Neo4j | 5.x |
 | 认证 | JWT（bcrypt） | - |
-| 部署 | Docker Compose（3容器） | - |
 
-**已砍掉的（不要用）**：Node.js, Express, MySQL, Redis, CRA, WebSocket
+**已砍掉**: Node.js, Express, MySQL, Redis, CRA, WebSocket
+
+---
+
+## 常用命令
+
+### 后端开发
+
+```bash
+# 创建虚拟环境（首次）
+cd backend
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+
+# 启动开发服务器
+uvicorn app.main:app --reload --port 8000
+
+# 运行测试
+pytest tests/ -v
+
+# 创建管理员用户
+python scripts/create_admin.py
+```
+
+### 前端开发
+
+```bash
+cd frontend
+npm install
+npm run dev      # 开发服务器 http://localhost:5173
+npm run build    # 生产构建
+npm run lint     # ESLint 检查
+npm run test:e2e # Playwright E2E 测试
+```
+
+### 数据导入
+
+```bash
+# 导入文物数据到 SQLite
+python scripts/import_artifacts.py
+
+# 导入规则三元组到 Neo4j
+python scripts/import_to_neo4j.py
+```
+
+---
 
 ## 项目结构
 
 ```
 ADD_new/
-├── backend/           # FastAPI 后端
+├── backend/
 │   ├── app/
-│   │   ├── main.py    # FastAPI 入口
-│   │   ├── config.py  # 配置管理
-│   │   ├── database.py # SQLite 连接
-│   │   ├── models/    # SQLAlchemy 模型
-│   │   ├── schemas/   # Pydantic schema
-│   │   ├── routers/   # API 路由
-│   │   ├── services/  # 业务逻辑
-│   │   └── ai/        # LangChain/LightRAG
+│   │   ├── main.py          # FastAPI 入口
+│   │   ├── config.py        # 配置（环境变量）
+│   │   ├── database.py      # SQLite 连接
+│   │   ├── models/          # SQLAlchemy 模型
+│   │   ├── schemas/         # Pydantic schema
+│   │   ├── routers/         # API 路由
+│   │   ├── services/        # 业务逻辑
+│   │   └── ai/              # LightRAG 服务
 │   ├── tests/
-│   ├── requirements.txt
-│   └── alembic/       # 数据库迁移（可选）
-├── frontend/          # React 前端
+│   └── requirements.txt
+├── frontend/
 │   ├── src/
-│   │   ├── features/  # 按功能分模块
-│   │   ├── components/ # 共享组件
-│   │   ├── api/       # API 调用层
-│   │   ├── store/     # 状态管理
-│   │   └── router/    # 路由配置
-│   ├── package.json
-│   └── vite.config.ts
-├── scripts/           # 数据脚本
-├── data/              # 数据资产
-├── demo/              # UI 原型（参考，不要修改）
-└── docs/              # 项目文档（不要修改）
+│   │   ├── pages/           # 页面组件
+│   │   ├── layouts/         # 布局组件
+│   │   ├── api/             # API 调用封装
+│   │   └── main.tsx         # 入口
+│   └── package.json
+├── data/
+│   ├── final/               # 清洗后的数据（771条文物）
+│   ├── graph_data.json      # 图谱数据
+│   └── official_195_list.json
+├── docs/
+│   ├── PRD.md               # 产品需求文档
+│   ├── pitfalls.md          # 踩坑记录
+│   ├── technical-debt.md    # 技术债务
+│   └── review-round-1.md    # E2E 测试评审
+└── demo/                    # UI 原型（参考，不要修改）
 ```
 
-## MVP 页面（6个）
+---
 
-1. `/login` — 登录/注册
-2. `/` — Dashboard（统计卡片+柱状图+饼图+词云）
-3. `/artifacts` — 文物管理（搜索+筛选+列表+分页）
-4. `/artifacts/:id` — 文物详情（元数据+图片）
-5. `/graph` — 知识图谱（D3.js力导向图）
-6. `/chat` — AI智能问答（Thinking+ToolCall+Answer三阶段）
+## 核心架构
 
-## MVP API
+### 数据流
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| /api/auth/register | POST | 注册 |
-| /api/auth/login | POST | 登录（返回JWT） |
-| /api/auth/me | GET | 当前用户信息 |
-| /api/artifacts | GET | 文物列表（分页+搜索+筛选） |
-| /api/artifacts | POST | 创建文物 |
-| /api/artifacts/:id | GET | 文物详情 |
-| /api/artifacts/:id | PUT | 更新文物 |
-| /api/artifacts/:id | DELETE | 删除文物 |
-| /api/stats/overview | GET | 统计概览 |
-| /api/stats/by-era | GET | 按年代统计 |
-| /api/stats/by-category | GET | 按类别统计 |
-| /api/stats/by-location | GET | 按出土地点统计 |
-| /api/stats/wordcloud | GET | 词云数据 |
-| /api/graph/full | GET | 全图数据 |
-| /api/graph/search | GET | 图谱搜索 |
-| /api/graph/node/:node_id | GET | 节点详情 |
-| /api/chat/sessions | GET/POST | 会话管理 |
-| /api/chat/sessions | DELETE | 批量删除会话 |
-| /api/chat/sessions/:id/messages | GET | 历史消息 |
-| /api/chat/ask | POST | AI问答（SSE流式） |
-| /api/artifacts/:id/repair-image | POST | 图像修复（需认证） |
+```
+SQLite (artifacts) ──┐
+                     ├──> 知识图谱页面 (/graph)
+Neo4j (规则三元组) ──┘
 
-## SQLite 数据模型
+LightRAG KV Store ────> AI 问答 (/chat)
 
-```sql
-CREATE TABLE users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT DEFAULT 'user' CHECK(role IN ('admin','user')),
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE artifacts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  description TEXT,
-  category TEXT,
-  era TEXT,
-  location TEXT,
-  image_url TEXT,
-  tags TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE chat_sessions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER REFERENCES users(id),
-  title TEXT,
-  mode_used TEXT DEFAULT 'tool_calling',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE chat_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id INTEGER REFERENCES chat_sessions(id),
-  role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
-  content TEXT,
-  tool_calls TEXT,  -- JSON
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE attachments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  artifact_id INTEGER REFERENCES artifacts(id),
-  original_name TEXT,
-  storage_path TEXT,
-  mime_type TEXT,
-  size_bytes INTEGER,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);  -- 注意：MVP 不含附件上传功能，此表预留
+Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互通
 ```
 
-## 设计系统
+**关键问题**: Neo4j 和 LightRAG 是两套独立系统，AI 问答不查 Neo4j，知识抽取结果不可被 AI 使用。详见 `docs/technical-debt.md`。
 
-- Stripe风格，白色背景 #ffffff，深色标题 #061b31，紫色主色 #533afd
-- 字体：Söhne（或系统无衬线字体回退）
-- 参考 demo/style.css（约550行完整CSS变量体系）
-- 参考 demo/*.html 页面布局
+### API 端点
+
+| 路由 | 说明 |
+|------|------|
+| `/api/auth/*` | 登录/注册/JWT 认证 |
+| `/api/artifacts/*` | 文物 CRUD |
+| `/api/stats/*` | 统计数据 |
+| `/api/graph/*` | 知识图谱查询、导入导出、知识抽取 |
+| `/api/chat/*` | AI 问答（SSE 流式） |
+
+---
 
 ## 开发规范
 
 ### 后端
-- Python 3.12, FastAPI
+
 - 路由/服务/模型三层分离
 - Pydantic v2 schema
-- SQLAlchemy 2.0（同步即可，不需要async）
-- JWT认证，bcrypt密码哈希
-- SSE流式响应用 StreamingResponse
-- 错误处理：统一HTTPException + 错误码
+- SQLAlchemy 2.0（同步）
+- SSE 用 `StreamingResponse`
+- 错误统一 `HTTPException`
 
 ### 前端
-- Vite + React 19 + TypeScript
-- Ant Design Pro 组件库
-- 按功能分模块（features/artifacts, features/graph, features/chat 等）
-- API 调用统一封装在 api/ 目录
-- 状态管理：Zustand 或 React Context
-- SSE 使用 EventSource API
+
+- 按功能分模块（pages/features）
+- API 调用封装在 `api/` 目录
+- SSE 用 `fetch` + `ReadableStream`（POST 请求不能用 EventSource）
 - 路由：React Router v6
 
 ### Git
-- 每个 agent 每完成一个功能模块 commit 一次
-- commit message 格式：`feat(module): 描述`
-- 不要 commit node_modules, __pycache__, .env 等
+
+- commit 格式：`feat(module): 描述`
+- 不提交 `node_modules`, `__pycache__`, `.env`
+
+---
 
 ## Agent 使用规范
 
 ### 模型选择（强制）
-派 agent 时**必须**指定 `model` 参数，可选值：
-- `opus`：复杂架构决策、代码审查、需要深度思考的任务
-- `sonnet`：日常开发、功能实现、代码修改（**默认选择**）
-- `haiku`：简单查询、文件搜索、轻量任务
 
-**禁止**：不指定 model（会回退到 claude-opus-4-6，该模型不可用）
+派 agent 时**必须**指定 `model` 参数：
+- `opus`：复杂架构决策、代码审查
+- `sonnet`：日常开发、功能实现（**默认**）
+- `haiku`：简单查询、文件搜索
 
-### Subagent vs Agent Team Member
+### 验证要求
 
-| 场景 | 方式 | 说明 |
-|------|------|------|
-| 简单搜索、代码查找 | Subagent（`subagent_type`） | Explore/Plan 等内置类型，无 team 上下文 |
-| 单次独立任务 | Subagent | 用完即弃，不需要通信 |
-| 多 agent 并行协作 | **Agent Team Member**（`team_name`） | 共享 task list，可互相通信 |
-| 需要 reviewer-generator 对抗流程 | **Agent Team Member** | reviewer 审完通知 generator |
+**"编译通过" ≠ "能跑"。必须用浏览器实际验证。**
 
-### 对抗式优化流程
-1. reviewer-X：审查系统，输出问题报告到 `docs/review-round-X.md`，只审不改
-2. generator-X：按报告修复，自检，commit，通知 reviewer 确认
-3. 本轮完成后删除两个 teammate（必须同时关闭对应 tmux pane：`tmux kill-pane -t <pane_id>`），清理上下文，开启下一轮
+前端改动后必须：
+1. 启动 dev server
+2. 打开浏览器访问对应页面
+3. 验证数据有内容、交互能用、边界情况处理
 
-### 验证要求（强制）
-**"编译通过"不等于"能跑"。必须用浏览器实际看一眼。**
-
-1. 前端改动后，必须打开浏览器访问对应页面，实际操作验证
-2. 不允许只看 `npm run build` 通过就认为完成——那是最低标准
-3. 验证清单：
-   - 页面能正常加载（不白屏、不报错）
-   - 数据有内容（统计数字非零、列表有数据、图表有图形）
-   - 交互能用（按钮可点、搜索有结果、分页能翻）
-   - 边界情况（空状态有提示、图片失败有 fallback）
-4. 如果有 Playwright MCP 可用，用截图验证；没有就用 `curl` + 手动判断
-5. 发现问题则继续修复，直到页面功能正确
-
-## 工程师心智模型（强制）
-
-以下是优秀软件工程师的思维方式，**每个 agent 必须内化**：
-
-### 1. 超越快乐路径
-不要只测"正常输入"。要主动思考：
-- 数据为空时会怎样？
-- 网络断了会怎样？
-- 用户乱点会怎样？
-- 并发操作会怎样？
-
-### 2. 系统思维
-不要只看你改的那个文件。改了前端组件 → 后端接口返回的数据格式对吗？改了数据库模型 → 已有数据会兼容吗？改了 API → 前端调用处都更新了吗？
-
-### 3. 先读后写
-动手改代码前，先读懂周围的代码。理解现有架构、命名规范、数据流。不要闭着眼睛复制粘贴。
-
-### 4. 根因 > 症状
-发现 bug 时，不要只修表面现象。问三遍"为什么"：
-- 为什么这里会报错？
-- 为什么数据是空的？
-- 为什么这个状态不对？
-
-### 5. 交付即责任
-你写的代码，你是第一责任人。交付前必须：
-- 通读自己的每一行改动
-- 确认没有引入新问题
-- 确认边界情况都处理了
-- 确认浏览器里实际能跑
-
-### 6. 自动化 > 手动
-重复的事情写成脚本、测试、工具。不要手动做第三次相同的事情。
-
-### 7. 主动沟通问题
-遇到不确定的设计决策、模糊的需求、可能的技术风险——说出来，不要闷头猜。但说出来的方式是"我倾向于 X，因为 Y"，不是"你看怎么办"。
+---
 
 ## 关键约束
 
-1. **本地开发优先**：先不搞Docker，直接本地跑 FastAPI + Vite dev
-2. **不要问用户**：所有决策参考 docs/ 下的文档，拿不准就按最简方案
-3. **不要修改 docs/ 和 demo/ 目录**：这些是参考文档
-4. **数据已有**：data/artifacts_list.json 有 629 条文物数据，data/artifacts_detail/ 有详情，可以直接导入 SQLite
-5. **后端端口 8000，前端端口 5173**
-6. **CORS 允许前端跨域访问后端**
-7. **Python 需要 3.10+**（用了 `X | None` 语法），必须建虚拟环境（`python -m venv .venv`），激活后再安装依赖
-8. **Windows 环境**：Python open() 加 encoding='utf-8'，路径用 os.path.join
+1. **本地开发优先**：直接跑 FastAPI + Vite dev，不用 Docker
+2. **不要问用户**：参考 docs/ 文档，拿不准按最简方案
+3. **不要修改 docs/ 和 demo/**：这些是参考文档
+4. **数据已有**：`data/final/` 有 771 条清洗后的文物数据
+5. **端口**：后端 8000，前端 5173
+6. **CORS**：已配置允许前端跨域
+7. **Python 版本**：3.10+（用了 `X | None` 语法），必须用虚拟环境
+8. **Windows 环境**：`open()` 加 `encoding='utf-8'`，路径用 `os.path.join`
+
+---
 
 ## 踩坑记录
 
-开发过程中遇到的每个坑都要记录到 `docs/pitfalls.md`，格式：
+开发中遇到的问题实时追加到 `docs/pitfalls.md`。
 
-```markdown
-### [日期] 问题简述
-- **现象**：发生了什么
-- **原因**：根本原因
-- **解决**：怎么修的
-- **教训**：一句话总结，给后来人看
-```
-
-每个 agent 遇到非显而易见的问题时（编码错误、依赖冲突、平台兼容性、API 行为异常等），必须追加到这个文件。不要等任务结束再写，遇到就记。
-
-每个 agent 接到一个任务后：
-1. 读 CLAUDE.md 获取项目上下文
-2. 实现功能代码
-3. 本地验证（启动 dev server，确认无报错）
-4. **自我 review**（强制，不可跳过）：
-   - 通读自己改动的每一行代码，检查逻辑错误、边界情况、安全漏洞
-   - 是否所有 user story 都覆盖了？异步操作是否正常？
-   - 前端改动必须在浏览器中实际操作验证，不能只看 TypeScript 编译通过
-5. git commit
-6. 汇报完成状态和可改进点
+关键踩坑：
+- POST SSE 不能用 EventSource，必须用 fetch + ReadableStream
+- SSE 需要禁用 Nginx/代理缓冲
+- Windows 下 `open()` 必须指定 `encoding='utf-8'`
+- recharts TypeScript 类型严格，不要手动标注更窄的类型

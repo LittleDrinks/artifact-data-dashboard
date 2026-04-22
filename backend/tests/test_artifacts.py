@@ -23,7 +23,10 @@ def sample_artifact(db_session: Session):
     db_session.add(artifact)
     db_session.commit()
     db_session.refresh(artifact)
-    return artifact
+    yield artifact
+    # Teardown: delete test artifact
+    db_session.delete(artifact)
+    db_session.commit()
 
 
 @pytest.fixture
@@ -43,7 +46,11 @@ def multiple_artifacts(db_session: Session):
     db_session.commit()
     for a in artifacts:
         db_session.refresh(a)
-    return artifacts
+    yield artifacts
+    # Teardown: delete all test artifacts
+    for a in artifacts:
+        db_session.delete(a)
+    db_session.commit()
 
 
 class TestListArtifacts:

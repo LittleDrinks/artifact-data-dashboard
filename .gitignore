@@ -54,9 +54,13 @@ logs/
 backend/data/
 backend/.env
 backend/static/
+backend/.pip-cache/
 
 # Test screenshots
-tests/screenshots/
+*screenshots/
+*e2e*
+frontend/playwright-report/
+*.png
 
 # Data (large/generated files)
 data/eval/
@@ -67,3 +71,4 @@ data/final/artifacts_list_clean.json
 data/final/benchmark_qa.json
 data/final/benchmark_qa_clean.json
 data/final/filter_report.json
+

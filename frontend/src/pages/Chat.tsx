@@ -151,7 +151,17 @@ export default function Chat() {
   const loadSessionMessages = useCallback(async (sessionId: number) => {
     try {
       const msgs: ChatMessageInfo[] = await getChatMessages(sessionId);
-      const displayMsgs: DisplayMessage[] = msgs.map((m) => {
+      // Deduplicate messages by (role, content) - backend may return duplicates
+      const seen = new Set<string>();
+      const uniqueMsgs: ChatMessageInfo[] = [];
+      for (const m of msgs) {
+        const key = `${m.role}:${m.content}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueMsgs.push(m);
+        }
+      }
+      const displayMsgs: DisplayMessage[] = uniqueMsgs.map((m) => {
         const toolCalls: ToolCallEntry[] = [];
         let thinkingRounds: string[] = [];
         if (m.tool_calls) {
@@ -1261,6 +1271,8 @@ export default function Chat() {
             }}
           >
             <Input.TextArea
+              id="chat-input"
+              name="chat-input"
               ref={inputRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}

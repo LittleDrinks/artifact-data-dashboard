@@ -2,19 +2,21 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Use Tsinghua mirror for faster downloads in China
 RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-# Install dependencies first (cache layer)
 COPY requirements.txt .
 RUN pip install --no-cache-dir --timeout=120 --retries=5 -r requirements.txt
 
-# Pre-download bge-m3 embedding model (~2GB) at build time
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+# Install modelscope for faster download in China, then download bge-m3
+RUN pip install --no-cache-dir modelscope
+COPY download_model.py .
+RUN python download_model.py || \
+    echo "WARNING: Model download failed, will retry at runtime"
 
-# Copy application code
 COPY . .
 
-EXPOSE 8000
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000
+ENTRYPOINT ["/app/entrypoint.sh"]

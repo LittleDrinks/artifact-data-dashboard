@@ -93,7 +93,13 @@ def get_overview_stats(db: Session) -> OverviewStats:
     if cached is not None:
         return cached
 
-    total = db.query(func.count(Artifact.id)).scalar() or 0
+    # Exclude JUNK_CATEGORIES from total count to match artifacts list behavior
+    total = (
+        db.query(func.count(Artifact.id))
+        .filter(Artifact.category.notin_(JUNK_CATEGORIES))
+        .scalar()
+        or 0
+    )
     total_categories = (
         db.query(func.count(func.distinct(Artifact.category)))
         .filter(
