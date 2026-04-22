@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
 from app.schemas.artifact import ArtifactCreate, ArtifactUpdate
-from app.services.stats import clear_stats_cache
+from app.services.stats import JUNK_CATEGORIES, clear_stats_cache
 
 
 def _normalize_category_for_query(category: str) -> str:
@@ -28,6 +28,7 @@ def get_artifacts(
     location: Optional[str] = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
+    exclude_junk: bool = True,
 ) -> tuple[list[Artifact], int]:
     """
     Get a paginated, filtered list of artifacts.
@@ -35,6 +36,16 @@ def get_artifacts(
     Returns (artifacts_list, total_count).
     """
     query = db.query(Artifact)
+
+    # Exclude junk/maintenance categories by default
+    if exclude_junk:
+        query = query.filter(
+            or_(
+                Artifact.category.is_(None),
+                Artifact.category == "",
+                Artifact.category.notin_(JUNK_CATEGORIES),
+            )
+        )
 
     # Apply filters
     if search:
@@ -121,5 +132,8 @@ def get_distinct_values(db: Session, field: str) -> list[str]:
     column = getattr(Artifact, field, None)
     if column is None:
         return []
-    results = db.query(column).filter(column.isnot(None), column != "").distinct().all()
+    query = db.query(column).filter(column.isnot(None), column != "")
+    if field == "category":
+        query = query.filter(column.notin_(JUNK_CATEGORIES))
+    results = query.distinct().all()
     return [r[0] for r in results if r[0]]

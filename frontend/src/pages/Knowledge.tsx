@@ -10,8 +10,12 @@ import {
   message,
   Space,
   Divider,
+  Alert,
+  Steps,
+  Result,
+  Tooltip,
 } from 'antd';
-import { ExperimentOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { ExperimentOutlined, UploadOutlined, DownloadOutlined, QuestionCircleOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { extractTriples, importGraphCSV, exportGraphCSV } from '../api/graph';
 
@@ -48,6 +52,7 @@ export default function Knowledge() {
   const [extractText, setExtractText] = useState('');
   const [extracting, setExtracting] = useState(false);
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
+  const [extractionStep, setExtractionStep] = useState(0); // 0=idle, 1=analyzing, 2=extracting, 3=done
 
   // CSV import state
   const [csvFile, setCsvFile] = useState<UploadFile | null>(null);
@@ -66,8 +71,12 @@ export default function Knowledge() {
 
     setExtracting(true);
     setExtractionResult(null);
+    setExtractionStep(1);
 
     try {
+      // Simulate step progression for UX feedback
+      setTimeout(() => setExtractionStep(2), 800);
+
       const res = await extractTriples(extractText);
       const data = res.data as {
         success: boolean;
@@ -76,6 +85,8 @@ export default function Knowledge() {
         count: number;
         message: string;
       };
+
+      setExtractionStep(3);
 
       if (data.success) {
         // Map backend field names to frontend format
@@ -89,14 +100,16 @@ export default function Knowledge() {
           target: r.tgt_name || '',
         }));
         setExtractionResult({ entities: mappedEntities, relations: mappedRelations });
-        message.success(data.message || `抽取完成，${data.count} 个结果`);
+        message.success(`抽取完成：发现 ${mappedEntities.length} 个实体、${mappedRelations.length} 个关系`);
       } else {
         message.error(data.message || '抽取失败');
+        setExtractionStep(0);
       }
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } }; message?: string };
       const detail = err?.response?.data?.detail || err?.message || '未知错误';
       message.error(`抽取失败：${detail}`);
+      setExtractionStep(0);
     } finally {
       setExtracting(false);
     }
@@ -240,6 +253,9 @@ export default function Knowledge() {
             <span style={{ fontWeight: 510, color: 'var(--text-heading)' }}>
               文本知识抽取
             </span>
+            <Tooltip title="从文本中自动识别文物、朝代、地点等实体，并抽取它们之间的关系">
+              <QuestionCircleOutlined style={{ color: 'var(--text-muted)', cursor: 'help' }} />
+            </Tooltip>
           </Space>
         }
         style={{
@@ -250,35 +266,74 @@ export default function Knowledge() {
         }}
         styles={{ body: { padding: '20px 24px' } }}
       >
+        {/* Help text */}
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16, borderRadius: 6 }}
+          message="输入文物相关文本，系统将自动识别实体（文物、朝代、地点、类别等）并抽取关系三元组"
+        />
+
         <TextArea
           rows={8}
-          placeholder="请输入文物相关文本，如考古报告、文物描述、历史文献..."
+          placeholder="示例：越王勾践剑是春秋晚期越国的青铜剑，1965年出土于湖北江陵望山楚墓，现藏于湖北省博物馆。剑身刻有"越王鸠浅自作用剑"铭文，被誉为"天下第一剑"。"
           value={extractText}
-          onChange={(e) => setExtractText(e.target.value)}
+          onChange={(e) => {
+            setExtractText(e.target.value);
+            if (extractionStep > 0) setExtractionStep(0);
+            if (extractionResult) setExtractionResult(null);
+          }}
           style={{
             borderRadius: 8,
             border: '1px solid var(--border)',
             resize: 'none',
           }}
         />
-        <Button
-          type="primary"
-          onClick={handleExtract}
-          loading={extracting}
-          disabled={!extractText.trim()}
-          style={{
-            marginTop: 12,
-            background: 'var(--purple)',
-            borderRadius: 6,
-          }}
-        >
-          {extracting ? '正在抽取实体和关系...' : '开始抽取'}
-        </Button>
 
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Button
+            type="primary"
+            onClick={handleExtract}
+            loading={extracting}
+            disabled={!extractText.trim()}
+            style={{
+              background: 'var(--purple)',
+              borderRadius: 6,
+            }}
+          >
+            {extracting ? '正在抽取...' : '开始抽取'}
+          </Button>
+
+          {extractText.trim() && (
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              输入 {extractText.length} 字
+            </span>
+          )}
+        </div>
+
+        {/* Progress indicator */}
         {extracting && (
-          <div style={{ marginTop: 16, textAlign: 'center' }}>
-            <Spin><span style={{ color: 'var(--text-muted)' }}>正在抽取实体和关系...</span></Spin>
+          <div style={{ marginTop: 16 }}>
+            <Steps
+              size="small"
+              current={extractionStep}
+              items={[
+                { title: '分析文本', icon: extractionStep >= 1 ? <LoadingOutlined /> : undefined },
+                { title: '识别实体', icon: extractionStep >= 2 ? <LoadingOutlined /> : undefined },
+                { title: '抽取关系', icon: extractionStep >= 3 ? <CheckCircleOutlined /> : undefined },
+              ]}
+            />
           </div>
+        )}
+
+        {/* Success indicator */}
+        {extractionStep === 3 && extractionResult && !extracting && (
+          <Result
+            status="success"
+            title="抽取完成"
+            subTitle={`发现 ${extractionResult.entities.length} 个实体、${extractionResult.relations.length} 个关系`}
+            style={{ padding: '12px 0' }}
+          />
         )}
 
         {renderExtractionResult()}
