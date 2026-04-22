@@ -1,6 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   Input,
   Button,
@@ -22,6 +22,7 @@ import {
   RightOutlined,
   BulbOutlined,
   ReloadOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import {
   getChatSessions,
@@ -742,6 +743,42 @@ export default function Chat() {
     }
   };
 
+  // ── Build artifact name→id map from tool calls ──
+  const buildArtifactNameMap = (msg: DisplayMessage): Map<string, number> => {
+    const map = new Map<string, number>();
+    for (const tc of msg.toolCalls) {
+      if (tc.tool === 'search_artifacts') {
+        for (const r of tc.results) {
+          if (r.name && r.id) map.set(r.name, r.id);
+        }
+      }
+      if (tc.tool === 'get_artifact_detail' && tc.artifactDetail) {
+        if (tc.artifactDetail.name && tc.artifactDetail.id) {
+          map.set(tc.artifactDetail.name, tc.artifactDetail.id);
+        }
+      }
+    }
+    return map;
+  };
+
+  // ── Pre-process content: wrap artifact names in markdown links ──
+  const linkifyArtifactNames = (content: string, nameMap: Map<string, number>): string => {
+    if (nameMap.size === 0 || !content) return content;
+    // Sort names by length (longest first) to avoid partial matches
+    const names = [...nameMap.keys()].sort((a, b) => b.length - a.length);
+    let result = content;
+    for (const name of names) {
+      const id = nameMap.get(name)!;
+      // Only replace if the name appears as plain text (not already in a markdown link)
+      // Use a regex that avoids matching inside markdown link syntax
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Match the name when NOT preceded by '(' (part of markdown link) and NOT followed by ')' (part of markdown link)
+      const regex = new RegExp(`(?<!\\[)(?<!\\]\\()(?:\\*\\*)?${escaped}(?:\\*\\*)?(?!\\]\\()`, 'g');
+      result = result.replace(regex, `**[${name}](/artifacts/${id})**`);
+    }
+    return result;
+  };
+
   // ── Render interleaved ReAct rounds (thinking + tool call paired) ──
   const renderReActRounds = (msg: DisplayMessage) => {
     if (msg.thinkingRounds.length === 0 && msg.toolCalls.length === 0) return null;
@@ -922,6 +959,7 @@ export default function Chat() {
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
+          transition: 'flex-basis 0.2s ease',
         }}
       >
         {/* Header */}
@@ -1117,9 +1155,35 @@ export default function Chat() {
                             {children}
                           </code>
                         ),
+                        a: ({ href, children }) => {
+                          // If this is an internal artifact link, render as React Router Link
+                          if (href && href.startsWith('/artifacts/')) {
+                            return (
+                              <Link
+                                to={href}
+                                style={{
+                                  color: '#533afd',
+                                  textDecoration: 'none',
+                                  fontWeight: 500,
+                                  borderBottom: '1px solid rgba(83,58,253,0.3)',
+                                  transition: 'border-color 0.15s',
+                                }}
+                                onMouseEnter={(e) => {
+                                  (e.currentTarget as HTMLElement).style.borderBottomColor = '#533afd';
+                                }}
+                                onMouseLeave={(e) => {
+                                  (e.currentTarget as HTMLElement).style.borderBottomColor = 'rgba(83,58,253,0.3)';
+                                }}
+                              >
+                                {children}
+                              </Link>
+                            );
+                          }
+                          return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                        },
                       }}
                     >
-                      {msg.content}
+                      {linkifyArtifactNames(msg.content, buildArtifactNameMap(msg))}
                     </ReactMarkdown>
                   ) : (
                     <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
@@ -1180,6 +1244,7 @@ export default function Chat() {
             padding: '16px 24px',
             borderTop: '1px solid #e5edf5',
             background: '#f6f9fc',
+            flexShrink: 0,
           }}
         >
           <div
@@ -1235,6 +1300,7 @@ export default function Chat() {
         <div
           style={{
             width: 340,
+            flexShrink: 0,
             borderLeft: '1px solid #e5edf5',
             background: '#fff',
             display: 'flex',

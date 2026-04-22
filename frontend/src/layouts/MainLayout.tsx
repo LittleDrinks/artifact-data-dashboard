@@ -10,6 +10,8 @@ import {
   UserOutlined,
   ExperimentOutlined,
   MenuOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../hooks/useAuth';
 
@@ -188,6 +190,45 @@ export default function MainLayout() {
           items={menuItems}
           style={{ border: 'none', background: 'transparent', padding: '8px', marginTop: 4 }}
         />
+
+        {/* Collapse/expand toggle at bottom of sider */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 48,
+            left: 0,
+            right: 0,
+            display: 'flex',
+            justifyContent: collapsed ? 'center' : 'flex-end',
+            padding: collapsed ? '4px 0' : '4px 12px',
+          }}
+        >
+          <div
+            onClick={() => setCollapsed(!collapsed)}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#94a3b8',
+              transition: 'all 0.15s',
+              background: 'transparent',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = '#f0f4f8';
+              (e.currentTarget as HTMLElement).style.color = '#061b31';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = 'transparent';
+              (e.currentTarget as HTMLElement).style.color = '#94a3b8';
+            }}
+          >
+            {collapsed ? <RightOutlined style={{ fontSize: 12 }} /> : <LeftOutlined style={{ fontSize: 12 }} />}
+          </div>
+        </div>
 
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 4 }}>
