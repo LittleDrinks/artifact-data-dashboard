@@ -92,6 +92,27 @@ def _load_detail_data(name: str) -> dict:
         return {}
 
 
+def _validate_description(name: str, description: str | None) -> str | None:
+    """Validate that description contains the artifact name.
+
+    If description doesn't contain the artifact name (even partially),
+    it's likely scraped from a wrong source and should be discarded.
+    """
+    if not description or not name:
+        return None
+    # Check if any significant part of the name appears in description
+    # Handle cases like "后母戊鼎" appearing in description of "后母戊鼎"
+    name_parts = name.split()
+    for part in name_parts:
+        if len(part) >= 2 and part in description:
+            return description
+    # Also check if description contains at least 2 chars of the name
+    if len(name) >= 2 and name[:2] in description:
+        return description
+    # Description doesn't match the artifact name - likely wrong data
+    return None
+
+
 def _clean_location(location: str | None) -> str | None:
     """Clean location field: remove description text, keep only place name."""
     if not location:
@@ -107,6 +128,19 @@ def _clean_location(location: str | None) -> str | None:
         # If still too long, return None (discard)
         return None
     return location.strip()
+
+
+def _default_era(category: str | None) -> str | None:
+    """Provide default era based on category if era is missing."""
+    if not category:
+        return None
+    # Common category-era mappings for Chinese artifacts
+    category_lower = category.lower()
+    if "青铜" in category_lower or "铜" in category_lower:
+        return "商周"
+    if "陶" in category_lower or "瓷" in category_lower:
+        return "古代"
+    return None
 
 
 def seed_artifacts() -> int:
@@ -148,6 +182,14 @@ def seed_artifacts() -> int:
                 category = _normalize_category(detail.get("category")) or category
                 source_url = detail.get("url") or source_url
 
+            # Validate description contains artifact name (BUG-1 fix)
+            raw_description = detail.get("summary") if detail else None
+            description = _validate_description(name, raw_description)
+
+            # Set default era if missing (BUG-5 fix)
+            if not era:
+                era = _default_era(category)
+
             artifact = Artifact(
                 name=name,
                 category=category,
@@ -158,7 +200,7 @@ def seed_artifacts() -> int:
                 museum=detail.get("museum") if detail else None,
                 dimensions=detail.get("dimensions") if detail else None,
                 location=_clean_location(detail.get("location")) if detail else None,
-                description=detail.get("summary") if detail else None,
+                description=description,
             )
             artifacts.append(artifact)
 
@@ -166,6 +208,33 @@ def seed_artifacts() -> int:
         db.commit()
         print(f"Successfully imported {len(artifacts)} artifacts ({skipped} skipped, {enriched} enriched).")
         return len(artifacts)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def cleanup_bad_descriptions() -> int:
+    """Clean up existing bad descriptions in the database.
+
+    Remove descriptions that don't contain the artifact name.
+    Run this as: python -c "from seed import cleanup_bad_descriptions; cleanup_bad_descriptions()"
+    """
+    init_db()
+    db = SessionLocal()
+    try:
+        artifacts = db.query(Artifact).all()
+        cleaned = 0
+        for art in artifacts:
+            if art.description:
+                validated = _validate_description(art.name, art.description)
+                if validated is None:
+                    art.description = None
+                    cleaned += 1
+        db.commit()
+        print(f"Cleaned {cleaned} bad descriptions out of {len(artifacts)} artifacts.")
+        return cleaned
     except Exception:
         db.rollback()
         raise

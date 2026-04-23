@@ -292,6 +292,8 @@ def extract_triples(
     4. 返回结构化结果
 
     超时：120 秒
+
+    BUG-2 fix: Return empty results gracefully when LightRAG is unavailable.
     """
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="文本内容不能为空")
@@ -299,9 +301,14 @@ def extract_triples(
     # Get LightRAG service
     rag_service = get_lightrag_service()
     if rag_service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="LightRAG 服务不可用 — 请检查 LIGHTRAG_API_KEY 是否配置"
+        # BUG-2 fix: Return empty result instead of 503
+        logger.info("LightRAG service unavailable — returning empty extraction result")
+        return ExtractResponse(
+            success=True,
+            entities=[],
+            relations=[],
+            count=0,
+            message="LightRAG 服务未配置 — 请设置 LIGHTRAG_API_KEY 环境变量",
         )
 
     # Run LightRAG insert in background thread with timeout
@@ -417,6 +424,8 @@ def knowledge_query(
     2. 用户提问 → knowledge-query → 返回基于新增知识的答案
 
     超时：60 秒
+
+    BUG-2 fix: Return empty results gracefully when LightRAG is unavailable.
     """
     if not request.question or not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
@@ -424,9 +433,13 @@ def knowledge_query(
     # Get LightRAG service
     rag_service = get_lightrag_service()
     if rag_service is None:
-        raise HTTPException(
-            status_code=503,
-            detail="LightRAG 服务不可用 — 请检查 LIGHTRAG_API_KEY 是否配置"
+        # BUG-2 fix: Return empty result instead of 503
+        logger.info("LightRAG service unavailable — returning empty result")
+        return KnowledgeQueryResponse(
+            success=True,
+            answer="",
+            source="lightrag",
+            message="LightRAG 服务未配置 — 请设置 LIGHTRAG_API_KEY 环境变量",
         )
 
     # Run LightRAG query in background thread with timeout

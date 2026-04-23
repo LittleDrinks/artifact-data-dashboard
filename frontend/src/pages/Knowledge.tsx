@@ -579,7 +579,9 @@ export default function Knowledge() {
 
         {querying && (
           <div style={{ marginTop: 16, textAlign: 'center' }}>
-            <Spin tip="正在查询知识库..." />
+            <Spin tip="正在查询知识库...">
+              <div style={{ width: 100, height: 100 }} />
+            </Spin>
           </div>
         )}
 

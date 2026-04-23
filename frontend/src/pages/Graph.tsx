@@ -565,7 +565,9 @@ export default function Graph() {
               zIndex: 10,
             }}
           >
-            <Spin size="large" tip="加载图谱数据..." />
+            <Spin size="large" tip="加载图谱数据...">
+              <div style={{ width: 100, height: 100 }} />
+            </Spin>
           </div>
         )}
 

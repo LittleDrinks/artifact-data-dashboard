@@ -431,7 +431,7 @@ export default function Artifacts() {
         okText={editingArtifact ? '保存' : '创建'}
         cancelText="取消"
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}
