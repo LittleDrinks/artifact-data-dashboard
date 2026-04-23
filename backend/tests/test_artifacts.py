@@ -24,9 +24,11 @@ def sample_artifact(db_session: Session):
     db_session.commit()
     db_session.refresh(artifact)
     yield artifact
-    # Teardown: delete test artifact
-    db_session.delete(artifact)
-    db_session.commit()
+    # Teardown: delete test artifact (check if still exists)
+    existing = db_session.get(Artifact, artifact.id)
+    if existing:
+        db_session.delete(existing)
+        db_session.commit()
 
 
 @pytest.fixture

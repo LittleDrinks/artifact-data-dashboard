@@ -289,7 +289,13 @@ export default function Knowledge() {
           target: r.tgt_name || '',
         }));
         setExtractionResult({ entities: mappedEntities, relations: mappedRelations });
-        message.success(`抽取完成：发现 ${mappedEntities.length} 个实体、${mappedRelations.length} 个关系`);
+
+        // Show appropriate message based on result
+        if (mappedEntities.length === 0 && mappedRelations.length === 0) {
+          message.warning(data.message || '未提取到实体和关系，请检查文本内容或 LightRAG 配置');
+        } else {
+          message.success(`抽取完成：发现 ${mappedEntities.length} 个实体、${mappedRelations.length} 个关系`);
+        }
       } else {
         message.error(data.message || '抽取失败');
         setExtractionStep(0);

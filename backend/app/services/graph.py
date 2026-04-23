@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.artifact import Artifact
 from app.schemas.graph import GraphNode, GraphLink
+from app.services.stats import JUNK_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -587,12 +588,16 @@ def build_graph_from_artifacts(
     for art in artifacts:
         if art.era:
             reserved_names.add(art.era)
-        if art.category:
+        if art.category and art.category not in JUNK_CATEGORIES:
             reserved_names.add(art.category)
         if art.location:
             reserved_names.add(art.location)
 
     for art in artifacts:
+        # --- Skip artifacts with junk categories (Wikipedia maintenance categories) ---
+        if art.category and art.category in JUNK_CATEGORIES:
+            continue
+
         # --- 文物节点 ---
         art_node_id = f"artifact_{art.id}"
         nodes[art_node_id] = GraphNode(

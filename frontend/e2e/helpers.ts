@@ -7,29 +7,44 @@ const API_BASE = 'http://localhost:8000/api';
 /**
  * 登录辅助函数
  * 先用 API 注册（如果不存在）/登录获取 token，然后设置 localStorage
+ * 包含 429 重试逻辑（最多 3 次，每次等待 1s）
  */
 export async function login(
   page: Page,
   username: string = 'testuser',
   password: string = 'testpass123'
 ): Promise<void> {
-  // 尝试注册
-  const registerRes = await page.request.post(`${API_BASE}/auth/register`, {
-    data: { username, email: `${username}@test.com`, password, confirm_password: password },
-    failOnStatusCode: false,
-  });
+  // 尝试注册（带重试）
+  let registerRes;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    registerRes = await page.request.post(`${API_BASE}/auth/register`, {
+      data: { username, email: `${username}@test.com`, password, confirm_password: password },
+      failOnStatusCode: false,
+    });
+    if (registerRes.status() !== 429) break;
+    await page.waitForTimeout(1000 * (attempt + 1)); // Exponential backoff: 1s, 2s, 3s
+  }
 
   // 如果注册失败（用户已存在），则直接登录
-  if (registerRes.status() !== 200 && registerRes.status() !== 201) {
+  if (registerRes && registerRes.status() !== 200 && registerRes.status() !== 201) {
     // 用户可能已存在，尝试登录
   }
 
-  // 登录获取 token
-  const loginRes = await page.request.post(`${API_BASE}/auth/login`, {
-    data: { username, password },
-  });
+  // 登录获取 token（带重试）
+  let loginRes;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    loginRes = await page.request.post(`${API_BASE}/auth/login`, {
+      data: { username, password },
+      failOnStatusCode: false,
+    });
+    if (loginRes.status() !== 429) break;
+    await page.waitForTimeout(1000 * (attempt + 1)); // Exponential backoff
+  }
 
-  expect(loginRes.status()).toBe(200);
+  if (!loginRes || loginRes.status() !== 200) {
+    throw new Error(`Login failed after retries: status ${loginRes?.status()}`);
+  }
+
   const loginData = await loginRes.json();
   const token = loginData.access_token;
 

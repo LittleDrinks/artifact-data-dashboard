@@ -79,6 +79,8 @@ def client(test_engine):
     test_app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
     test_app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
     test_app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+    from app.routers import graph
+    test_app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
 
     # Override get_db dependency
     test_app.dependency_overrides[get_db] = override_get_db

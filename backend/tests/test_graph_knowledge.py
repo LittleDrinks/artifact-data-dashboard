@@ -47,15 +47,18 @@ class TestExtractValidation:
         resp = graph_client.post("/api/graph/extract", json={"text": "   \n\t  "})
         assert resp.status_code == 400
 
-    def test_extract_no_lightrag_returns_503(self, graph_client):
-        """When LightRAG service is None, should return 503."""
+    def test_extract_no_lightrag_returns_graceful_fallback(self, graph_client):
+        """When LightRAG service is None, should return 200 with empty results (graceful fallback)."""
         with patch("app.routers.graph.get_lightrag_service", return_value=None):
             resp = graph_client.post(
                 "/api/graph/extract",
                 json={"text": "这是一段测试文本"},
             )
-            assert resp.status_code == 503
-            assert "LightRAG" in resp.json()["detail"]
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["count"] == 0
+            assert "LightRAG" in data["message"]
 
 
 # ── Test: Knowledge Query endpoint (NEW) ─────────────────────────────
@@ -75,14 +78,18 @@ class TestKnowledgeQuery:
         )
         assert resp.status_code == 400
 
-    def test_knowledge_query_no_lightrag_returns_503(self, graph_client):
-        """When LightRAG is not configured, return 503."""
+    def test_knowledge_query_no_lightrag_returns_graceful_fallback(self, graph_client):
+        """When LightRAG is not configured, return 200 with empty answer (graceful fallback)."""
         with patch("app.routers.graph.get_lightrag_service", return_value=None):
             resp = graph_client.post(
                 "/api/graph/knowledge-query",
                 json={"question": "越王勾践剑是什么？"},
             )
-            assert resp.status_code == 503
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["answer"] == ""
+            assert data["source"] == "lightrag"
 
     def test_knowledge_query_success_returns_answer(self, graph_client, mock_lightrag_service):
         """Successful query returns the LightRAG answer."""
