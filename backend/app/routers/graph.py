@@ -198,6 +198,7 @@ async def import_graph_csv(
         )
 
     # Import to Neo4j
+    driver = None
     try:
         driver = GraphDatabase.driver(
             settings.NEO4J_URI,
@@ -261,8 +262,6 @@ async def import_graph_csv(
                 )
                 relations_imported += 1
 
-        driver.close()
-
         return ImportResponse(
             success=True,
             nodes_imported=nodes_imported,
@@ -277,6 +276,9 @@ async def import_graph_csv(
             status_code=500,
             detail=f"Neo4j 导入失败: {str(e)}"
         )
+    finally:
+        if driver:
+            driver.close()
 
 
 @router.post("/extract", response_model=ExtractResponse)

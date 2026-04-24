@@ -61,7 +61,7 @@ app.include_router(repair.router, prefix="/api/artifacts", tags=["repair"])
 # In production, frontend is built to frontend/dist and served by FastAPI
 # In development, frontend runs on Vite dev server (port 5173) with CORS
 static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
-if os.path.isdir(static_dir) and not settings.DEBUG:
+if os.path.isdir(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 

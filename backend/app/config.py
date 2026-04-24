@@ -78,9 +78,6 @@ class Settings(BaseSettings):
         if not self.LIGHTRAG_DIR:
             self.LIGHTRAG_DIR = str(Path(__file__).parent.parent / "data" / "lightrag")
 
-        if self.JWT_SECRET_KEY == "your-secret-key-change-in-production":
-            import secrets
-            self.JWT_SECRET_KEY = secrets.token_urlsafe(32)
 
 
 settings = Settings()

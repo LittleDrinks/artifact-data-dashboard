@@ -55,6 +55,16 @@ export default function MainLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // Listen for auth:logout event from API client (401 handler)
+  useEffect(() => {
+    const handleAuthLogout = () => {
+      logout();
+      navigate('/login', { replace: true });
+    };
+    window.addEventListener('auth:logout', handleAuthLogout);
+    return () => window.removeEventListener('auth:logout', handleAuthLogout);
+  }, [logout, navigate]);
+
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>

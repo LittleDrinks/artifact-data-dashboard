@@ -21,6 +21,7 @@ client.interceptors.request.use(
 );
 
 // 响应拦截器：401 时跳转登录页（但不在登录页本身触发）
+// 使用自定义事件通知 React Router，避免整页刷新
 client.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -28,7 +29,9 @@ client.interceptors.response.use(
       // Don't redirect if already on login page — the login form handles its own errors
       if (window.location.pathname !== '/login') {
         localStorage.removeItem('token');
-        window.location.href = '/login';
+        // Dispatch custom event that React components can listen to
+        // This avoids using window.location.href which causes full page reload
+        window.dispatchEvent(new CustomEvent('auth:logout', { detail: { reason: 'unauthorized' } }));
       }
     }
     return Promise.reject(error);

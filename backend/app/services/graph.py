@@ -854,7 +854,7 @@ def search_graph(
     matched_count = len(matched_node_ids)
 
     if not matched_node_ids:
-        return _filter_graph_by_types(nodes_dict, links_dict, types), 0
+        return [], [], 0
 
     # Multi-hop neighbor expansion
     result_node_ids: Set[str] = set(matched_node_ids)

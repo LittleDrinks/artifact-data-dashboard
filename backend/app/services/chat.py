@@ -21,7 +21,7 @@ from typing import Optional
 
 from openai import OpenAI
 import httpx
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.models.chat import ChatSession, ChatMessage
@@ -96,7 +96,8 @@ def get_user_sessions(
     query = db.query(ChatSession).filter(ChatSession.user_id == user_id)
     total = query.count()
     sessions = (
-        query.order_by(ChatSession.created_at.desc())
+        query.options(joinedload(ChatSession.messages))
+        .order_by(ChatSession.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -176,14 +177,21 @@ def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
 
     Only returns user/assistant messages (no system).
     """
-    messages = (
-        db.query(ChatMessage)
+    # Get the most recent message IDs first
+    recent_ids_subq = (
+        db.query(ChatMessage.id)
         .filter(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.id.desc())
         .limit(limit)
+        .subquery()
+    )
+    # Then query those messages in ascending order (chronological)
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.id.in_(db.query(recent_ids_subq.c.id)))
+        .order_by(ChatMessage.id.asc())
         .all()
     )
-    messages.reverse()  # chronological order
 
     result: list[dict] = []
     for m in messages:

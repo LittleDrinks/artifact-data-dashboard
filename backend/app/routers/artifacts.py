@@ -86,6 +86,8 @@ def export_artifacts_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
+    # UTF-8 BOM for Excel compatibility
+    output.write("\ufeff")
     writer.writerow(["id", "name", "category", "era", "location", "material", "museum", "tags"])
 
     for art in artifacts:
