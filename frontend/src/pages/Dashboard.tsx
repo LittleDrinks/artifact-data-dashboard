@@ -1,4 +1,4 @@
-import { Card, Row, Col, Statistic, Spin, Empty, Tooltip as AntTooltip, Skeleton } from 'antd';
+import { Card, Row, Col, Statistic, Spin, Empty, Tooltip as AntTooltip, Skeleton, Alert } from 'antd';
 import {
   AppstoreOutlined,
   CalendarOutlined,
@@ -126,9 +126,9 @@ function StatCards({
   }
 
   return (
-    <Row gutter={20} style={{ marginBottom: 24 }}>
+    <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
       {cards.map((item) => (
-        <Col span={6} key={item.title}>
+        <Col xs={12} sm={12} md={6} key={item.title}>
           <Card
             style={{
               borderRadius: 'var(--r-card)',
@@ -649,12 +649,13 @@ export default function Dashboard() {
   const [wordCloudData, setWordCloudData] = useState<WordCloudItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getOverview()
       .then(setOverview)
       .catch(() => {
-        // overview stays null, cards show 0 via nullish coalescing
+        setError('加载统计数据失败');
       })
       .finally(() => setLoading(false));
   }, []);
@@ -674,15 +675,25 @@ export default function Dashboard() {
 
   return (
     <div>
+      {/* ── Error Alert ── */}
+      {error && (
+        <Alert
+          type="error"
+          message={error}
+          style={{ marginBottom: 16 }}
+          closable
+          onClose={() => setError(null)}
+        />
+      )}
       {/* ── Stat Cards ── */}
       <StatCards stats={overview} loading={loading} />
 
       {/* ── Charts Row ── */}
-      <Row gutter={20} style={{ marginBottom: 24 }}>
-        <Col span={12}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} md={12}>
           <EraBarChart data={eraData} loading={chartLoading} />
         </Col>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <CategoryPieChart data={categoryData} loading={chartLoading} />
         </Col>
       </Row>

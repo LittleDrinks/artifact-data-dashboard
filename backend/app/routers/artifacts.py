@@ -139,7 +139,7 @@ def update_artifact(
     return artifact
 
 
-@router.delete("/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{artifact_id}")
 def delete_artifact(
     artifact_id: int,
     db: Session = Depends(get_db),
@@ -155,6 +155,6 @@ def delete_artifact(
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"文物 ID {artifact_id} 不存在",
+            detail=f"文物 ID {artifact_id} 不存在或已被删除",
         )
-    return None
+    return {"success": True, "deleted_id": artifact_id}

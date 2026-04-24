@@ -12,6 +12,7 @@ const Graph = lazy(() => import('./pages/Graph'));
 const Chat = lazy(() => import('./pages/Chat'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
 const KnowledgeDemo = lazy(() => import('./pages/KnowledgeDemo'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 /** Loading fallback */
 function PageLoader() {
@@ -36,6 +37,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   if (!token) {
     return <Navigate to="/login" replace />;
   }
+  // Token 存在但可能已过期 — API 层 401 拦截会自动跳转
   return <>{children}</>;
 }
 
@@ -67,8 +69,8 @@ export default function App() {
               <Route path="knowledge-demo" element={<KnowledgeDemo />} />
             </Route>
 
-            {/* 未匹配路由重定向 */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {/* 未匹配路由 — 404 页面 */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

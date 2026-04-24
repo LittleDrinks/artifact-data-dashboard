@@ -4,12 +4,14 @@ Configures CORS, includes routers, and sets up startup/shutdown events.
 """
 
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
@@ -54,6 +56,13 @@ app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(repair.router, prefix="/api/artifacts", tags=["repair"])
+
+# ── Mount frontend static files (production only) ──
+# In production, frontend is built to frontend/dist and served by FastAPI
+# In development, frontend runs on Vite dev server (port 5173) with CORS
+static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
+if os.path.isdir(static_dir) and not settings.DEBUG:
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 @app.exception_handler(Exception)

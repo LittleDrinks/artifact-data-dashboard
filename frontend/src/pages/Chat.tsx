@@ -115,7 +115,7 @@ export default function Chat() {
       const data = await getChatSessions(1, 50);
       setSessions(data.items);
     } catch {
-      // Silently fail
+      message.error('加载会话列表失败');
     }
   }, []);
 
