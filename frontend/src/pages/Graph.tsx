@@ -532,7 +532,8 @@ export default function Graph() {
     <div
       style={{
         display: 'flex',
-        height: 'calc(100vh - 64px)',
+        flex: 1,
+        minHeight: 0,
         gap: 0,
         background: '#f8fafc',
       }}

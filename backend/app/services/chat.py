@@ -351,17 +351,28 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
             if use_tools:
                 kwargs["tools"] = TOOL_DEFINITIONS
             stream = client.chat.completions.create(**kwargs)
-        except (httpx.TimeoutException, Exception) as exc:
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as exc:
+            # Specific network/timeout errors - these are expected and should be handled gracefully
             err_msg = str(exc)[:300]
-            # If model doesn't support tools, retry without
+            logger.warning("LLM network error: %s", err_msg)
+            yield _sse_event("answer_start", {})
+            yield _sse_event("answer_delta", {
+                "content": "抱歉，AI 服务暂时响应超时，请稍后重试。"
+            })
+            yield _sse_event("answer_end", {})
+            return content_text
+        except Exception as exc:
+            # Unexpected errors - check if it's a tool-unsupported error first (for retry)
+            err_msg = str(exc)[:300]
             if use_tools and ("tool" in err_msg.lower() or "function" in err_msg.lower() or "does not support" in err_msg.lower() or "400" in err_msg):
                 logger.warning("Model %s may not support tools, retrying without: %s", settings.AI_MODEL_NAME, err_msg)
                 use_tools = False
                 continue
-            logger.warning("LLM stream creation failed: %s", err_msg)
+            # Other unexpected errors - log full traceback and return generic message
+            logger.error("LLM stream creation failed unexpectedly: %s", err_msg, exc_info=True)
             yield _sse_event("answer_start", {})
             yield _sse_event("answer_delta", {
-                "content": "抱歉，AI 服务暂时响应超时，请稍后重试。"
+                "content": "抱歉，AI 服务出现异常，请稍后重试。"
             })
             yield _sse_event("answer_end", {})
             return content_text

@@ -23,21 +23,28 @@ _RATE_LIMIT_MAX = 5  # attempts per window
 
 
 def _check_rate_limit(client_ip: str) -> None:
-    """Raise 429 if client_ip exceeds login rate limit."""
+    """Raise 429 if client_ip exceeds login rate limit.
+
+    Uses TTL-based lazy cleanup instead of scanning all keys on every request.
+    """
     if not settings.RATE_LIMIT_ENABLED:
         return
     now = time.time()
-    # Prune ALL expired keys to prevent memory leak
-    expired_keys = [
-        k for k, v in _login_attempts.items()
-        if not v or now - v[-1] > _RATE_LIMIT_WINDOW
-    ]
-    for k in expired_keys:
-        del _login_attempts[k]
 
-    # Prune old entries for this IP
+    # Lazy cleanup: only prune entries for this IP (not all IPs)
+    # This avoids O(n) scan of all keys on every request
     attempts = _login_attempts[client_ip]
+    # Prune old entries for this IP only
     _login_attempts[client_ip] = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+
+    # Periodically clean up empty IPs to prevent memory leak (1% probability)
+    # This spreads the cleanup cost across requests instead of doing it every time
+    import random
+    if random.random() < 0.01:
+        empty_ips = [ip for ip, ts in _login_attempts.items() if not ts]
+        for ip in empty_ips:
+            del _login_attempts[ip]
+
     if len(_login_attempts[client_ip]) >= _RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -98,13 +105,24 @@ def get_current_user(
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(data: UserRegister, db: Session = Depends(get_db)):
-    """Register a new user. Returns user info on success."""
+    """Register a new user. Returns user info on success.
+
+    Handles IntegrityError for race condition between uniqueness check and commit.
+    """
+    from sqlalchemy.exc import IntegrityError
+
     try:
         user = auth_service.register_user(db, data)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+    except IntegrityError:
+        # Race condition: concurrent request created duplicate user
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户名或邮箱已被注册",
         )
     return user
 

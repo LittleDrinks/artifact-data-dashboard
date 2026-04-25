@@ -12,6 +12,7 @@ import {
   MenuOutlined,
   LeftOutlined,
   RightOutlined,
+  CloseOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../hooks/useAuth';
 
@@ -112,26 +113,62 @@ export default function MainLayout() {
             zIndex: 100,
             transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
             transition: 'transform 0.2s ease',
-            overflow: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          {/* Logo */}
-          <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid var(--border)', gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14 }}>
-              文
+          {/* Header with close button */}
+          <div style={{
+            height: 56,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 16px',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14 }}>
+                文
+              </div>
+              <span style={{ fontSize: 15, color: 'var(--text-heading)' }}>文物大数据平台</span>
             </div>
-            <span style={{ fontSize: 15, color: 'var(--text-heading)' }}>文物大数据平台</span>
+            <div
+              onClick={() => setMobileOpen(false)}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 4,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'var(--bg-canvas)';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = 'transparent';
+              }}
+            >
+              <CloseOutlined style={{ fontSize: 16 }} />
+            </div>
           </div>
 
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedKey]}
-            onClick={handleMenuClick}
-            items={menuItems}
-            style={{ border: 'none', background: 'transparent', padding: '8px', marginTop: 4 }}
-          />
+          {/* Scrollable menu area */}
+          <div style={{ flex: 1, overflowY: 'auto', paddingTop: 4 }}>
+            <Menu
+              mode="inline"
+              selectedKeys={[selectedKey]}
+              onClick={handleMenuClick}
+              items={menuItems}
+              style={{ border: 'none', background: 'transparent', padding: '8px' }}
+            />
+          </div>
 
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, borderTop: '1px solid var(--border)' }}>
+          {/* Fixed bottom user section */}
+          <div style={{ padding: 8, borderTop: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px' }}>
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff' }}>
                 <UserOutlined />

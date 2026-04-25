@@ -360,14 +360,15 @@ export default function Artifacts() {
       </div>
 
       {/* 数据表格 */}
-      {loading ? (
-        <Card
-          style={{
-            borderRadius: 'var(--r-card)',
-            border: '1px solid var(--border)',
-            overflow: 'hidden',
-          }}
-        >
+      <Card
+        style={{
+          borderRadius: 'var(--r-card)',
+          border: '1px solid var(--border)',
+          overflow: 'hidden',
+        }}
+        styles={{ body: { padding: 0 } }}
+      >
+        {loading ? (
           <div style={{ padding: '16px 24px' }}>
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton
@@ -379,16 +380,7 @@ export default function Artifacts() {
               />
             ))}
           </div>
-        </Card>
-      ) : (
-      <Card
-        style={{
-          borderRadius: 'var(--r-card)',
-          border: '1px solid var(--border)',
-          overflow: 'hidden',
-        }}
-        styles={{ body: { padding: 0 } }}
-      >
+        ) : (
         <Table<Artifact>
           columns={columns}
           dataSource={data}
@@ -418,8 +410,8 @@ export default function Artifacts() {
             },
           })}
         />
+        )}
       </Card>
-      )}
 
       {/* 新建 / 编辑弹窗 */}
       <Modal
