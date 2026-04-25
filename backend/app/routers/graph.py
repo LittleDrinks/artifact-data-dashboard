@@ -349,6 +349,7 @@ def extract_triples(
         )
 
     # Query Neo4j for newly added entities (LightRAG stores with entity_name property)
+    driver = None
     try:
         driver = GraphDatabase.driver(
             settings.NEO4J_URI,
@@ -393,8 +394,6 @@ def extract_triples(
                     relation=record.get("rel", "related"),
                 ))
 
-        driver.close()
-
         return ExtractResponse(
             success=True,
             entities=entities,
@@ -413,6 +412,9 @@ def extract_triples(
             count=0,
             message=f"LightRAG 提取成功，但无法从 Neo4j 查询结果: {str(e)}",
         )
+    finally:
+        if driver:
+            driver.close()
 
 
 @router.post("/knowledge-query", response_model=KnowledgeQueryResponse)
