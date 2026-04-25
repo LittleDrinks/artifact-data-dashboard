@@ -177,9 +177,47 @@ def _query_neo4j_base_layer(
 
     try:
         with driver.session() as session:
-            # Query nodes by label and source='rule'
+            # Query nodes by label and source='rule' - apply global limit after collecting all types
+            # First, count total available nodes per type to distribute limit fairly
+            total_nodes = 0
+            type_counts: Dict[str, int] = {}
             for node_type in type_filter:
-                # Map frontend types to Neo4j labels
+                label_map = {
+                    "artifact": "artifact",
+                    "era": "era",
+                    "category": "category",
+                    "location": "location",
+                    "tag": "tag",
+                    "material": "material",
+                    "museum": "museum",
+                }
+                neo4j_label = label_map.get(node_type)
+                if not neo4j_label:
+                    continue
+                count_query = f"""
+                    MATCH (n:{neo4j_label})
+                    WHERE n.source = 'rule'
+                    RETURN count(n) AS cnt
+                """
+                result = session.run(count_query)
+                record = result.single()
+                cnt = record.get("cnt", 0) if record else 0
+                type_counts[node_type] = cnt
+                total_nodes += cnt
+
+            # Distribute limit proportionally across types
+            per_type_limits: Dict[str, int] = {}
+            if total_nodes > 0:
+                for node_type, cnt in type_counts.items():
+                    # Proportional distribution, but at least 1 per type if available
+                    per_type_limits[node_type] = max(1, int(limit * cnt / total_nodes))
+            else:
+                # Fallback: equal distribution
+                for node_type in type_counts:
+                    per_type_limits[node_type] = limit // len(type_counts)
+
+            # Now query nodes with per-type limits
+            for node_type in type_filter:
                 label_map = {
                     "artifact": "artifact",
                     "era": "era",
@@ -193,14 +231,14 @@ def _query_neo4j_base_layer(
                 if not neo4j_label:
                     continue
 
-                # Query nodes with this label
+                type_limit = per_type_limits.get(node_type, limit)
                 node_query = f"""
                     MATCH (n:{neo4j_label})
                     WHERE n.source = 'rule'
                     RETURN n.id AS id, n.name AS name, labels(n)[0] AS type, n AS props
                     SKIP $offset LIMIT $limit
                 """
-                result = session.run(node_query, offset=offset, limit=limit)
+                result = session.run(node_query, offset=offset, limit=type_limit)
 
                 for record in result:
                     node_id = record.get("id")

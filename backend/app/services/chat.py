@@ -121,7 +121,13 @@ def get_session_messages(
 
 
 def save_message(
-    db: Session, session_id: int, role: str, content: str, tool_calls: Optional[str] = None
+    db: Session,
+    session_id: int,
+    role: str,
+    content: str,
+    tool_calls: Optional[str] = None,
+    reasoning_content: Optional[str] = None,
+    tool_call_id: Optional[str] = None,
 ) -> ChatMessage:
     """Save a message to the database."""
     msg = ChatMessage(
@@ -129,6 +135,8 @@ def save_message(
         role=role,
         content=content,
         tool_calls=tool_calls,
+        reasoning_content=reasoning_content,
+        tool_call_id=tool_call_id,
     )
     db.add(msg)
     db.commit()
@@ -198,7 +206,26 @@ def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
         if m.role == "user":
             result.append({"role": "user", "content": m.content})
         elif m.role == "assistant":
-            result.append({"role": "assistant", "content": m.content or ""})
+            msg_dict: dict = {"role": "assistant", "content": m.content or ""}
+            # Restore tool_calls if present
+            if m.tool_calls:
+                try:
+                    tc_data = json.loads(m.tool_calls)
+                    # Only restore actual tool call structures, not thinking logs
+                    if isinstance(tc_data, list) and tc_data and "id" in tc_data[0]:
+                        msg_dict["tool_calls"] = tc_data
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            # Restore reasoning_content for DeepSeek v4-flash
+            if m.reasoning_content:
+                msg_dict["reasoning_content"] = m.reasoning_content
+            result.append(msg_dict)
+        elif m.role == "tool":
+            # Restore tool result messages
+            tool_msg: dict = {"role": "tool", "content": m.content or ""}
+            if m.tool_call_id:
+                tool_msg["tool_call_id"] = m.tool_call_id
+            result.append(tool_msg)
     return result
 
 
@@ -287,13 +314,15 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     if all_thinking_rounds:
         all_tool_calls_log.insert(0, {"type": "thinking", "rounds": all_thinking_rounds})
 
-    # Save AI reply
+    # Save AI reply with reasoning_content
     tool_calls_json = (
         json.dumps(all_tool_calls_log, ensure_ascii=False)
         if all_tool_calls_log
         else None
     )
-    save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json)
+    # Combine all thinking rounds into a single reasoning_content string for persistence
+    combined_reasoning = "\n\n".join(all_thinking_rounds) if all_thinking_rounds else None
+    save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json, reasoning_content=combined_reasoning)
 
     # Update session title if still the default
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
@@ -528,11 +557,14 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                     })
 
                 # Append tool result to conversation
+                tool_result_content = json.dumps(result, ensure_ascii=False)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": json.dumps(result, ensure_ascii=False),
+                    "content": tool_result_content,
                 })
+                # Persist tool result to database for session continuity
+                save_message(db, session_id, "tool", tool_result_content, tool_call_id=tc["id"])
 
             # Continue to next round
             continue

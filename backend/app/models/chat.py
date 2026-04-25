@@ -41,6 +41,8 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(10), nullable=False)
     content: Mapped[Optional[str]] = mapped_column(Text)
     tool_calls: Mapped[Optional[str]] = mapped_column(Text)  # JSON string
+    reasoning_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # DeepSeek v4-flash thinking
+    tool_call_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # for role=tool messages
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),

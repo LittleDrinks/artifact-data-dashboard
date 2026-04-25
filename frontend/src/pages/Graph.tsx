@@ -1,6 +1,6 @@
 /**
  * 知识图谱可视化页面
- * D3.js 力导向图 + Ant Design 控制面板
+ * D3.js 力导向图 + Canvas 渲染（高性能）
  */
 import {
   Card,
@@ -76,7 +76,7 @@ const TYPE_NAMES: Record<string, string> = {
   tag: '标签',
 };
 
-/** Map API node type to internal group — demo uses richer types */
+/** Map API node type to internal group */
 function resolveColor(type: string): string {
   return TYPE_COLORS[type] ?? '#8c8c8c';
 }
@@ -89,13 +89,19 @@ function nodeRadius(type: string): number {
 
 export default function Graph() {
   /* ── Refs ── */
-  const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
-  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const isDraggingRef = useRef(false); // Prevent hover effects during drag
   const [searchParams] = useSearchParams();
+
+  // Transform state (zoom/pan)
+  const transformRef = useRef({ x: 0, y: 0, k: 1 });
+  // Hovered node for tooltip
+  const [hoveredNode, setHoveredNode] = useState<SimNode | null>(null);
+  const tooltipPosRef = useRef({ x: 0, y: 0 });
+  // Drag state
+  const dragNodeRef = useRef<SimNode | null>(null);
+  const isDraggingRef = useRef(false);
 
   /* ── State ── */
   const [loading, setLoading] = useState(true);
@@ -108,18 +114,19 @@ export default function Graph() {
   const [selectedNode, setSelectedNode] = useState<NodeDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Node type filter — default show ALL types to display relationships (edges)
-  // This is critical for a good demo experience — users see artifact→era/category/location
   const allTypes = ['artifact', 'era', 'category', 'location', 'tag'] as const;
   const [visibleTypes, setVisibleTypes] = useState<Set<string>>(new Set(allTypes));
 
-  // 导出状态
   const [exporting, setExporting] = useState(false);
 
   // Force parameters
   const [chargeStrength, setChargeStrength] = useState(-400);
   const [linkDistance, setLinkDistance] = useState(120);
   const [collisionPadding, setCollisionPadding] = useState(6);
+
+  // Simulation data refs (for Canvas rendering)
+  const simNodesRef = useRef<SimNode[]>([]);
+  const simLinksRef = useRef<SimLink[]>([]);
 
   /* ── Fetch data ── */
 
@@ -152,7 +159,6 @@ export default function Graph() {
       const data = await searchGraph(searchKeyword.trim(), Array.from(visibleTypes), searchDepth);
       setGraphData(data);
       setSelectedNode(null);
-      // Identify matched nodes (nodes whose name contains the keyword)
       const kw = searchKeyword.trim().toLowerCase();
       const matchedIds = new Set<string>();
       data.nodes.forEach((n) => {
@@ -190,7 +196,6 @@ export default function Graph() {
       searchGraph(searchParam, Array.from(visibleTypes), searchDepth)
         .then((data) => {
           setGraphData(data);
-          // Identify matched nodes
           const kw = searchParam.toLowerCase();
           const matchedIds = new Set<string>();
           data.nodes.forEach((n) => {
@@ -208,16 +213,12 @@ export default function Graph() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Track previous types to avoid re-fetching on initial mount
-  // Initialize with null and set on first useEffect run for robustness
   const prevTypesRef = useRef<Set<string> | null>(null);
   useEffect(() => {
-    // On first run, just record the current types and skip fetch
     if (prevTypesRef.current === null) {
       prevTypesRef.current = visibleTypes;
       return;
     }
-    // On subsequent runs, only fetch if visibleTypes actually changed
     if (prevTypesRef.current !== visibleTypes) {
       prevTypesRef.current = visibleTypes;
       if (!searchKeyword.trim()) {
@@ -226,48 +227,118 @@ export default function Graph() {
     }
   }, [visibleTypes, nodeLimit, searchKeyword, fetchGraph]);
 
-  /* ── D3 render effect ── */
-  useEffect(() => {
-    if (!graphData || !svgRef.current || !containerRef.current) return;
+  /* ── Canvas render ── */
+  const drawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    // Stop previous simulation
+    const W = canvas.width;
+    const H = canvas.height;
+    const { x: tx, y: ty, k: tk } = transformRef.current;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(tx, ty);
+    ctx.scale(tk, tk);
+
+    const nodes = simNodesRef.current;
+    const links = simLinksRef.current;
+
+    // Draw links
+    ctx.strokeStyle = '#d4dee9';
+    ctx.lineWidth = 1.2 / tk;
+    for (const link of links) {
+      const sx = (link.source as SimNode).x ?? 0;
+      const sy = (link.source as SimNode).y ?? 0;
+      const tx2 = (link.target as SimNode).x ?? 0;
+      const ty2 = (link.target as SimNode).y ?? 0;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(tx2, ty2);
+      ctx.stroke();
+    }
+
+    // Draw nodes
+    for (const node of nodes) {
+      const nx = node.x ?? 0;
+      const ny = node.y ?? 0;
+      const r = node.r;
+      const color = resolveColor(node.type);
+
+      // Highlight matched nodes
+      const isMatched = activeSearchKeyword && matchedNodeIds.has(node.id);
+      const isDimmed = activeSearchKeyword && !matchedNodeIds.has(node.id);
+
+      ctx.globalAlpha = isDimmed ? 0.4 : 1;
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(nx, ny, r, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = isMatched ? '#ff6b6b' : '#fff';
+      ctx.lineWidth = (isMatched ? 3 : 2) / tk;
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = '#061b31';
+      ctx.font = `${10 / tk}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(node.name, nx, ny + r + 4 / tk);
+
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    // Draw hovered node tooltip
+    if (hoveredNode && !isDraggingRef.current) {
+      const nx = (hoveredNode.x ?? 0) * tk + tx;
+      const ny = (hoveredNode.y ?? 0) * tk + ty;
+      const text = `${hoveredNode.name} (${TYPE_NAMES[hoveredNode.type] ?? hoveredNode.type})`;
+      ctx.font = '12px sans-serif';
+      const metrics = ctx.measureText(text);
+      const pw = metrics.width + 12;
+      const ph = 24;
+      const px = nx - pw / 2;
+      const py = ny - (hoveredNode.r * tk) - ph - 6;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.beginPath();
+      ctx.roundRect(px, py, pw, ph, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, nx, py + ph / 2);
+    }
+  }, [activeSearchKeyword, matchedNodeIds, hoveredNode]);
+
+  /* ── D3 simulation + Canvas setup ── */
+  useEffect(() => {
+    if (!graphData || !canvasRef.current || !containerRef.current) return;
+
     simulationRef.current?.stop();
 
     const container = containerRef.current;
     const W = container.clientWidth;
     const H = container.clientHeight;
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll('*').remove();
-    svg.attr('width', W).attr('height', H);
+    // Set canvas size (HiDPI)
+    const canvas = canvasRef.current;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${H}px`;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.scale(dpr, dpr);
 
-    // Defs — arrow marker
-    const defs = svg.append('defs');
-    defs
-      .append('marker')
-      .attr('id', 'arrowhead')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 6)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-4L8,0L0,4')
-      .attr('fill', '#94a3b8');
-
-    // Zoom behavior
-    const zoomBehavior = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 5])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
-    svg.call(zoomBehavior);
-    zoomRef.current = zoomBehavior;
-
-    const g = svg.append('g');
-    gRef.current = g;
+    // Reset transform
+    transformRef.current = { x: W * 0.05, y: H * 0.05, k: 0.9 };
 
     // Build simulation data
     const simNodes: SimNode[] = graphData.nodes.map((n: GraphNode) => ({
@@ -284,159 +355,14 @@ export default function Graph() {
       relation: l.relation,
     }));
 
-    // Links
-    const linkSel = g
-      .append('g')
-      .attr('stroke', '#d4dee9')
-      .attr('stroke-width', 1.2)
-      .selectAll('line')
-      .data(simLinks)
-      .join('line')
-      .attr('marker-end', 'url(#arrowhead)');
+    simNodesRef.current = simNodes;
+    simLinksRef.current = simLinks;
 
-    // Link labels (shown on hover via CSS, always rendered for perf)
-    const linkLabelSel = g
-      .append('g')
-      .selectAll('text')
-      .data(simLinks)
-      .join('text')
-      .text((d) => d.relation)
-      .attr('font-size', 8)
-      .attr('fill', '#94a3b8')
-      .attr('text-anchor', 'middle')
-      .attr('paint-order', 'stroke')
-      .attr('stroke', '#ffffff')
-      .attr('stroke-width', 3)
-      .attr('stroke-linecap', 'round')
-      .attr('stroke-linejoin', 'round')
-      .style('pointer-events', 'none')
-      .style('opacity', 0); // hidden by default, shown on link hover
-
-    // Node groups
-    const nodeSel = g
-      .append('g')
-      .selectAll<SVGGElement, SimNode>('g')
-      .data(simNodes, (d) => d.id)
-      .join('g')
-      .attr('cursor', 'pointer')
-      .on('click', (_event, d) => {
-        handleNodeClick(d.id);
-      })
-      .on('mouseenter', (_event, d) => {
-        // Skip hover effects during drag to prevent flickering
-        if (isDraggingRef.current) return;
-
-        // Highlight connected links
-        const connectedIds = new Set<string>();
-        linkSel.each(function (l) {
-          const s = typeof l.source === 'object' ? (l.source as SimNode).id : l.source;
-          const t = typeof l.target === 'object' ? (l.target as SimNode).id : l.target;
-          if (s === d.id || t === d.id) {
-            connectedIds.add(`${s}-${t}`);
-            d3.select(this).attr('stroke', '#533afd').attr('stroke-width', 2);
-          }
-        });
-        // Show labels for connected links
-        linkLabelSel.each(function (l) {
-          const s = typeof l.source === 'object' ? (l.source as SimNode).id : l.source;
-          const t = typeof l.target === 'object' ? (l.target as SimNode).id : l.target;
-          if (s === d.id || t === d.id) {
-            d3.select(this).style('opacity', 1);
-          }
-        });
-        // Dim unconnected nodes
-        nodeSel
-          .filter((n) => n.id !== d.id && !connectedIds.has(`${n.id}-${d.id}`) && !connectedIds.has(`${d.id}-${n.id}`))
-          .attr('opacity', 0.25);
-      })
-      .on('mouseleave', () => {
-        // Skip hover effects during drag to prevent flickering
-        if (isDraggingRef.current) return;
-
-        linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
-        linkLabelSel.style('opacity', 0);
-        // Reset group opacity to 1 (clears hover dimming)
-        // Circle/text inside have their own opacity for search highlighting
-        nodeSel.attr('opacity', 1);
-      })
-      .call(
-        d3
-          .drag<SVGGElement, SimNode>()
-          .on('start', (event, d) => {
-            isDraggingRef.current = true;
-            if (!event.active) simulationRef.current?.alpha(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on('end', (event, d) => {
-            isDraggingRef.current = false;
-            // Reset highlighting — mouse position likely changed during drag
-            linkSel.attr('stroke', '#d4dee9').attr('stroke-width', 1.2);
-            linkLabelSel.style('opacity', 0);
-            nodeSel.attr('opacity', 1);
-            if (!event.active) simulationRef.current?.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }),
-      );
-
-    // Node circles
-    nodeSel
-      .append('circle')
-      .attr('r', (d) => d.r)
-      .attr('fill', (d) => resolveColor(d.type))
-      .attr('stroke', (d) => {
-        if (!activeSearchKeyword) return '#fff';
-        // Matched nodes get red border, neighbors get normal border
-        if (matchedNodeIds.has(d.id)) {
-          return '#ff6b6b'; // Red for matched nodes
-        }
-        return '#fff';
-      })
-      .attr('stroke-width', (d) => {
-        if (!activeSearchKeyword) return 2;
-        if (matchedNodeIds.has(d.id)) {
-          return 4; // Thicker border for matched nodes
-        }
-        return 2;
-      })
-      .attr('opacity', (d) => {
-        if (!activeSearchKeyword) return 1;
-        // Matched nodes fully visible, neighbors slightly dimmed
-        if (matchedNodeIds.has(d.id)) {
-          return 1;
-        }
-        return 0.6;
-      });
-
-    // Node labels
-    nodeSel
-      .append('text')
-      .text((d) => d.name)
-      .attr('text-anchor', 'middle')
-      .attr('dy', (d) => d.r + 12)
-      .attr('font-size', 10)
-      .attr('fill', '#061b31')
-      .attr('font-weight', 400)
-      .attr('opacity', (d) => {
-        if (!activeSearchKeyword) return 1;
-        if (matchedNodeIds.has(d.id)) {
-          return 1;
-        }
-        return 0.6;
-      })
-      .style('pointer-events', 'none')
-      .style('user-select', 'none');
-
-    // Simulation with performance optimizations
+    // Simulation with Barnes-Hut optimization
     const simulation = d3
       .forceSimulation<SimNode>(simNodes)
-      .alphaDecay(0.05) // Faster convergence (default 0.0287)
-      .velocityDecay(0.4) // Faster damping
+      .alphaDecay(0.05)
+      .velocityDecay(0.4)
       .force(
         'link',
         d3
@@ -444,41 +370,134 @@ export default function Graph() {
           .id((d) => d.id)
           .distance(linkDistance),
       )
-      .force('charge', d3.forceManyBody().strength(chargeStrength))
+      .force('charge', d3.forceManyBody().strength(chargeStrength).theta(0.9)) // Barnes-Hut O(n log n)
       .force('center', d3.forceCenter(W / 2, H / 2))
       .force(
         'collision',
         d3.forceCollide<SimNode>().radius((d) => d.r + collisionPadding),
       )
       .on('tick', () => {
-        linkSel
-          .attr('x1', (d) => (d.source as SimNode).x ?? 0)
-          .attr('y1', (d) => (d.source as SimNode).y ?? 0)
-          .attr('x2', (d) => (d.target as SimNode).x ?? 0)
-          .attr('y2', (d) => (d.target as SimNode).y ?? 0);
-
-        linkLabelSel
-          .attr('x', (d) => (((d.source as SimNode).x ?? 0) + ((d.target as SimNode).x ?? 0)) / 2)
-          .attr('y', (d) => (((d.source as SimNode).y ?? 0) + ((d.target as SimNode).y ?? 0)) / 2 - 4);
-
-        nodeSel.attr('transform', (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+        drawCanvas();
       });
 
     simulationRef.current = simulation;
 
-    // Initial zoom to fit
-    svg.call(
-      zoomBehavior.transform,
-      d3.zoomIdentity.translate(W * 0.05, H * 0.05).scale(0.9),
-    );
+    // --- Mouse interactions ---
+    // Find node under cursor
+    const findNode = (mx: number, my: number): SimNode | null => {
+      const { x: ttx, y: tty, k: ttk } = transformRef.current;
+      // Convert screen coords to simulation coords
+      const sx = (mx - ttx) / ttk;
+      const sy = (my - tty) / ttk;
+      for (let i = simNodes.length - 1; i >= 0; i--) {
+        const n = simNodes[i];
+        const dx = (n.x ?? 0) - sx;
+        const dy = (n.y ?? 0) - sy;
+        if (dx * dx + dy * dy <= (n.r + 4) * (n.r + 4)) {
+          return n;
+        }
+      }
+      return null;
+    };
+
+    // Zoom with wheel
+    canvas.addEventListener('wheel', (e: WheelEvent) => {
+      e.preventDefault();
+      const { x: ttx, y: tty, k: ttk } = transformRef.current;
+      const factor = e.deltaY > 0 ? 0.92 : 1.08;
+      const newK = Math.max(0.2, Math.min(5, ttk * factor));
+      // Zoom towards cursor
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      transformRef.current = {
+        x: mx - (mx - ttx) * (newK / ttk),
+        y: my - (my - tty) * (newK / ttk),
+        k: newK,
+      };
+      drawCanvas();
+    }, { passive: false });
+
+    // Pan and drag
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
+    canvas.addEventListener('mousedown', (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const node = findNode(mx, my);
+      if (node) {
+        // Start drag
+        isDraggingRef.current = true;
+        dragNodeRef.current = node;
+        node.fx = node.x;
+        node.fy = node.y;
+        simulation.alphaTarget(0.3).restart();
+      } else {
+        // Start pan
+        isPanning = true;
+        panStart = { x: e.clientX - transformRef.current.x, y: e.clientY - transformRef.current.y };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      if (isDraggingRef.current && dragNodeRef.current) {
+        const { x: ttx, y: tty, k: ttk } = transformRef.current;
+        dragNodeRef.current.fx = (mx - ttx) / ttk;
+        dragNodeRef.current.fy = (my - tty) / ttk;
+        drawCanvas();
+      } else if (isPanning) {
+        transformRef.current.x = e.clientX - panStart.x;
+        transformRef.current.y = e.clientY - panStart.y;
+        drawCanvas();
+      } else {
+        // Hover detection
+        const node = findNode(mx, my);
+        if (node !== hoveredNode) {
+          setHoveredNode(node);
+          tooltipPosRef.current = { x: mx, y: my };
+        }
+        canvas.style.cursor = node ? 'pointer' : 'grab';
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (isDraggingRef.current && dragNodeRef.current) {
+        isDraggingRef.current = false;
+        dragNodeRef.current.fx = null;
+        dragNodeRef.current.fy = null;
+        dragNodeRef.current = null;
+        simulation.alphaTarget(0);
+      }
+      isPanning = false;
+    });
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+      if (isDraggingRef.current) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const node = findNode(mx, my);
+      if (node) {
+        handleNodeClick(node.id);
+      }
+    });
+
+    // Initial draw
+    drawCanvas();
 
     return () => {
       simulation.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData, activeSearchKeyword, matchedNodeIds]);
+  }, [graphData, activeSearchKeyword, matchedNodeIds, drawCanvas]);
 
-  /* ── Update force params without re-rendering the whole graph ── */
+  /* ── Update force params ── */
   useEffect(() => {
     const sim = simulationRef.current;
     if (!sim) return;
@@ -487,7 +506,7 @@ export default function Graph() {
     linkForce?.distance(linkDistance);
 
     const chargeForce = sim.force<d3.ForceManyBody<SimNode>>('charge');
-    chargeForce?.strength(chargeStrength);
+    chargeForce?.strength(chargeStrength).theta(0.9);
 
     const collisionForce = sim.force<d3.ForceCollide<SimNode>>('collision');
     collisionForce?.radius((d: SimNode) => d.r + collisionPadding);
@@ -498,13 +517,12 @@ export default function Graph() {
   /* ── Handlers ── */
 
   const handleResetZoom = useCallback(() => {
-    if (!svgRef.current || !zoomRef.current) return;
-    const svg = d3.select(svgRef.current);
-    svg
-      .transition()
-      .duration(500)
-      .call(zoomRef.current.transform, d3.zoomIdentity);
-  }, []);
+    if (!containerRef.current) return;
+    const W = containerRef.current.clientWidth;
+    const H = containerRef.current.clientHeight;
+    transformRef.current = { x: W * 0.05, y: H * 0.05, k: 0.9 };
+    drawCanvas();
+  }, [drawCanvas]);
 
   const handleReheat = useCallback(() => {
     simulationRef.current?.alpha(1).restart();
@@ -591,8 +609,8 @@ export default function Graph() {
           </div>
         )}
 
-        <svg
-          ref={svgRef}
+        <canvas
+          ref={canvasRef}
           style={{
             width: '100%',
             height: '100%',
@@ -809,10 +827,8 @@ export default function Graph() {
                 type={visibleTypes.size === allTypes.length ? 'default' : 'primary'}
                 onClick={() => {
                   if (visibleTypes.size === allTypes.length) {
-                    // Currently showing all -> show only artifacts
                     setVisibleTypes(new Set(['artifact']));
                   } else {
-                    // Currently partial -> show all to see relationships
                     setVisibleTypes(new Set(allTypes));
                   }
                 }}
