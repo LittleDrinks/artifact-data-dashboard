@@ -364,6 +364,15 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
         except Exception as exc:
             # Unexpected errors - check if it's a tool-unsupported error first (for retry)
             err_msg = str(exc)[:300]
+            # Check for reasoning_content error specifically - this means we forgot to pass it back
+            if "reasoning_content" in err_msg and "must be passed back" in err_msg:
+                logger.error("DeepSeek reasoning_content not passed back: %s", err_msg)
+                yield _sse_event("answer_start", {})
+                yield _sse_event("answer_delta", {
+                    "content": "抱歉，AI 服务出现内部错误（reasoning_content 未正确传递），请联系开发者。"
+                })
+                yield _sse_event("answer_end", {})
+                return content_text
             if use_tools and ("tool" in err_msg.lower() or "function" in err_msg.lower() or "does not support" in err_msg.lower() or "400" in err_msg):
                 logger.warning("Model %s may not support tools, retrying without: %s", settings.AI_MODEL_NAME, err_msg)
                 use_tools = False
