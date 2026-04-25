@@ -441,11 +441,17 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                 })
 
             # Append assistant message (with tool_calls) to conversation
-            messages.append({
+            # CRITICAL: DeepSeek v4-flash requires reasoning_content in assistant message
+            # when it was present in the streaming response. Without it, the API returns:
+            # "The reasoning_content in the thinking mode must be passed back to the API."
+            assistant_msg: dict = {
                 "role": "assistant",
                 "content": content_text or None,
                 "tool_calls": assistant_tc_list,
-            })
+            }
+            if thinking_text:
+                assistant_msg["reasoning_content"] = thinking_text
+            messages.append(assistant_msg)
 
             # Execute each tool call and emit SSE events
             for tc in assistant_tc_list:

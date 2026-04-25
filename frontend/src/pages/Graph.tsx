@@ -432,9 +432,11 @@ export default function Graph() {
       .style('pointer-events', 'none')
       .style('user-select', 'none');
 
-    // Simulation
+    // Simulation with performance optimizations
     const simulation = d3
       .forceSimulation<SimNode>(simNodes)
+      .alphaDecay(0.05) // Faster convergence (default 0.0287)
+      .velocityDecay(0.4) // Faster damping
       .force(
         'link',
         d3

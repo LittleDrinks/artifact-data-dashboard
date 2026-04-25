@@ -24,7 +24,6 @@ const menuItems = [
   { key: '/graph', icon: <ApartmentOutlined />, label: '知识图谱' },
   { key: '/chat', icon: <MessageOutlined />, label: 'AI 问答' },
   { key: '/knowledge', icon: <ExperimentOutlined />, label: '知识抽取' },
-  { key: '/knowledge-demo', icon: <ExperimentOutlined />, label: 'LightRAG Demo' },
 ];
 
 const MOBILE_BREAKPOINT = 768;
