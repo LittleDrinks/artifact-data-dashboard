@@ -15,7 +15,12 @@ select = [
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
 ]
-ignore = ["E501"]  # 行太长由 formatter 处理
+ignore = [
+    "E501",  # 行太长由 formatter 处理
+    "B008",  # FastAPI Depends() 是标准依赖注入模式，非 bug
+    "E741",  # 变量名 l 问题：历史代码大量使用，逐步清理
+    "B904",  # raise without from：历史代码模式，不影响功能
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

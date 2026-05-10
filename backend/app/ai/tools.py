@@ -6,9 +6,8 @@ Provides three tools for the LLM:
 - query_knowledge_graph: semantic entity search via Neo4j
 """
 
-import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -122,6 +121,7 @@ TOOL_DEFINITIONS = [
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
+
 def execute_tool(name: str, arguments: dict[str, Any], db: Session) -> dict[str, Any]:
     """Route a tool call to the appropriate handler.
 
@@ -145,11 +145,12 @@ def execute_tool(name: str, arguments: dict[str, Any], db: Session) -> dict[str,
 # search_artifacts implementation
 # ---------------------------------------------------------------------------
 
+
 def _tool_search_artifacts(db: Session, args: dict[str, Any]) -> dict[str, Any]:
     keyword: str = args.get("keyword", "")
-    era: Optional[str] = args.get("era")
-    category: Optional[str] = args.get("category")
-    location: Optional[str] = args.get("location")
+    era: str | None = args.get("era")
+    category: str | None = args.get("category")
+    location: str | None = args.get("location")
     limit: int = min(int(args.get("limit", 20)), 50)
 
     if not keyword:
@@ -193,14 +194,16 @@ def _tool_search_artifacts(db: Session, args: dict[str, Any]) -> dict[str, Any]:
     items = []
     for a in results:
         snippet = _build_snippet(a, keyword)
-        items.append({
-            "id": a.id,
-            "name": a.name,
-            "snippet": snippet,
-            "category": a.category,
-            "era": a.era,
-            "location": a.location,
-        })
+        items.append(
+            {
+                "id": a.id,
+                "name": a.name,
+                "snippet": snippet,
+                "category": a.category,
+                "era": a.era,
+                "location": a.location,
+            }
+        )
 
     return {"results": items, "count": len(items)}
 
@@ -208,6 +211,7 @@ def _tool_search_artifacts(db: Session, args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # get_artifact_detail implementation
 # ---------------------------------------------------------------------------
+
 
 def _tool_get_artifact_detail(db: Session, args: dict[str, Any]) -> dict[str, Any]:
     artifact_id = args.get("artifact_id")
@@ -234,6 +238,7 @@ def _tool_get_artifact_detail(db: Session, args: dict[str, Any]) -> dict[str, An
 # query_knowledge_graph implementation
 # ---------------------------------------------------------------------------
 
+
 def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, Any]:
     """Query knowledge graph for semantic entities and relations.
 
@@ -242,8 +247,8 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
     """
     keyword: str = args.get("keyword", "")
     limit: int = min(int(args.get("limit", 20)), 50)
-    era: Optional[str] = args.get("era")
-    category: Optional[str] = args.get("category")
+    era: str | None = args.get("era")
+    category: str | None = args.get("category")
 
     if not keyword:
         return {"entities": [], "relations": [], "count": 0, "source": "none"}
@@ -258,10 +263,19 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
                 for n in nodes
             ]
             relations = [
-                {"source": l.source.replace("neo4j_", ""), "target": l.target.replace("neo4j_", ""), "relation": l.relation}
+                {
+                    "source": l.source.replace("neo4j_", ""),
+                    "target": l.target.replace("neo4j_", ""),
+                    "relation": l.relation,
+                }
                 for l in links
             ]
-            return {"entities": entities, "relations": relations, "count": len(entities), "source": "neo4j"}
+            return {
+                "entities": entities,
+                "relations": relations,
+                "count": len(entities),
+                "source": "neo4j",
+            }
         except Exception as exc:
             logger.warning("Neo4j query failed, falling back to SQLite: %s", str(exc)[:200])
 
@@ -270,13 +284,18 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
         # If era/category filters provided, incorporate into keyword for better matching
         search_keyword = keyword
         if era and era not in keyword:
-            search_keyword = keyword  # Keep original keyword; era/category are handled by graph structure
+            search_keyword = (
+                keyword  # Keep original keyword; era/category are handled by graph structure
+            )
         if category and category not in keyword:
             search_keyword = keyword
 
         # First try searching by the main keyword
         nodes, links, matched_count = graph_service.search_graph(
-            db, keyword=search_keyword, node_types=["artifact", "era", "category", "location", "tag"], depth=1
+            db,
+            keyword=search_keyword,
+            node_types=["artifact", "era", "category", "location", "tag"],
+            depth=1,
         )
 
         # If era/category filters provided, also search by those to expand the subgraph
@@ -291,12 +310,18 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
                 if n.id not in existing_ids:
                     # Only add if connected to existing nodes
                     for l in era_links:
-                        if (l.source == n.id and l.target in existing_ids) or (l.target == n.id and l.source in existing_ids):
+                        if (l.source == n.id and l.target in existing_ids) or (
+                            l.target == n.id and l.source in existing_ids
+                        ):
                             nodes.append(n)
                             existing_ids.add(n.id)
                             break
             for l in era_links:
-                if (l.source, l.target) not in existing_links_set and l.source in existing_ids and l.target in existing_ids:
+                if (
+                    (l.source, l.target) not in existing_links_set
+                    and l.source in existing_ids
+                    and l.target in existing_ids
+                ):
                     links.append(l)
                     existing_links_set.add((l.source, l.target))
 
@@ -309,12 +334,18 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
             for n in cat_nodes:
                 if n.id not in existing_ids:
                     for l in cat_links:
-                        if (l.source == n.id and l.target in existing_ids) or (l.target == n.id and l.source in existing_ids):
+                        if (l.source == n.id and l.target in existing_ids) or (
+                            l.target == n.id and l.source in existing_ids
+                        ):
                             nodes.append(n)
                             existing_ids.add(n.id)
                             break
             for l in cat_links:
-                if (l.source, l.target) not in existing_links_set and l.source in existing_ids and l.target in existing_ids:
+                if (
+                    (l.source, l.target) not in existing_links_set
+                    and l.source in existing_ids
+                    and l.target in existing_ids
+                ):
                     links.append(l)
                     existing_links_set.add((l.source, l.target))
 
@@ -345,11 +376,13 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
         for l in links:
             src_name = node_name_map.get(l.source, l.source)
             tgt_name = node_name_map.get(l.target, l.target)
-            relations.append({
-                "source": src_name,
-                "target": tgt_name,
-                "relation": l.relation,
-            })
+            relations.append(
+                {
+                    "source": src_name,
+                    "target": tgt_name,
+                    "relation": l.relation,
+                }
+            )
 
         # Build a text summary for the LLM to easily understand the data
         summary_parts = []
@@ -361,7 +394,9 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
         tag_names = [n.name for n in nodes if n.type == "tag"][:10]
 
         if artifact_names:
-            summary_parts.append(f"相关文物（{len(artifact_names)}件）：{'、'.join(artifact_names)}")
+            summary_parts.append(
+                f"相关文物（{len(artifact_names)}件）：{'、'.join(artifact_names)}"
+            )
         if era_names:
             summary_parts.append(f"涉及朝代：{'、'.join(era_names)}")
         if cat_names:
@@ -409,6 +444,7 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_snippet(artifact: Artifact, keyword: str, max_len: int = 120) -> str:
     """Return a short text snippet from the artifact description, centred on the keyword."""
