@@ -3,7 +3,7 @@ status: resolved
 phase: 01-stop-bleeding
 source: fix-rel-01-deepseek-400-SUMMARY.md, fix-sec-01-jwt-default-key-SUMMARY.md, fix-sec-02-debug-default-false-SUMMARY.md, fix-sec-07-admin-password-env-SUMMARY.md
 started: 2026-05-10T12:17:33Z
-updated: 2026-05-10T14:20:00Z
+updated: 2026-05-10T15:45:00Z
 ---
 
 ## Current Test
@@ -36,7 +36,7 @@ result: pass
 reported: "发送后返回 Internal server error，未触发 alert 弹窗（XSS 过滤未验证，因后端报错阻止了正常回复渲染）"
 severity: major
 fix_plan: 01-19
-note: "后端修复后需人工验证 XSS 过滤实际效果"
+note: "已验证：未触发 alert，HTML 标签被当作文本显示"
 
 ### 5. 管理员登录
 expected: 使用管理员账号（admin / 环境变量中配置的密码）能正常登录，登录成功后跳转到首页
