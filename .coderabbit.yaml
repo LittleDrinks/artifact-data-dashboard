@@ -1,0 +1,15 @@
+# CodeRabbit configuration
+# Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: "zh-CN"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!docs/**"
+    - "!data/**"
+    - "!.planning/**"
