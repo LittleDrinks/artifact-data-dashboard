@@ -252,17 +252,30 @@ def _sse_event(event_type: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def stream_chat_response(db: Session, query: str, session_id: int, new_session: bool = False):
+def stream_chat_response(
+    db: Session,
+    query: str,
+    session_id: int,
+    new_session: bool = False,
+    collector: dict | None = None,
+):
     """Generator that yields SSE events for the chat flow (ReAct Tool Calling).
 
     Uses ``yield from`` to delegate to ``_react_gen`` which handles the
     actual ReAct loop.
 
+    This generator is **decoupled from DB writes** — it does NOT call
+    ``save_message()`` or ``db.commit()``.  All persistence is the
+    responsibility of the caller (router) via a BackgroundTask.
+
     Args:
-        db: Database session
+        db: Database session (read-only / tool execution only)
         query: User's question
         session_id: Session ID to use (already created)
         new_session: If True, emit session_created event first
+        collector: Optional mutable dict populated with metadata needed
+            for post-stream persistence (answer_text, tool_calls_log,
+            thinking_rounds, sources, tool_results).
     """
     start_time = time.time()
 
@@ -270,9 +283,6 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     # This allows frontend to set activeSessionId before any other events
     if new_session:
         yield _sse_event("session_created", {"session_id": session_id})
-
-    # Save user message
-    save_message(db, session_id, "user", query)
 
     # Build initial message list
     history = load_history(db, session_id, limit=10)
@@ -293,6 +303,7 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
 
     all_tool_calls_log: list[dict] = []
     all_thinking_rounds: list[str] = []  # Accumulate thinking text for DB persistence
+    all_tool_results: list[dict] = []  # Collect tool results for background persistence
     answer_text = ""
     sources: list[dict] = []
 
@@ -301,7 +312,7 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     if use_llm:
         try:
             answer_text = yield from _react_gen(
-                db, messages, all_tool_calls_log, all_thinking_rounds
+                db, messages, all_tool_calls_log, all_thinking_rounds, all_tool_results
             )
         except Exception as exc:
             logger.error("ReAct loop failed: %s", str(exc)[:300], exc_info=True)
@@ -329,27 +340,6 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     if all_thinking_rounds:
         all_tool_calls_log.insert(0, {"type": "thinking", "rounds": all_thinking_rounds})
 
-    # Save AI reply with reasoning_content
-    tool_calls_json = (
-        json.dumps(all_tool_calls_log, ensure_ascii=False) if all_tool_calls_log else None
-    )
-    # Combine all thinking rounds into a single reasoning_content string for persistence
-    combined_reasoning = "\n\n".join(all_thinking_rounds) if all_thinking_rounds else None
-    save_message(
-        db,
-        session_id,
-        "assistant",
-        answer_text,
-        tool_calls=tool_calls_json,
-        reasoning_content=combined_reasoning,
-    )
-
-    # Update session title if still the default
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-    if session and session.title == "新对话":
-        title = query[:50] + ("..." if len(query) > 50 else "")
-        update_session_title(db, session_id, title)
-
     # Build citation sources from tool call results
     for tc_log in all_tool_calls_log:
         if tc_log.get("tool") == "search_artifacts":
@@ -368,6 +358,15 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
                     }
                 )
 
+    # Populate collector for post-stream persistence
+    if collector is not None:
+        collector["answer_text"] = answer_text
+        collector["tool_calls_log"] = all_tool_calls_log
+        collector["thinking_rounds"] = all_thinking_rounds
+        collector["sources"] = sources
+        collector["tool_results"] = all_tool_results
+        collector["query"] = query
+
     yield _sse_event(
         "done",
         {
@@ -383,13 +382,20 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
 
 
 def _react_gen(
-    db: Session, messages: list[dict], tool_calls_log: list[dict], thinking_rounds: list[str]
+    db: Session,
+    messages: list[dict],
+    tool_calls_log: list[dict],
+    thinking_rounds: list[str],
+    tool_results: list[dict],
 ):
     """ReAct loop generator. Yields SSE event strings, returns final answer text.
 
     Up to MAX_REACT_ROUNDS iterations:
     - If the LLM requests tool calls -> execute them, append results, continue.
     - If the LLM produces content without tool calls -> final answer, return.
+
+    NOTE: This generator does NOT perform any DB writes.  Tool results are
+    collected in *tool_results* for the caller to persist via BackgroundTask.
     """
     client = _get_client()
 
@@ -623,8 +629,13 @@ def _react_gen(
                         "content": tool_result_content,
                     }
                 )
-                # Persist tool result to database for session continuity
-                save_message(db, session_id, "tool", tool_result_content, tool_call_id=tc["id"])  # noqa: F821
+                # Collect tool result for post-stream persistence (decoupled from generator)
+                tool_results.append(
+                    {
+                        "tool_call_id": tc["id"],
+                        "content": tool_result_content,
+                    }
+                )
 
             # Continue to next round
             continue

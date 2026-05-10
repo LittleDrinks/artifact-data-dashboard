@@ -1,14 +1,15 @@
 """Chat router - session management and SSE streaming for AI Q&A."""
 
+import json
 import time
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.chat import ChatSession
 from app.models.user import User
 from app.routers.auth import get_current_user
@@ -118,10 +119,56 @@ def delete_sessions(
     return {"deleted": count}
 
 
+def _persist_chat_response(
+    session_id: int,
+    collector: dict,
+) -> None:
+    """Background task: persist assistant message, tool results, and update title.
+
+    Runs after the SSE stream completes so the generator stays decoupled
+    from DB write operations.
+    """
+    db = SessionLocal()
+    try:
+        # 1. Save assistant message
+        tool_calls_log = collector.get("tool_calls_log", [])
+        tool_calls_json = json.dumps(tool_calls_log, ensure_ascii=False) if tool_calls_log else None
+        thinking_rounds = collector.get("thinking_rounds", [])
+        combined_reasoning = "\n\n".join(thinking_rounds) if thinking_rounds else None
+        chat_service.save_message(
+            db,
+            session_id,
+            "assistant",
+            collector.get("answer_text", ""),
+            tool_calls=tool_calls_json,
+            reasoning_content=combined_reasoning,
+        )
+
+        # 2. Save tool result messages for session continuity
+        for tr in collector.get("tool_results", []):
+            chat_service.save_message(
+                db,
+                session_id,
+                "tool",
+                tr["content"],
+                tool_call_id=tr["tool_call_id"],
+            )
+
+        # 3. Update session title if still the default
+        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if session and session.title == "新对话":
+            query = collector.get("query", "")
+            title = query[:50] + ("..." if len(query) > 50 else "")
+            chat_service.update_session_title(db, session_id, title)
+    finally:
+        db.close()
+
+
 @router.post("/ask")
 def ask_question(
     data: ChatAskRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -157,9 +204,16 @@ def ask_question(
                 detail="会话不存在",
             )
 
+    # Save user message BEFORE streaming (synchronous, part of request transaction)
+    chat_service.save_message(db, session_id, "user", data.question)
+
+    # Collector gathers metadata during streaming for post-stream persistence
+    collector: dict = {}
+
     return StreamingResponse(
-        chat_service.stream_chat_response(db, data.question, session_id, new_session),
+        chat_service.stream_chat_response(db, data.question, session_id, new_session, collector),
         media_type="text/event-stream",
+        background=background_tasks.add_task(_persist_chat_response, session_id, collector),
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
