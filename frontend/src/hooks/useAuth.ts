@@ -7,15 +7,15 @@ import type { UserInfo } from '../api/auth';
 export function useAuth() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const token = localStorage.getItem('token');
+    return !!token; // 有 token 时先 loading，等验证完成后再关闭
+  });
 
-  // 初始化：检查 token 并获取用户信息
+  // 初始化：验证 token 并获取用户信息
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    if (!token) return;
     authApi
       .getMe()
       .then(setUser)

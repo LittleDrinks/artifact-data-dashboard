@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: PR Agent action step
         id: pragent
-        uses: qodo-ai/pr-agent@main
+        uses: qodo-ai/pr-agent@v0.34.3
         env:
           # DeepSeek API 配置
           CONFIG.MODEL: "deepseek-chat"

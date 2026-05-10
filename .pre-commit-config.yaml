@@ -9,13 +9,13 @@ repos:
         files: ^backend/.*\.py$
 
   - repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v9.22.0
+    rev: v9.39.1
     hooks:
       - id: eslint
         files: ^frontend/.*\.(ts|tsx)$
         additional_dependencies:
-          - eslint@9.22.0
-          - typescript-eslint@8.26.0
+          - eslint@9.39.1
+          - typescript-eslint@8.58.2
           - eslint-plugin-react-hooks@7.0.1
           - eslint-plugin-react-refresh@0.5.2
 
