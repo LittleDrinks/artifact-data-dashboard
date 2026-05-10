@@ -11,6 +11,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # Test comment for PR-Agent (Kimi) review verification v2
+
     # Application
     APP_NAME: str = "文物大数据与人工智能集成系统"
     APP_VERSION: str = "1.0.0"

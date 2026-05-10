@@ -24,8 +24,8 @@ jobs:
         uses: qodo-ai/pr-agent@v0.34.3
         env:
           # Kimi Code API 配置
-          CONFIG.MODEL: "kimi-for-coding"
-          CONFIG.FALLBACK_MODELS: "[kimi-for-coding]"
+          CONFIG.MODEL: "openai/kimi-for-coding"
+          CONFIG.FALLBACK_MODELS: "[openai/kimi-for-coding]"
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "128000"
           OPENAI_KEY: ${{ secrets.KIMI_API_KEY }}
           OPENAI.API_BASE: "https://api.kimi.com/coding/v1"
