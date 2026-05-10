@@ -1,0 +1,36 @@
+name: CodeRabbit
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: coderabbitai/ai-pr-reviewer@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_BASE: https://api.deepseek.com/v1
+        with:
+          debug: true
+          review_simple_changes: true
+          review_comment_lgtm: false
+          openai_model: deepseek-v4-pro
+          openai_timeout_ms: 120000
+          language: zh-CN
+          system_message: |
+            你是一位资深代码审查员。请用中文提供简洁、具体的代码审查意见。
+            关注：代码质量、潜在 bug、安全问题和可维护性。
