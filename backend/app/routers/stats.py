@@ -20,6 +20,8 @@ router = APIRouter()
 @router.get("/overview", response_model=OverviewStats)
 async def get_overview(db: Session = Depends(get_db)):
     """获取 Dashboard 概览统计。"""
+    # NOTE: `await run_in_threadpool(...)` blocks until completion.
+    # The request-scoped `db` session remains open during execution.
     return await run_in_threadpool(lambda: stats_service.get_overview_stats(db))
 
 

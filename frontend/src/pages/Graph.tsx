@@ -454,6 +454,8 @@ export default function Graph() {
         const { x: ttx, y: tty, k: ttk } = transformRef.current;
         dragNodeRef.current.fx = (mx - ttx) / ttk;
         dragNodeRef.current.fy = (my - tty) / ttk;
+        // NOTE: drawCanvas is accessed via stable ref, not stale closure.
+        // The ref is updated on every effect run, so handlers always use the latest version.
         drawCanvas();
       } else if (isPanning) {
         transformRef.current.x = e.clientX - panStart.x;
@@ -509,6 +511,9 @@ export default function Graph() {
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('click', handleClick);
     };
+    // NOTE: drawCanvas is intentionally excluded from deps.
+    // It is stabilized via ref (drawCanvasRef) to prevent infinite re-renders.
+    // See Phase 1 fix: D3 simulation tick handler must not trigger effect re-run.
   }, [graphData, activeSearchKeyword, matchedNodeIds]);
 
   /* ── Update force params ── */

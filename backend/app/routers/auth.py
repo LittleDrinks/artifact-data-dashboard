@@ -136,6 +136,9 @@ async def login(data: UserLogin, request: Request, db: Session = Depends(get_db)
     _check_rate_limit(client_ip)
 
     try:
+        # NOTE: `await run_in_threadpool(...)` blocks until the thread completes.
+        # FastAPI will not close the `db` session (Depends) until the endpoint returns.
+        # This is the standard FastAPI pattern for calling sync code in async endpoints.
         token_response = await run_in_threadpool(lambda: auth_service.authenticate_user(db, data))
     except ValueError as e:
         raise HTTPException(

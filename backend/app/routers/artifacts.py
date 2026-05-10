@@ -34,6 +34,8 @@ async def list_artifacts(
     db: Session = Depends(get_db),
 ):
     """获取文物列表（分页、搜索、筛选）"""
+    # NOTE: `await run_in_threadpool(...)` blocks until completion.
+    # The request-scoped `db` session remains open during execution.
     artifacts, total = await run_in_threadpool(
         lambda: artifact_service.get_artifacts(
             db,
@@ -119,6 +121,8 @@ def export_artifacts_csv(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
     """获取文物详情"""
+    # NOTE: `await run_in_threadpool(...)` blocks until completion.
+    # The request-scoped `db` session remains open during execution.
     artifact = await run_in_threadpool(lambda: artifact_service.get_artifact_by_id(db, artifact_id))
     if not artifact:
         raise HTTPException(

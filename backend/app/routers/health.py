@@ -45,6 +45,8 @@ def _check_ai_api() -> bool:
     if not settings.AI_API_BASE:
         # No AI API configured — treat as unavailable but not a hard failure
         logger.info("Health check: AI_API_BASE not configured")
+        # NOTE: Returning False when AI_API_BASE is unconfigured is intentional.
+        # The health endpoint reports "degraded" so operators know the AI feature is disabled.
         return False
     try:
         response = requests.head(
