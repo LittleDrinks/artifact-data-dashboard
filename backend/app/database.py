@@ -147,6 +147,7 @@ def _ensure_new_columns():
 
         chat_new_columns = [
             ("reasoning_content", "TEXT"),
+            ("tool_call_id", "VARCHAR(100)"),
         ]
         for col_name, col_type in chat_new_columns:
             if col_name not in existing_chat_columns:
