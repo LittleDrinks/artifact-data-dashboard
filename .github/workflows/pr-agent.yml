@@ -23,11 +23,11 @@ jobs:
         id: pragent
         uses: qodo-ai/pr-agent@v0.34.3
         env:
-          # Kimi (Moonshot) API 配置
+          # Kimi Code API 配置
           CONFIG.MODEL: "kimi-for-coding"
           CONFIG.FALLBACK_MODELS: "[kimi-for-coding]"
           OPENAI_KEY: ${{ secrets.KIMI_API_KEY }}
-          OPENAI.API_BASE: "https://api.moonshot.cn/v1"
+          OPENAI.API_BASE: "https://api.kimi.com/coding/v1"
 
           # GitHub 配置
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
