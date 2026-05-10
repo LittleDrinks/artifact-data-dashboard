@@ -1,6 +1,6 @@
 """User model."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, String, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,7 +18,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(10), default="user", server_default="user")
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=text("CURRENT_TIMESTAMP"),
     )
 

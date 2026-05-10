@@ -1,6 +1,7 @@
 """Statistics router - overview, era/category/location stats, word cloud."""
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -17,9 +18,11 @@ router = APIRouter()
 
 
 @router.get("/overview", response_model=OverviewStats)
-def get_overview(db: Session = Depends(get_db)):
+async def get_overview(db: Session = Depends(get_db)):
     """获取 Dashboard 概览统计。"""
-    return stats_service.get_overview_stats(db)
+    # NOTE: `await run_in_threadpool(...)` blocks until completion.
+    # The request-scoped `db` session remains open during execution.
+    return await run_in_threadpool(lambda: stats_service.get_overview_stats(db))
 
 
 @router.get("/by-era", response_model=list[EraStat])

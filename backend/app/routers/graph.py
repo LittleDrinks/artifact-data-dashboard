@@ -7,6 +7,7 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from neo4j import GraphDatabase
 from sqlalchemy.orm import Session
@@ -26,9 +27,95 @@ from app.schemas.graph import (
     NodeDetailResponse,
 )
 from app.services import graph as graph_service
+from app.services.graph import validate_label
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _import_triples_to_neo4j(
+    triples: list[dict],
+    existing_errors: list[str],
+    last_row_num: int,
+) -> tuple[int, int, list[str]]:
+    """Import triples to Neo4j in a thread-safe manner."""
+    driver = None
+    import_errors = list(existing_errors)
+    try:
+        driver = GraphDatabase.driver(
+            settings.NEO4J_URI,
+            auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+        )
+
+        nodes_imported = 0
+        relations_imported = 0
+
+        def sanitize_label(label: str) -> str:
+            import re
+
+            sanitized = re.sub(r"[^a-zA-Z0-9_]", "", label)
+            return sanitized if sanitized else "Unknown"
+
+        with driver.session() as session:
+            for triple in triples:
+                src_type_sanitized = sanitize_label(triple["source_type"])
+                tgt_type_sanitized = sanitize_label(triple["target_type"])
+
+                try:
+                    validate_label(src_type_sanitized)
+                    validate_label(tgt_type_sanitized)
+                except ValueError as exc:
+                    import_errors.append(f"行 {last_row_num}: 无效标签类型: {exc}")
+                    continue
+
+                src_id = f"{src_type_sanitized}:{triple['source_name']}"
+                tgt_id = f"{tgt_type_sanitized}:{triple['target_name']}"
+
+                session.run(
+                    f"""
+                    MERGE (n:`{src_type_sanitized}` {{id: $id}})
+                    SET n.name = $name
+                    SET n.source = 'csv_import'
+                    """,
+                    id=src_id,
+                    name=triple["source_name"],
+                )
+                nodes_imported += 1
+
+                session.run(
+                    f"""
+                    MERGE (n:`{tgt_type_sanitized}` {{id: $id}})
+                    SET n.name = $name
+                    SET n.source = 'csv_import'
+                    """,
+                    id=tgt_id,
+                    name=triple["target_name"],
+                )
+                nodes_imported += 1
+
+                rel_type_sanitized = sanitize_label(
+                    triple["relation"].replace(" ", "_").replace("-", "_")
+                )
+                session.run(
+                    f"""
+                    MATCH (s:`{src_type_sanitized}` {{id: $src_id}})
+                    MATCH (t:`{tgt_type_sanitized}` {{id: $tgt_id}})
+                    MERGE (s)-[r:`{rel_type_sanitized}`]->(t)
+                    SET r.source = 'csv_import'
+                    """,
+                    src_id=src_id,
+                    tgt_id=tgt_id,
+                )
+                relations_imported += 1
+
+        return nodes_imported, relations_imported, import_errors
+
+    except Exception as e:
+        logger.exception("Neo4j import failed")
+        raise HTTPException(status_code=500, detail=f"Neo4j 导入失败: {str(e)}")
+    finally:
+        if driver:
+            driver.close()
 
 
 @router.get("/full", response_model=GraphDataResponse)
@@ -203,88 +290,17 @@ async def import_graph_csv(
             errors=errors,
         )
 
-    # Import to Neo4j
-    driver = None
-    try:
-        driver = GraphDatabase.driver(
-            settings.NEO4J_URI,
-            auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
-        )
+    nodes_imported, relations_imported, import_errors = await run_in_threadpool(
+        lambda: _import_triples_to_neo4j(triples, errors, row_num)
+    )
 
-        nodes_imported = 0
-        relations_imported = 0
-
-        def sanitize_label(label: str) -> str:
-            """Sanitize Neo4j label to prevent Cypher injection."""
-            # Only allow alphanumeric and underscore characters
-            import re
-
-            sanitized = re.sub(r"[^a-zA-Z0-9_]", "", label)
-            return sanitized if sanitized else "Unknown"
-
-        with driver.session() as session:
-            # Batch import nodes and relations
-            for triple in triples:
-                # Generate IDs from name and type
-                src_type_sanitized = sanitize_label(triple["source_type"])
-                tgt_type_sanitized = sanitize_label(triple["target_type"])
-                src_id = f"{src_type_sanitized}:{triple['source_name']}"
-                tgt_id = f"{tgt_type_sanitized}:{triple['target_name']}"
-
-                # MERGE source node (use sanitized label)
-                session.run(
-                    f"""
-                    MERGE (n:`{src_type_sanitized}` {{id: $id}})
-                    SET n.name = $name
-                    SET n.source = 'csv_import'
-                    """,
-                    id=src_id,
-                    name=triple["source_name"],
-                )
-                nodes_imported += 1
-
-                # MERGE target node
-                session.run(
-                    f"""
-                    MERGE (n:`{tgt_type_sanitized}` {{id: $id}})
-                    SET n.name = $name
-                    SET n.source = 'csv_import'
-                    """,
-                    id=tgt_id,
-                    name=triple["target_name"],
-                )
-                nodes_imported += 1
-
-                # MERGE relationship (sanitize relation type)
-                rel_type_sanitized = sanitize_label(
-                    triple["relation"].replace(" ", "_").replace("-", "_")
-                )
-                session.run(
-                    f"""
-                    MATCH (s:`{src_type_sanitized}` {{id: $src_id}})
-                    MATCH (t:`{tgt_type_sanitized}` {{id: $tgt_id}})
-                    MERGE (s)-[r:`{rel_type_sanitized}`]->(t)
-                    SET r.source = 'csv_import'
-                    """,
-                    src_id=src_id,
-                    tgt_id=tgt_id,
-                )
-                relations_imported += 1
-
-        return ImportResponse(
-            success=True,
-            nodes_imported=nodes_imported,
-            relations_imported=relations_imported,
-            message=f"成功导入 {len(triples)} 条三元组",
-            errors=errors if errors else None,
-        )
-
-    except Exception as e:
-        logger.exception("Neo4j import failed")
-        raise HTTPException(status_code=500, detail=f"Neo4j 导入失败: {str(e)}")
-    finally:
-        if driver:
-            driver.close()
+    return ImportResponse(
+        success=True,
+        nodes_imported=nodes_imported,
+        relations_imported=relations_imported,
+        message=f"成功导入 {len(triples)} 条三元组",
+        errors=import_errors if import_errors else None,
+    )
 
 
 @router.post("/extract", response_model=ExtractResponse)

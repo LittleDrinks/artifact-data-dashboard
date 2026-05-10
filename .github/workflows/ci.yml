@@ -12,6 +12,9 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      JWT_SECRET_KEY: "ci-test-secret-key-not-for-production"
+      ADMIN_DEFAULT_PASSWORD: "admin123"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,6 +23,8 @@ jobs:
       - run: pip install ruff==0.11.0
       - run: ruff check app/
       - run: ruff format --check app/
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest tests/ -v --tb=short
 
   frontend:
     runs-on: ubuntu-latest
@@ -36,3 +41,4 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
+      - run: npm run build

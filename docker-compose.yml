@@ -36,6 +36,8 @@ services:
     build: ./frontend
     ports:
       - "80:80"
+    env_file:
+      - ./frontend/.env
     depends_on:
       - backend
 

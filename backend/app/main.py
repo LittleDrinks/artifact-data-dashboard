@@ -39,14 +39,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration - allow frontend dev server
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS configuration
+if settings.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    logger.warning("CORS_ORIGINS is empty; CORS middleware not configured (same-origin only).")
 
 # Register routers
 app.include_router(health.router, prefix="/api", tags=["health"])

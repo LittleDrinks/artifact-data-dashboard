@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
@@ -1153,6 +1154,7 @@ export default function Chat() {
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                   {msg.role === 'assistant' ? (
                     <ReactMarkdown
+                      rehypePlugins={[rehypeSanitize]}
                       components={{
                         p: ({ children }) => <p style={{ margin: 0, lineHeight: 1.7 }}>{children}</p>,
                         strong: ({ children }) => <strong style={{ fontWeight: 600 }}>{children}</strong>,

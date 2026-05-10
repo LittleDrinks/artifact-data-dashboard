@@ -1,17 +1,18 @@
 """Conftest module - shared fixtures for pytest tests."""
 
-import pytest
-import tempfile
 import os
+import tempfile
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
-from app.routers import auth, artifacts, stats, chat, health
 from app.models.user import User
-from app.services.auth import hash_password, create_access_token
+from app.routers import artifacts, auth, chat, health, repair, stats
+from app.services.auth import create_access_token, hash_password
 
 
 @pytest.fixture(scope="function")
@@ -50,8 +51,8 @@ def test_engine():
 @pytest.fixture(scope="function")
 def db_session(test_engine):
     """Create a test database session."""
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-    session = TestSessionLocal()
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+    session = test_session_local()
     try:
         yield session
     finally:
@@ -61,10 +62,10 @@ def db_session(test_engine):
 @pytest.fixture(scope="function")
 def client(test_engine):
     """Create a test client with test database engine (no lifespan)."""
-    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+    test_session_local = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
     def override_get_db():
-        session = TestSessionLocal()
+        session = test_session_local()
         try:
             yield session
         finally:
@@ -80,7 +81,9 @@ def client(test_engine):
     test_app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
     test_app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     from app.routers import graph
+
     test_app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
+    test_app.include_router(repair.router, prefix="/api/artifacts", tags=["repair"])
 
     # Override get_db dependency
     test_app.dependency_overrides[get_db] = override_get_db

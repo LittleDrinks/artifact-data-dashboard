@@ -11,12 +11,11 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # Test comment for PR-Agent (Kimi) review verification v2
-
     # Application
     APP_NAME: str = "文物大数据与人工智能集成系统"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
+    ADMIN_DEFAULT_PASSWORD: str = ""
 
     # Server
     HOST: str = "0.0.0.0"
@@ -35,8 +34,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost"]
+    # CORS — must be explicitly configured; empty means no CORS (same-origin only)
+    CORS_ORIGINS: list[str] = []
 
     # AI / LLM — Chat Q&A
     # User-configured OpenAI-compatible API
@@ -76,6 +75,9 @@ class Settings(BaseSettings):
 
         if not self.LIGHTRAG_DIR:
             self.LIGHTRAG_DIR = str(Path(__file__).parent.parent / "data" / "lightrag")
+
+        if self.JWT_SECRET_KEY == "your-secret-key-change-in-production" and not self.DEBUG:
+            raise ValueError("JWT_SECRET_KEY must be changed from default in production")
 
 
 settings = Settings()

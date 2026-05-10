@@ -54,17 +54,20 @@ def get_db() -> Generator[Session, None, None]:
 
 def _ensure_admin_user():
     """Create a default admin user if one does not already exist, or fix role if wrong."""
-    import os
-
     from app.models.user import User
-    from app.services.auth import hash_password
+    from app.services.auth import hash_password, verify_password
+
+    default_password = settings.ADMIN_DEFAULT_PASSWORD
+    if not default_password:
+        raise ValueError("ADMIN_DEFAULT_PASSWORD environment variable is required")
+    if len(default_password) < 8:
+        raise ValueError("ADMIN_DEFAULT_PASSWORD must be at least 8 characters")
 
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
             # Create new admin user
-            default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
             admin = User(
                 username="admin",
                 email="admin@heritage.cn",
@@ -77,6 +80,11 @@ def _ensure_admin_user():
             # Fix existing admin user with wrong role
             admin.role = "admin"
             db.commit()
+        else:
+            # Update password if env var has changed
+            if not verify_password(default_password, admin.password_hash):
+                admin.password_hash = hash_password(default_password)
+                db.commit()
     finally:
         db.close()
 
@@ -114,7 +122,8 @@ def init_db():
 
 def _ensure_new_columns():
     """Add new columns if they don't exist (SQLite migration)."""
-    new_columns = [
+    # Migrate artifacts table
+    artifact_columns = [
         ("material", "VARCHAR(50)"),
         ("museum", "VARCHAR(100)"),
         ("source_url", "VARCHAR(500)"),
@@ -122,14 +131,27 @@ def _ensure_new_columns():
     ]
 
     with engine.connect() as conn:
-        # 获取现有列
+        # 获取 artifacts 现有列
         result = conn.execute(text("PRAGMA table_info(artifacts)"))
         existing_columns = {row[1] for row in result.fetchall()}
 
         # 添加缺失的列
-        for col_name, col_type in new_columns:
+        for col_name, col_type in artifact_columns:
             if col_name not in existing_columns:
                 conn.execute(text(f"ALTER TABLE artifacts ADD COLUMN {col_name} {col_type}"))
                 print(f"Added column: {col_name}")
+
+        # Migrate chat_messages table
+        result = conn.execute(text("PRAGMA table_info(chat_messages)"))
+        existing_chat_columns = {row[1] for row in result.fetchall()}
+
+        chat_new_columns = [
+            ("reasoning_content", "TEXT"),
+            ("tool_call_id", "VARCHAR(100)"),
+        ]
+        for col_name, col_type in chat_new_columns:
+            if col_name not in existing_chat_columns:
+                conn.execute(text(f"ALTER TABLE chat_messages ADD COLUMN {col_name} {col_type}"))
+                print(f"Added column: chat_messages.{col_name}")
 
         conn.commit()
