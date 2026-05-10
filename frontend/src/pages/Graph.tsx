@@ -92,6 +92,7 @@ export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const drawCanvasRef = useRef<(() => void) | null>(null);
   const [searchParams] = useSearchParams();
 
   // Transform state (zoom/pan)
@@ -317,6 +318,9 @@ export default function Graph() {
     }
   }, [activeSearchKeyword, matchedNodeIds, hoveredNode]);
 
+  // Keep ref in sync so D3 tick handler always calls latest version
+  drawCanvasRef.current = drawCanvas;
+
   /* ── D3 simulation + Canvas setup ── */
   useEffect(() => {
     if (!graphData || !canvasRef.current || !containerRef.current) return;
@@ -377,7 +381,7 @@ export default function Graph() {
         d3.forceCollide<SimNode>().radius((d) => d.r + collisionPadding),
       )
       .on('tick', () => {
-        drawCanvas();
+        drawCanvasRef.current?.();
       });
 
     simulationRef.current = simulation;
@@ -494,8 +498,7 @@ export default function Graph() {
     return () => {
       simulation.stop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphData, activeSearchKeyword, matchedNodeIds, drawCanvas]);
+  }, [graphData, activeSearchKeyword, matchedNodeIds]);
 
   /* ── Update force params ── */
   useEffect(() => {
