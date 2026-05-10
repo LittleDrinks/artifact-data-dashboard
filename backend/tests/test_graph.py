@@ -496,7 +496,7 @@ class TestGraphImportMockNeo4j:
             # Verify Neo4j session.run was called
             assert mock_session.run.called
 
-    def import_invalid_label_returns_error_in_response(self, client: TestClient):
+    def test_import_invalid_label_returns_error_in_response(self, client: TestClient):
         """Invalid label should be caught and reported in errors, not crash."""
         import csv
 
@@ -528,6 +528,12 @@ class TestGraphImportMockNeo4j:
                 "/api/graph/import",
                 files={"file": ("test.csv", io.BytesIO(content), "text/csv")},
             )
-            # The endpoint wraps _import_triples_to_neo4j in try/except and raises HTTPException(500)
-            assert resp.status_code == 500
-            assert "无效标签" in resp.json()["detail"]
+            # Invalid label is caught inside _import_triples_to_neo4j, recorded as error,
+            # and the endpoint returns 200 with success=True and errors list.
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["errors"] is not None
+            assert len(data["errors"]) > 0
+            assert data["nodes_imported"] == 0
+            assert data["relations_imported"] == 0
