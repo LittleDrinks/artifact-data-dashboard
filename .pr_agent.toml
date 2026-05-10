@@ -1,0 +1,13 @@
+[config]
+model = "deepseek/deepseek-v4-pro"
+fallback_models = ["deepseek/deepseek-v4-pro"]
+custom_model_max_tokens = 64000
+
+[pr_reviewer]
+extra_instructions = "请用中文进行代码审查"
+
+[pr_description]
+extra_instructions = "请用中文生成 PR 描述"
+
+[pr_code_suggestions]
+extra_instructions = "请用中文提供代码改进建议"
