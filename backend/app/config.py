@@ -2,6 +2,7 @@
 Application configuration module.
 Reads settings from environment variables with sensible defaults.
 """
+# Test comment for CodeRabbit review verification
 
 from pathlib import Path
 
