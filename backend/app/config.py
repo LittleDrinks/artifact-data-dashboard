@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Test comment for PR-Agent (Kimi) review verification v2
+    # Test comment v3: verifying openai/kimi-for-coding prefix fix
 
     # Application
     APP_NAME: str = "文物大数据与人工智能集成系统"
