@@ -44,6 +44,13 @@ def _validate_image_url(url: str) -> None:
     Raises HTTPException with 400 if validation fails.
     """
     parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅支持 HTTP/HTTPS 协议",
+        )
+
     hostname = parsed.hostname
 
     if not hostname:
@@ -95,9 +102,9 @@ def download_image(url: str) -> np.ndarray:
             )
 
         # 4. Size check: stream and cap at 10 MB
-        content = b""
+        content = bytearray()
         for chunk in resp.iter_content(chunk_size=_READ_CHUNK_SIZE):
-            content += chunk
+            content.extend(chunk)
             if len(content) > _MAX_IMAGE_SIZE:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
