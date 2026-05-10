@@ -22,6 +22,23 @@ from app.services.stats import JUNK_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
+# ── Cypher 标签白名单 ──────────────────────────────────────────────────
+# 防止 Cypher 注入：所有动态标签必须先通过 validate_label() 校验
+
+ALLOWED_LABELS = {"artifact", "era", "category", "location", "tag", "material", "museum"}
+
+
+def validate_label(label: str) -> str:
+    """校验 Neo4j 节点/关系标签是否在白名单内。
+
+    Raises:
+        ValueError: 标签不在 ALLOWED_LABELS 中时抛出。
+    """
+    if label not in ALLOWED_LABELS:
+        raise ValueError(f"Invalid label: {label}. Must be one of: {ALLOWED_LABELS}")
+    return label
+
+
 # Neo4j driver singleton
 _neo4j_driver = None
 
@@ -193,17 +210,9 @@ def _query_neo4j_base_layer(
             total_nodes = 0
             type_counts: dict[str, int] = {}
             for node_type in type_filter:
-                label_map = {
-                    "artifact": "artifact",
-                    "era": "era",
-                    "category": "category",
-                    "location": "location",
-                    "tag": "tag",
-                    "material": "material",
-                    "museum": "museum",
-                }
-                neo4j_label = label_map.get(node_type)
-                if not neo4j_label:
+                try:
+                    neo4j_label = validate_label(node_type)
+                except ValueError:
                     continue
                 count_query = f"""
                     MATCH (n:{neo4j_label})
@@ -229,17 +238,9 @@ def _query_neo4j_base_layer(
 
             # Now query nodes with per-type limits
             for node_type in type_filter:
-                label_map = {
-                    "artifact": "artifact",
-                    "era": "era",
-                    "category": "category",
-                    "location": "location",
-                    "tag": "tag",
-                    "material": "material",
-                    "museum": "museum",
-                }
-                neo4j_label = label_map.get(node_type)
-                if not neo4j_label:
+                try:
+                    neo4j_label = validate_label(node_type)
+                except ValueError:
                     continue
 
                 type_limit = per_type_limits.get(node_type, limit)
@@ -339,17 +340,9 @@ def _search_neo4j_base_layer(
         with driver.session() as session:
             # Search nodes by name containing keyword
             for node_type in type_filter:
-                label_map = {
-                    "artifact": "artifact",
-                    "era": "era",
-                    "category": "category",
-                    "location": "location",
-                    "tag": "tag",
-                    "material": "material",
-                    "museum": "museum",
-                }
-                neo4j_label = label_map.get(node_type)
-                if not neo4j_label:
+                try:
+                    neo4j_label = validate_label(node_type)
+                except ValueError:
                     continue
 
                 search_query = f"""

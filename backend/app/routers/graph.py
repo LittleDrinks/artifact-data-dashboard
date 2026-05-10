@@ -26,6 +26,7 @@ from app.schemas.graph import (
     NodeDetailResponse,
 )
 from app.services import graph as graph_service
+from app.services.graph import validate_label
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -228,6 +229,15 @@ async def import_graph_csv(
                 # Generate IDs from name and type
                 src_type_sanitized = sanitize_label(triple["source_type"])
                 tgt_type_sanitized = sanitize_label(triple["target_type"])
+
+                # Validate against whitelist before Cypher interpolation
+                try:
+                    validate_label(src_type_sanitized)
+                    validate_label(tgt_type_sanitized)
+                except ValueError as exc:
+                    errors.append(f"行 {row_num}: 无效标签类型: {exc}")
+                    continue
+
                 src_id = f"{src_type_sanitized}:{triple['source_name']}"
                 tgt_id = f"{tgt_type_sanitized}:{triple['target_name']}"
 
