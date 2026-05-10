@@ -23,12 +23,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENAI_API_BASE: https://api.deepseek.com/v1
         with:
           debug: true
           review_simple_changes: true
           review_comment_lgtm: false
-          openai_model: deepseek-v4-pro
+          openai_base_url: https://api.deepseek.com/v1
+          openai_light_model: deepseek-v4-pro
+          openai_heavy_model: deepseek-v4-pro
           openai_timeout_ms: 120000
           language: zh-CN
           system_message: |
