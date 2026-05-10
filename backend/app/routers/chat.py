@@ -130,7 +130,17 @@ def _persist_chat_response(
     """
     db = SessionLocal()
     try:
-        # 1. Save assistant message
+        # 1. Save tool result messages first (they precede the assistant response)
+        for tr in collector.get("tool_results", []):
+            chat_service.save_message(
+                db,
+                session_id,
+                "tool",
+                tr["content"],
+                tool_call_id=tr["tool_call_id"],
+            )
+
+        # 2. Save assistant message last so it appears after tool results
         tool_calls_log = collector.get("tool_calls_log", [])
         tool_calls_json = json.dumps(tool_calls_log, ensure_ascii=False) if tool_calls_log else None
         thinking_rounds = collector.get("thinking_rounds", [])
@@ -143,16 +153,6 @@ def _persist_chat_response(
             tool_calls=tool_calls_json,
             reasoning_content=combined_reasoning,
         )
-
-        # 2. Save tool result messages for session continuity
-        for tr in collector.get("tool_results", []):
-            chat_service.save_message(
-                db,
-                session_id,
-                "tool",
-                tr["content"],
-                tool_call_id=tr["tool_call_id"],
-            )
 
         # 3. Update session title if still the default
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()

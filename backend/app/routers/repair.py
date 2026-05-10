@@ -59,13 +59,13 @@ def _validate_image_url(url: str) -> None:
             detail="无效的 URL: 无法解析主机名",
         )
 
-    # 1. IP check: reject private / loopback IPs
+    # 1. IP check: reject private / loopback / link-local IPs
     try:
         ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback:
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="禁止访问内网或回环地址",
+                detail="禁止访问内网、回环或链路本地地址",
             )
     except ValueError:
         # Not an IP, proceed to domain check
@@ -85,37 +85,37 @@ def download_image(url: str) -> np.ndarray:
     _validate_image_url(url)
 
     try:
-        resp = requests.get(
+        with requests.get(
             url,
             timeout=(5, 10),
             headers={"User-Agent": "Mozilla/5.0"},
             stream=True,
-        )
-        resp.raise_for_status()
+        ) as resp:
+            resp.raise_for_status()
 
-        # 3. Content-Type check: only allow image/*
-        content_type = resp.headers.get("Content-Type", "")
-        if not content_type.startswith("image/"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"无效的 Content-Type: {content_type}，只允许 image/*",
-            )
-
-        # 4. Size check: stream and cap at 10 MB
-        content = bytearray()
-        for chunk in resp.iter_content(chunk_size=_READ_CHUNK_SIZE):
-            content.extend(chunk)
-            if len(content) > _MAX_IMAGE_SIZE:
+            # 3. Content-Type check: only allow image/*
+            content_type = resp.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"图片大小超过最大限制 {_MAX_IMAGE_SIZE // (1024 * 1024)} MB",
+                    detail=f"无效的 Content-Type: {content_type}，只允许 image/*",
                 )
 
-        pil_img = Image.open(io.BytesIO(content))
-        # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
-        if pil_img.mode != "RGB":
-            pil_img = pil_img.convert("RGB")
-        return np.array(pil_img)
+            # 4. Size check: stream and cap at 10 MB
+            content = bytearray()
+            for chunk in resp.iter_content(chunk_size=_READ_CHUNK_SIZE):
+                content.extend(chunk)
+                if len(content) > _MAX_IMAGE_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"图片大小超过最大限制 {_MAX_IMAGE_SIZE // (1024 * 1024)} MB",
+                    )
+
+            pil_img = Image.open(io.BytesIO(content))
+            # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            return np.array(pil_img)
     except HTTPException:
         raise
     except Exception as e:
@@ -143,6 +143,8 @@ async def repair_image(
     - 返回修复后的图片 base64 编码
     """
     # 获取文物信息
+    # NOTE: OpenCV and requests are sync libraries; threadpool is required.
+    # The `db` session stays open because `await` blocks until completion.
     artifact = await run_in_threadpool(lambda: artifact_service.get_artifact_by_id(db, artifact_id))
     if not artifact:
         raise HTTPException(

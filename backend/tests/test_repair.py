@@ -139,11 +139,14 @@ class TestRepairImageEndpoint:
         return buffer.getvalue()
 
     def _mock_response(self, content_type="image/jpeg", content=None):
-        """Helper to create a mocked requests.Response."""
+        """Helper to create a mocked requests.Response (context manager compatible)."""
         mock_resp = MagicMock()
         mock_resp.headers = {"Content-Type": content_type}
         mock_resp.iter_content.return_value = [content or self._make_image_bytes()]
         mock_resp.raise_for_status.return_value = None
+        # Support `with requests.get(...) as resp:`
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
         return mock_resp
 
     @patch("app.routers.repair.requests.get")
@@ -307,6 +310,8 @@ class TestRepairImageEndpoint:
         mock_resp.headers = {"Content-Type": "text/html"}
         mock_resp.iter_content.return_value = [b"<html></html>"]
         mock_resp.raise_for_status.return_value = None
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
         mock_requests_get.return_value = mock_resp
 
         response = client.post(
