@@ -114,12 +114,12 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 
 ## Agent 使用规范
 
-派 agent 时**必须**指定 `model` 参数：
-- `opus`: 复杂架构决策
-- `sonnet`: 日常开发（**默认**）
-- `haiku`: 简单查询
+详见 `AGENTS.md` — 包含任务拆分、死循环预防、清理检查清单、Kimi prompt 规则等完整规范。
 
-**前端改动必须用浏览器验证** — 启动 dev server，打开页面，确认数据和交互正常。
+核心要点：
+- 派 agent 时**必须**指定 `model` 参数：`opus`（架构决策）、`sonnet`（日常开发，默认）、`haiku`（简单查询）
+- **前端改动必须用浏览器验证** — 启动 dev server，打开页面，确认数据和交互正常
+- Agent 死循环预警信号：50 次 tool calling 后仍在重复读文件 → 立即 kill，拆任务重新派发
 
 ---
 
