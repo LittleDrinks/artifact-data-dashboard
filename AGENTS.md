@@ -38,13 +38,13 @@
 | 单次 agent 执行时间 | 5 分钟 | 检查是否卡在网络请求或死循环 |
 | 并行 agent 数量 | 4-6 个 | 超过则排队，避免资源争抢 |
 
-**监控命令**：
+**监控命令**（将 `<team>` 替换为实际的 team 名称）：
 ```bash
-# 查看 agent tmux 会话
-ls ~/.claude/teams/{team}/
+# 查看 agent team 目录
+ls ~/.claude/teams/<team>/
 
 # 查看 agent 输出日志
-cat ~/.claude/teams/{team}/*.output 2>/dev/null | tail -50
+cat ~/.claude/teams/<team>/*.output 2>/dev/null | tail -50
 ```
 
 ---
@@ -75,8 +75,8 @@ cat ~/.claude/teams/{team}/*.output 2>/dev/null | tail -50
 
 - [ ] 确认 agent 已退出（不是挂起在 tmux 中）
 - [ ] `tmux kill-pane` 关闭残留 pane（`shutdown_request` 不够）
-- [ ] 删除 team 目录：`rm -rf ~/.claude/teams/{team}`（`TeamDelete` 经常失败）
-- [ ] 确认修改提交到了正确的分支（不是 detatched HEAD）
+- [ ] 删除 team 目录：`rm -rf ~/.claude/teams/<team>`（`TeamDelete` 经常失败；将 `<team>` 替换为实际名称）
+- [ ] 确认修改提交到了正确的分支（不是 detached HEAD）
 - [ ] 确认没有未提交的临时文件
 
 **一键清理脚本**（保存为 `scripts/clean-agents.sh`）：
@@ -88,8 +88,8 @@ for team in ~/.claude/teams/*/; do
     echo "Cleaning: $team"
     rm -rf "$team"
 done
-# 清理残留 tmux 会话
-tmux ls 2>/dev/null | grep -E '^[0-9]+:' | cut -d: -f1 | xargs -r tmux kill-session -t 2>/dev/null
+# 清理残留 tmux 会话（只杀以数字开头的 agent session）
+tmux ls 2>/dev/null | grep -E '^[0-9]+:' | awk -F: '{print $1}' | xargs -r -I {} tmux kill-session -t {} 2>/dev/null
 echo "Done."
 ```
 

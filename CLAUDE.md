@@ -151,11 +151,8 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 - **聚焦 merge** — 当前 PR 的首要目标是合并，不要引入不相关的改动。
 - **无关改动拆 PR** — workflow、文档更新、工具配置等非功能改动，单独开分支和 PR。
 - **技术债务同步** — 发现的技术债务记录到 `.planning/technical-debt.md`，并同步到 GitHub Issues。
-
-### Agent 使用
-
-- **精确指令** — 避免让 agent 探索过多，给出具体文件路径和修改内容。
-- **并行拆分** — 独立任务拆给多个 agent 并行执行，防止单个 agent 死循环。
+- **新建 PR 后必须等 review** — push 后不要立刻告诉用户"完成了"。等待 Copilot / CodeRabbit 跑完 review，逐条处理建议（修复或 rebuttal），直到没有新的 blocking 评论，再通知用户检查并 merge。
+- **AI Review 语言** — 已通过 `.coderabbit.yaml` 和 `.github/copilot-instructions.md` 要求 CodeRabbit / Copilot 用**简体中文**回复。如果 review 仍用英文，在首条 rebuttal 中追加提醒：`请用中文回复。`
 
 ---
 
