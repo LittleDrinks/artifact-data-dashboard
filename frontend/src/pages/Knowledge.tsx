@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
@@ -342,7 +343,7 @@ export default function Knowledge() {
       message.success(`导入成功，共 ${count} 条三元组`);
       setCsvFile(null);
       setCsvPreview([]);
-    } catch (error) {
+    } catch {
       message.error('导入失败，请检查文件格式');
     } finally {
       setImporting(false);
@@ -356,7 +357,7 @@ export default function Knowledge() {
     try {
       await exportGraphCSV();
       message.success('导出成功');
-    } catch (error) {
+    } catch {
       message.error('导出失败，请检查后端服务');
     } finally {
       setExporting(false);

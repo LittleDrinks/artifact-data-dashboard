@@ -4,14 +4,14 @@ import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.schemas.auth import UserRegister, UserLogin, TokenResponse, UserResponse
+from app.schemas.auth import TokenResponse, UserLogin, UserRegister, UserResponse
 from app.services import auth as auth_service
-from app.config import settings
 
 router = APIRouter()
 security = HTTPBearer()
@@ -40,6 +40,7 @@ def _check_rate_limit(client_ip: str) -> None:
     # Periodically clean up empty IPs to prevent memory leak (1% probability)
     # This spreads the cleanup cost across requests instead of doing it every time
     import random
+
     if random.random() < 0.01:
         empty_ips = [ip for ip, ts in _login_attempts.items() if not ts]
         for ip in empty_ips:

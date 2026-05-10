@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import health, auth, artifacts, stats, graph, chat, repair
+from app.routers import artifacts, auth, chat, graph, health, repair, stats
 from app.services.graph import _close_neo4j_driver
 
 logger = logging.getLogger(__name__)

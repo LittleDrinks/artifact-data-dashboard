@@ -2,7 +2,6 @@
 
 import time
 from collections import Counter
-from typing import List, Optional
 
 import jieba
 from sqlalchemy import func, or_
@@ -10,59 +9,294 @@ from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
 from app.schemas.stats import (
-    OverviewStats,
-    EraStat,
     CategoryStat,
+    EraStat,
     LocationStat,
+    OverviewStats,
     WordCloudItem,
 )
 
 # 中文停用词表（常见虚词、代词、介词 + 文物领域无意义词）
-STOP_WORDS = set(
-    "的 了 在 是 我 有 和 就 不 人 都 一 一个 上 也 很 到 说 要 去 你 会 着 没有 看 好 自己 "
-    "这 他 她 它 们 那 里 为 以 对 中 与 从 来 而 个 大 小 多 少 年 月 日 时 分 秒 "
-    "可 这个 那个 这些 那些 可以 因为 所以 如果 但是 然而 或者 以及 其他 还有 "
-    "之 其 于 等 被 把 将 向 给 让 用 通过 根据 按照 由于 关于 对于 其中 以及 "
-    "所 该 各 本 此 每 某 任 何 些 什么 怎么 哪 谁 几 多少 怎样 "
-    # 文物领域无意义词
-    "一种 年代 时期 时代 世纪 前后 左右 约为 部分 具有 属于 目前 已知 现存 "
-    "发现 出土 收藏 现藏 现藏于 馆藏 保存 完整 不同 重要 著名 代表 典型 主要 "
-    "古代 传统 中国 国家 级别 以上 以下 没有 无法 未知 不详 "
-    # 度量单位
-    "厘米 毫米 米 公分 尺 寸 高度 长度 直径 厚度 宽度 "
-    # 通用动词（孤立无意义）
-    "使用 利用 制作 雕刻 铸造 烧制 绘制 成为 开始 进行 发行 流通 描绘 作为 包括 "
-    # 通用名词（孤立无意义）
-    "特点 特征 风格 技术 工艺 方法 类型 彏式 材料 用途 "
-    # Wiki/法律术语残留
-    "引用 参考 来源 注释 图像 图片 目录 条例 实施 发布 公布 列为 "
-    "禁止 出境 出国 中华人民共和国 文物保护法 国家文物局 禁止出境展览文物 "
-    "境外 法律法规 法规 涵盖 修订 根据上述 "
-    # 博物馆展示相关（太通用）
-    "博物馆 博物院 展览 国家一级 国家博物馆 上海博物馆 "
-    # 批次编号
-    "第一批 第二批 第三批 "
-    # 通用描述词
-    "位于 又称 称为 认为 可能 所有 之一 一件 一幅 年间 之前 晚期 早期 "
-    "单位 作品 内容 历史 文化 艺术 人物 变化 "
-    # 数量描述词
-    "一座 九座 大型 重点 依据 几次 及其 有所 "
-    # 其他高频无意义词
-    "所有 全国 最早 历史 内容 作品 人物 艺术 文化 变化 得名 或称 参加 珍贵文物 国立 铸行 银行 纸币 "
-    .split()
-)
+STOP_WORDS = {
+    "的",
+    "了",
+    "在",
+    "是",
+    "我",
+    "有",
+    "和",
+    "就",
+    "不",
+    "人",
+    "都",
+    "一",
+    "一个",
+    "上",
+    "也",
+    "很",
+    "到",
+    "说",
+    "要",
+    "去",
+    "你",
+    "会",
+    "着",
+    "没有",
+    "看",
+    "好",
+    "自己",
+    "这",
+    "他",
+    "她",
+    "它",
+    "们",
+    "那",
+    "里",
+    "为",
+    "以",
+    "对",
+    "中",
+    "与",
+    "从",
+    "来",
+    "而",
+    "个",
+    "大",
+    "小",
+    "多",
+    "少",
+    "年",
+    "月",
+    "日",
+    "时",
+    "分",
+    "秒",
+    "可",
+    "这个",
+    "那个",
+    "这些",
+    "那些",
+    "可以",
+    "因为",
+    "所以",
+    "如果",
+    "但是",
+    "然而",
+    "或者",
+    "以及",
+    "其他",
+    "还有",
+    "之",
+    "其",
+    "于",
+    "等",
+    "被",
+    "把",
+    "将",
+    "向",
+    "给",
+    "让",
+    "用",
+    "通过",
+    "根据",
+    "按照",
+    "由于",
+    "关于",
+    "对于",
+    "其中",
+    "所",
+    "该",
+    "各",
+    "本",
+    "此",
+    "每",
+    "某",
+    "任",
+    "何",
+    "些",
+    "什么",
+    "怎么",
+    "哪",
+    "谁",
+    "几",
+    "多少",
+    "怎样",
+    "一种",
+    "年代",
+    "时期",
+    "时代",
+    "世纪",
+    "前后",
+    "左右",
+    "约为",
+    "部分",
+    "具有",
+    "属于",
+    "目前",
+    "已知",
+    "现存",
+    "发现",
+    "出土",
+    "收藏",
+    "现藏",
+    "现藏于",
+    "馆藏",
+    "保存",
+    "完整",
+    "不同",
+    "重要",
+    "著名",
+    "代表",
+    "典型",
+    "主要",
+    "古代",
+    "传统",
+    "中国",
+    "国家",
+    "级别",
+    "以上",
+    "以下",
+    "无法",
+    "未知",
+    "不详",
+    "厘米",
+    "毫米",
+    "米",
+    "公分",
+    "尺",
+    "寸",
+    "高度",
+    "长度",
+    "直径",
+    "厚度",
+    "宽度",
+    "使用",
+    "利用",
+    "制作",
+    "雕刻",
+    "铸造",
+    "烧制",
+    "绘制",
+    "成为",
+    "开始",
+    "进行",
+    "发行",
+    "流通",
+    "描绘",
+    "作为",
+    "包括",
+    "特点",
+    "特征",
+    "风格",
+    "技术",
+    "工艺",
+    "方法",
+    "类型",
+    "彏式",
+    "材料",
+    "用途",
+    "引用",
+    "参考",
+    "来源",
+    "注释",
+    "图像",
+    "图片",
+    "目录",
+    "条例",
+    "实施",
+    "发布",
+    "公布",
+    "列为",
+    "禁止",
+    "出境",
+    "出国",
+    "中华人民共和国",
+    "文物保护法",
+    "国家文物局",
+    "禁止出境展览文物",
+    "境外",
+    "法律法规",
+    "法规",
+    "涵盖",
+    "修订",
+    "根据上述",
+    "博物馆",
+    "博物院",
+    "展览",
+    "国家一级",
+    "国家博物馆",
+    "上海博物馆",
+    "第一批",
+    "第二批",
+    "第三批",
+    "位于",
+    "又称",
+    "称为",
+    "认为",
+    "可能",
+    "所有",
+    "之一",
+    "一件",
+    "一幅",
+    "年间",
+    "之前",
+    "晚期",
+    "早期",
+    "单位",
+    "作品",
+    "内容",
+    "历史",
+    "文化",
+    "艺术",
+    "人物",
+    "变化",
+    "一座",
+    "九座",
+    "大型",
+    "重点",
+    "依据",
+    "几次",
+    "及其",
+    "有所",
+    "全国",
+    "最早",
+    "得名",
+    "或称",
+    "参加",
+    "珍贵文物",
+    "国立",
+    "铸行",
+    "银行",
+    "纸币",
+}
 
 # Wikipedia maintenance / non-artifact categories to exclude from stats
 JUNK_CATEGORIES = {
-    "中国文物", "禁止出境展览文物", "中国博物馆船", "中國國家博物館藏品",
-    "山西博物院藏品", "河北博物院藏品", "浙江省博物館藏品",
-    "晋宁区", "新和县",
-    "引文格式1错误：日期", "使用了两种注音方式的页面", "使用过时图像语法的页面",
+    "中国文物",
+    "禁止出境展览文物",
+    "中国博物馆船",
+    "中國國家博物館藏品",
+    "山西博物院藏品",
+    "河北博物院藏品",
+    "浙江省博物館藏品",
+    "晋宁区",
+    "新和县",
+    "引文格式1错误：日期",
+    "使用了两种注音方式的页面",
+    "使用过时图像语法的页面",
     "维基共享资源分类链接使用了维基数据上的匹配项",
-    "自2018年10月带有失效链接的条目", "自2019年11月带有失效链接的条目",
-    "战国文物", "滇国", "方国", "晚清政治",
-    "祥云县历史", "红河哈尼族彝族自治州文物", "玉溪文物", "运城文化",
-    "聂耳", "突厥语铭文",
+    "自2018年10月带有失效链接的条目",
+    "自2019年11月带有失效链接的条目",
+    "战国文物",
+    "滇国",
+    "方国",
+    "晚清政治",
+    "祥云县历史",
+    "红河哈尼族彝族自治州文物",
+    "玉溪文物",
+    "运城文化",
+    "聂耳",
+    "突厥语铭文",
 }
 
 # ── TTL Cache (60s) ──
@@ -95,9 +329,7 @@ def get_overview_stats(db: Session) -> OverviewStats:
 
     # Exclude JUNK_CATEGORIES from total count to match artifacts list behavior
     total = (
-        db.query(func.count(Artifact.id))
-        .filter(Artifact.category.notin_(JUNK_CATEGORIES))
-        .scalar()
+        db.query(func.count(Artifact.id)).filter(Artifact.category.notin_(JUNK_CATEGORIES)).scalar()
         or 0
     )
     total_categories = (
@@ -133,7 +365,7 @@ def get_overview_stats(db: Session) -> OverviewStats:
     return result
 
 
-def get_era_stats(db: Session) -> List[EraStat]:
+def get_era_stats(db: Session) -> list[EraStat]:
     """按朝代统计文物数量分布。"""
     cached = _get_cached("era")
     if cached is not None:
@@ -151,7 +383,7 @@ def get_era_stats(db: Session) -> List[EraStat]:
     return value
 
 
-def get_category_stats(db: Session) -> List[CategoryStat]:
+def get_category_stats(db: Session) -> list[CategoryStat]:
     """按类别统计文物数量分布。"""
     cached = _get_cached("category")
     if cached is not None:
@@ -164,12 +396,14 @@ def get_category_stats(db: Session) -> List[CategoryStat]:
         .order_by(func.count(Artifact.id).desc())
         .all()
     )
-    value = [CategoryStat(category=r[0], count=r[1]) for r in results if r[0] not in JUNK_CATEGORIES]
+    value = [
+        CategoryStat(category=r[0], count=r[1]) for r in results if r[0] not in JUNK_CATEGORIES
+    ]
     _set_cached("category", value)
     return value
 
 
-def get_location_stats(db: Session) -> List[LocationStat]:
+def get_location_stats(db: Session) -> list[LocationStat]:
     """按出土地点统计文物数量分布。"""
     cached = _get_cached("location")
     if cached is not None:
@@ -187,7 +421,7 @@ def get_location_stats(db: Session) -> List[LocationStat]:
     return value
 
 
-def get_wordcloud_data(db: Session, limit: int = 100) -> List[WordCloudItem]:
+def get_wordcloud_data(db: Session, limit: int = 100) -> list[WordCloudItem]:
     """
     使用 jieba 分词提取文物名称和描述中的关键词及其频率。
     合并名称、描述、标签文本，过滤停用词和短词，返回 Top N。

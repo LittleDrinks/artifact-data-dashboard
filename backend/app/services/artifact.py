@@ -1,10 +1,6 @@
 """Artifact service - handles CRUD operations for artifacts."""
 
-import math
-import re
-from typing import Optional
-
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.artifact import Artifact
@@ -22,10 +18,10 @@ def get_artifacts(
     *,
     page: int = 1,
     page_size: int = 20,
-    search: Optional[str] = None,
-    category: Optional[str] = None,
-    era: Optional[str] = None,
-    location: Optional[str] = None,
+    search: str | None = None,
+    category: str | None = None,
+    era: str | None = None,
+    location: str | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
     exclude_junk: bool = True,

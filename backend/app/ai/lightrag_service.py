@@ -10,7 +10,6 @@ any insert or query.  This service handles that transparently via lazy init.
 import asyncio
 import logging
 import threading
-from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 _instance: Optional["LightRAGService"] = None
 
 # Lazy-loaded embedding model (shared across calls)
-_embed_model: Optional[SentenceTransformer] = None
+_embed_model: SentenceTransformer | None = None
 
 
 def _get_embed_model() -> SentenceTransformer:
@@ -102,7 +101,9 @@ class LightRAGService:
         llm_name = settings.LIGHTRAG_MODEL_NAME
         logger.info(
             "Initializing LightRAG — working_dir=%s, llm=%s (API: %s), embed=BAAI/bge-m3 (sentence-transformers)",
-            working_dir, llm_name, settings.LIGHTRAG_API_BASE,
+            working_dir,
+            llm_name,
+            settings.LIGHTRAG_API_BASE,
         )
 
         # Embedding via sentence-transformers
@@ -181,7 +182,7 @@ class LightRAGService:
 # ── module-level accessor ───────────────────────────────────────────
 
 
-def get_lightrag_service() -> Optional[LightRAGService]:
+def get_lightrag_service() -> LightRAGService | None:
     """Return the singleton LightRAGService.
 
     Requires LIGHTRAG_API_KEY to be configured. Returns None if unavailable.

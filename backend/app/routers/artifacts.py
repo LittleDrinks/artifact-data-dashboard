@@ -3,7 +3,6 @@
 import csv
 import io
 import math
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -27,10 +26,10 @@ router = APIRouter()
 def list_artifacts(
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页条数"),
-    keyword: Optional[str] = Query(None, description="搜索关键词（匹配名称/描述/标签）"),
-    category: Optional[str] = Query(None, description="类别筛选"),
-    era: Optional[str] = Query(None, description="年代筛选"),
-    location: Optional[str] = Query(None, description="出土地点筛选"),
+    keyword: str | None = Query(None, description="搜索关键词（匹配名称/描述/标签）"),
+    category: str | None = Query(None, description="类别筛选"),
+    era: str | None = Query(None, description="年代筛选"),
+    location: str | None = Query(None, description="出土地点筛选"),
     db: Session = Depends(get_db),
 ):
     """获取文物列表（分页、搜索、筛选）"""
@@ -66,10 +65,10 @@ def create_artifact(
 
 @router.get("/export")
 def export_artifacts_csv(
-    keyword: Optional[str] = Query(None, description="搜索关键词"),
-    category: Optional[str] = Query(None, description="类别筛选"),
-    era: Optional[str] = Query(None, description="年代筛选"),
-    location: Optional[str] = Query(None, description="出土地点筛选"),
+    keyword: str | None = Query(None, description="搜索关键词"),
+    category: str | None = Query(None, description="类别筛选"),
+    era: str | None = Query(None, description="年代筛选"),
+    location: str | None = Query(None, description="出土地点筛选"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -91,16 +90,18 @@ def export_artifacts_csv(
     writer.writerow(["id", "name", "category", "era", "location", "material", "museum", "tags"])
 
     for art in artifacts:
-        writer.writerow([
-            art.id,
-            art.name,
-            art.category or "",
-            art.era or "",
-            art.location or "",
-            getattr(art, "material", "") or "",
-            getattr(art, "museum", "") or "",
-            art.tags or "",
-        ])
+        writer.writerow(
+            [
+                art.id,
+                art.name,
+                art.category or "",
+                art.era or "",
+                art.location or "",
+                getattr(art, "material", "") or "",
+                getattr(art, "museum", "") or "",
+                art.tags or "",
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(

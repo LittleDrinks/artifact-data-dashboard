@@ -52,7 +52,8 @@ export default function MainLayout() {
 
   // Close mobile drawer on navigation
   useEffect(() => {
-    setMobileOpen(false);
+    const id = requestAnimationFrame(() => setMobileOpen(false));
+    return () => cancelAnimationFrame(id);
   }, [location.pathname]);
 
   // Listen for auth:logout event from API client (401 handler)

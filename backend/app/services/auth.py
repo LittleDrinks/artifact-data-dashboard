@@ -1,6 +1,6 @@
 """Authentication service - handles user registration, login, JWT token generation."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.user import User
-from app.schemas.auth import UserRegister, UserLogin, TokenResponse, UserResponse
+from app.schemas.auth import TokenResponse, UserLogin, UserRegister, UserResponse
 
 
 def get_user_by_username(db: Session, username: str) -> User | None:
@@ -41,7 +41,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(user_id: int, role: str) -> str:
     """Generate a JWT access token."""
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+    )
     payload = {
         "sub": str(user_id),
         "role": role,

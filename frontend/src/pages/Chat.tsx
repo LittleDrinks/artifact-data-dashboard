@@ -103,6 +103,7 @@ export default function Chat() {
 
   // Refs
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const inputRef = useRef<any>(null);
   const isAtBottomRef = useRef(true);
   const prevMsgCountRef = useRef(0);

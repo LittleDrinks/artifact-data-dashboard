@@ -3,15 +3,17 @@ Database connection and session management.
 Uses SQLAlchemy with SQLite in WAL mode for better concurrent read performance.
 """
 
+from collections.abc import Generator
+
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
-from typing import Generator
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
 
 class Base(DeclarativeBase):
     """SQLAlchemy declarative base class."""
+
     pass
 
 
@@ -82,7 +84,7 @@ def _ensure_admin_user():
 def init_db():
     """Create all tables in the database."""
     # Import all models so they are registered with Base.metadata
-    from app.models import user, artifact, chat, attachment  # noqa: F401
+    from app.models import artifact, attachment, chat, user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

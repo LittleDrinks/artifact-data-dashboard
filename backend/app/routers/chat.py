@@ -7,19 +7,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
-from app.models.user import User
 from app.models.chat import ChatSession
+from app.models.user import User
 from app.routers.auth import get_current_user
 from app.schemas.chat import (
     ChatAskRequest,
+    ChatMessageResponse,
     ChatSessionCreate,
     ChatSessionListResponse,
     ChatSessionResponse,
-    ChatMessageResponse,
 )
 from app.services import chat as chat_service
-from app.config import settings
 
 router = APIRouter()
 
@@ -36,8 +36,7 @@ def _check_ask_rate_limit(client_ip: str) -> None:
     now = time.time()
     # Prune ALL expired keys to prevent memory leak
     expired_keys = [
-        k for k, v in _ask_attempts.items()
-        if not v or now - v[-1] > _ASK_RATE_LIMIT_WINDOW
+        k for k, v in _ask_attempts.items() if not v or now - v[-1] > _ASK_RATE_LIMIT_WINDOW
     ]
     for k in expired_keys:
         del _ask_attempts[k]
@@ -73,9 +72,7 @@ def list_sessions(
     current_user: User = Depends(get_current_user),
 ):
     """获取用户的会话列表"""
-    sessions, total = chat_service.get_user_sessions(
-        db, current_user.id, page=page, page_size=size
-    )
+    sessions, total = chat_service.get_user_sessions(db, current_user.id, page=page, page_size=size)
     return ChatSessionListResponse(
         items=[ChatSessionResponse.model_validate(s) for s in sessions],
         total=total,
@@ -141,9 +138,7 @@ def ask_question(
     # Create a new session if none provided
     if session_id is None:
         title = data.question[:50] + ("..." if len(data.question) > 50 else "")
-        session = chat_service.create_session(
-            db, current_user.id, ChatSessionCreate(title=title)
-        )
+        session = chat_service.create_session(db, current_user.id, ChatSessionCreate(title=title))
         session_id = session.id
         new_session = True
     else:

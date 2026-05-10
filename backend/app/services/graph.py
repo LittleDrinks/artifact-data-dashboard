@@ -10,15 +10,14 @@ SQLite 基础图谱：artifact → era/category/location/tags
 import json
 import logging
 import os
-from typing import Optional, List, Tuple, Dict, Set
 
 from neo4j import GraphDatabase
-from sqlalchemy import func, case
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.artifact import Artifact
-from app.schemas.graph import GraphNode, GraphLink
+from app.schemas.graph import GraphLink, GraphNode
 from app.services.stats import JUNK_CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,9 @@ def _close_neo4j_driver():
         _neo4j_driver = None
 
 
-def _query_neo4j_entities(driver, limit: int = 100, keyword: str = None) -> Tuple[List[GraphNode], List[GraphLink]]:
+def _query_neo4j_entities(
+    driver, limit: int = 100, keyword: str = None
+) -> tuple[list[GraphNode], list[GraphLink]]:
     """Query entities and relations from Neo4j (LightRAG knowledge graph).
 
     Returns (nodes_list, links_list). Empty lists if Neo4j unavailable or no data.
@@ -59,8 +60,8 @@ def _query_neo4j_entities(driver, limit: int = 100, keyword: str = None) -> Tupl
     if driver is None:
         return [], []
 
-    nodes: Dict[str, GraphNode] = {}
-    links: Dict[str, GraphLink] = {}
+    nodes: dict[str, GraphNode] = {}
+    links: dict[str, GraphLink] = {}
 
     try:
         with driver.session() as session:
@@ -104,7 +105,9 @@ def _query_neo4j_entities(driver, limit: int = 100, keyword: str = None) -> Tupl
                     WHERE a.entity_name IN $names AND b.entity_name IN $names
                     RETURN a.entity_name AS src, b.entity_name AS tgt, type(r) AS rel_type
                 """
-                rel_result = session.run(rel_query, names=[n.replace("neo4j_", "") for n in entity_names])
+                rel_result = session.run(
+                    rel_query, names=[n.replace("neo4j_", "") for n in entity_names]
+                )
                 for record in rel_result:
                     src = record.get("src")
                     tgt = record.get("tgt")
@@ -157,8 +160,8 @@ def _query_neo4j_base_layer(
     driver,
     limit: int = 100,
     offset: int = 0,
-    node_types: Optional[List[str]] = None,
-) -> Tuple[Dict[str, GraphNode], Dict[str, GraphLink]]:
+    node_types: list[str] | None = None,
+) -> tuple[dict[str, GraphNode], dict[str, GraphLink]]:
     """Query base triple layer from Neo4j (nodes with source='rule').
 
     This queries Artifact, Era, Category, Location, Tag, Material, Museum nodes
@@ -169,18 +172,26 @@ def _query_neo4j_base_layer(
     if driver is None:
         return {}, {}
 
-    nodes: Dict[str, GraphNode] = {}
-    links: Dict[str, GraphLink] = {}
+    nodes: dict[str, GraphNode] = {}
+    links: dict[str, GraphLink] = {}
 
     # Default types to query
-    type_filter = node_types or ["artifact", "era", "category", "location", "tag", "material", "museum"]
+    type_filter = node_types or [
+        "artifact",
+        "era",
+        "category",
+        "location",
+        "tag",
+        "material",
+        "museum",
+    ]
 
     try:
         with driver.session() as session:
             # Query nodes by label and source='rule' - apply global limit after collecting all types
             # First, count total available nodes per type to distribute limit fairly
             total_nodes = 0
-            type_counts: Dict[str, int] = {}
+            type_counts: dict[str, int] = {}
             for node_type in type_filter:
                 label_map = {
                     "artifact": "artifact",
@@ -206,7 +217,7 @@ def _query_neo4j_base_layer(
                 total_nodes += cnt
 
             # Distribute limit proportionally across types
-            per_type_limits: Dict[str, int] = {}
+            per_type_limits: dict[str, int] = {}
             if total_nodes > 0:
                 for node_type, cnt in type_counts.items():
                     # Proportional distribution, but at least 1 per type if available
@@ -300,9 +311,9 @@ def _query_neo4j_base_layer(
 def _search_neo4j_base_layer(
     driver,
     keyword: str,
-    node_types: Optional[List[str]] = None,
+    node_types: list[str] | None = None,
     depth: int = 1,
-) -> Tuple[List[GraphNode], List[GraphLink], int]:
+) -> tuple[list[GraphNode], list[GraphLink], int]:
     """Search base layer nodes by keyword and expand neighbors.
 
     Returns (nodes_list, links_list, matched_count).
@@ -310,10 +321,18 @@ def _search_neo4j_base_layer(
     if driver is None:
         return [], [], 0
 
-    nodes: Dict[str, GraphNode] = {}
-    matched_ids: Set[str] = set()
+    nodes: dict[str, GraphNode] = {}
+    matched_ids: set[str] = set()
 
-    type_filter = node_types or ["artifact", "era", "category", "location", "tag", "material", "museum"]
+    type_filter = node_types or [
+        "artifact",
+        "era",
+        "category",
+        "location",
+        "tag",
+        "material",
+        "museum",
+    ]
     kw = keyword.lower()
 
     try:
@@ -371,8 +390,8 @@ def _search_neo4j_base_layer(
                 return [], [], 0
 
             # Multi-hop neighbor expansion
-            result_node_ids: Set[str] = set(matched_ids)
-            result_links: List[GraphLink] = []
+            result_node_ids: set[str] = set(matched_ids)
+            result_links: list[GraphLink] = []
 
             for _ in range(depth):
                 # Query relationships from current nodes
@@ -384,7 +403,7 @@ def _search_neo4j_base_layer(
                 """
                 expand_result = session.run(expand_query, ids=list(result_node_ids))
 
-                new_ids: Set[str] = set()
+                new_ids: set[str] = set()
                 for record in expand_result:
                     src = record.get("src")
                     tgt = record.get("tgt")
@@ -393,7 +412,6 @@ def _search_neo4j_base_layer(
                     tgt_type = record.get("tgt_type")
 
                     if src and tgt:
-                        link_key = f"{src}->{tgt}"
                         # Add link if not already added
                         existing = False
                         for l in result_links:
@@ -401,11 +419,13 @@ def _search_neo4j_base_layer(
                                 existing = True
                                 break
                         if not existing:
-                            result_links.append(GraphLink(
-                                source=src,
-                                target=tgt,
-                                relation=rel_type,
-                            ))
+                            result_links.append(
+                                GraphLink(
+                                    source=src,
+                                    target=tgt,
+                                    relation=rel_type,
+                                )
+                            )
 
                         # Add target node if new
                         if tgt not in result_node_ids and tgt not in nodes:
@@ -433,7 +453,7 @@ def _search_neo4j_base_layer(
 def _get_node_detail_from_neo4j(
     driver,
     node_id: str,
-) -> Optional[Tuple[GraphNode, List[GraphLink], List[GraphNode]]]:
+) -> tuple[GraphNode, list[GraphLink], list[GraphNode]] | None:
     """Get node detail from Neo4j base layer.
 
     Returns (node, related_links, neighbors) or None if not found.
@@ -487,8 +507,8 @@ def _get_node_detail_from_neo4j(
             """
             rel_result = session.run(rel_query, node_id=node_id)
 
-            neighbors: List[GraphNode] = []
-            links: List[GraphLink] = []
+            neighbors: list[GraphNode] = []
+            links: list[GraphLink] = []
 
             for rel_record in rel_result:
                 neighbor_id = rel_record.get("neighbor_id")
@@ -498,25 +518,31 @@ def _get_node_detail_from_neo4j(
                 direction = rel_record.get("direction", "out")
 
                 if neighbor_id:
-                    neighbors.append(GraphNode(
-                        id=neighbor_id,
-                        name=neighbor_name or neighbor_id,
-                        type=neighbor_type,
-                    ))
+                    neighbors.append(
+                        GraphNode(
+                            id=neighbor_id,
+                            name=neighbor_name or neighbor_id,
+                            type=neighbor_type,
+                        )
+                    )
 
                     # Create link based on direction
                     if direction == "out":
-                        links.append(GraphLink(
-                            source=node_id_found,
-                            target=neighbor_id,
-                            relation=rel_type,
-                        ))
+                        links.append(
+                            GraphLink(
+                                source=node_id_found,
+                                target=neighbor_id,
+                                relation=rel_type,
+                            )
+                        )
                     else:
-                        links.append(GraphLink(
-                            source=neighbor_id,
-                            target=node_id_found,
-                            relation=rel_type,
-                        ))
+                        links.append(
+                            GraphLink(
+                                source=neighbor_id,
+                                target=node_id_found,
+                                relation=rel_type,
+                            )
+                        )
 
             return node, links, neighbors
 
@@ -527,8 +553,8 @@ def _get_node_detail_from_neo4j(
 
 def _query_lightrag_kvstore(
     limit: int = 100,
-    keyword: Optional[str] = None,
-) -> Tuple[List[GraphNode], List[GraphLink]]:
+    keyword: str | None = None,
+) -> tuple[list[GraphNode], list[GraphLink]]:
     """Read LightRAG KV Store JSON files and build graph data.
 
     Returns (nodes_list, links_list). Empty lists if files not found.
@@ -541,16 +567,16 @@ def _query_lightrag_kvstore(
         return [], []
 
     try:
-        with open(entities_path, "r", encoding="utf-8") as f:
+        with open(entities_path, encoding="utf-8") as f:
             entities_data = json.load(f)
-        with open(relations_path, "r", encoding="utf-8") as f:
+        with open(relations_path, encoding="utf-8") as f:
             relations_data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to read LightRAG KV Store: %s", e)
         return [], []
 
     # Collect all unique entity names
-    all_entity_names: Set[str] = set()
+    all_entity_names: set[str] = set()
     for doc in entities_data.values():
         for name in doc.get("entity_names", []):
             all_entity_names.add(name)
@@ -561,7 +587,7 @@ def _query_lightrag_kvstore(
         all_entity_names = {n for n in all_entity_names if kw in n.lower()}
 
     # Build nodes
-    nodes: Dict[str, GraphNode] = {}
+    nodes: dict[str, GraphNode] = {}
     for name in all_entity_names:
         node_id = f"lightrag_{name}"
         nodes[node_id] = GraphNode(
@@ -571,7 +597,7 @@ def _query_lightrag_kvstore(
         )
 
     # Build links from relations
-    links: Dict[str, GraphLink] = {}
+    links: dict[str, GraphLink] = {}
     for doc in relations_data.values():
         for pair in doc.get("relation_pairs", []):
             if len(pair) >= 2:
@@ -596,19 +622,20 @@ def _query_lightrag_kvstore(
     return node_list, link_list
 
 
-def _parse_tags(tags_str: Optional[str]) -> List[str]:
+def _parse_tags(tags_str: str | None) -> list[str]:
     """解析 tags 字段，支持逗号、顿号、空格分隔"""
     if not tags_str:
         return []
     # 支持中文顿号、逗号、空格分隔
     import re
-    parts = re.split(r'[,，、\s]+', tags_str.strip())
+
+    parts = re.split(r"[,，、\s]+", tags_str.strip())
     return [p.strip() for p in parts if p.strip()]
 
 
 def build_graph_from_artifacts(
-    artifacts: List[Artifact],
-) -> Tuple[Dict[str, GraphNode], Dict[str, GraphLink]]:
+    artifacts: list[Artifact],
+) -> tuple[dict[str, GraphNode], dict[str, GraphLink]]:
     """
     从文物列表构建图谱节点和边。
 
@@ -618,11 +645,11 @@ def build_graph_from_artifacts(
     去重策略：先收集所有 era/category/location 名称，再处理 tags，
     避免 tag 与其他类型节点同名导致重复（如 tag_青铜器 vs cat_青铜器）。
     """
-    nodes: Dict[str, GraphNode] = {}
-    links: Dict[str, GraphLink] = {}
+    nodes: dict[str, GraphNode] = {}
+    links: dict[str, GraphLink] = {}
 
     # Step 1: Pre-collect all era/category/location names to prevent tag duplicates
-    reserved_names: Set[str] = set()
+    reserved_names: set[str] = set()
     for art in artifacts:
         if art.era:
             reserved_names.add(art.era)
@@ -742,10 +769,10 @@ def build_graph_from_artifacts(
 
 
 def _filter_graph_by_types(
-    nodes_dict: Dict[str, GraphNode],
-    links_dict: Dict[str, GraphLink],
-    node_types: List[str],
-) -> Tuple[List[GraphNode], List[GraphLink]]:
+    nodes_dict: dict[str, GraphNode],
+    links_dict: dict[str, GraphLink],
+    node_types: list[str],
+) -> tuple[list[GraphNode], list[GraphLink]]:
     """Filter graph nodes/links to only include requested node types.
 
     If 'artifact' is in node_types but other types are not, the non-artifact
@@ -758,7 +785,8 @@ def _filter_graph_by_types(
     allowed = set(node_types)
     filtered_nodes = {nid: n for nid, n in nodes_dict.items() if n.type in allowed}
     filtered_links = {
-        lk: l for lk, l in links_dict.items()
+        lk: l
+        for lk, l in links_dict.items()
         if l.source in filtered_nodes and l.target in filtered_nodes
     }
     return list(filtered_nodes.values()), list(filtered_links.values())
@@ -768,8 +796,8 @@ def get_full_graph(
     db: Session,
     limit: int = 100,
     offset: int = 0,
-    node_types: Optional[List[str]] = None,
-) -> Tuple[List[GraphNode], List[GraphLink]]:
+    node_types: list[str] | None = None,
+) -> tuple[list[GraphNode], list[GraphLink]]:
     """
     获取完整图谱数据。
 
@@ -801,10 +829,10 @@ def get_full_graph(
 
     # Optimize for demo: prioritize artifacts with rich metadata
     richness_expr = (
-        func.coalesce(case((Artifact.era != None, 1), else_=0), 0) +
-        func.coalesce(case((Artifact.category != None, 1), else_=0), 0) +
-        func.coalesce(case((Artifact.location != None, 1), else_=0), 0) +
-        func.coalesce(case((Artifact.tags != None, 1), else_=0), 0)
+        func.coalesce(case((Artifact.era != None, 1), else_=0), 0)  # noqa: E711
+        + func.coalesce(case((Artifact.category != None, 1), else_=0), 0)  # noqa: E711
+        + func.coalesce(case((Artifact.location != None, 1), else_=0), 0)  # noqa: E711
+        + func.coalesce(case((Artifact.tags != None, 1), else_=0), 0)  # noqa: E711
     )
 
     artifacts = (
@@ -827,9 +855,9 @@ def get_full_graph(
 def search_graph(
     db: Session,
     keyword: str,
-    node_types: Optional[List[str]] = None,
+    node_types: list[str] | None = None,
     depth: int = 1,
-) -> Tuple[List[GraphNode], List[GraphLink], int]:
+) -> tuple[list[GraphNode], list[GraphLink], int]:
     """
     搜索图谱节点，返回匹配节点及其多跳邻居构成的子图。
 
@@ -884,7 +912,7 @@ def search_graph(
 
     keyword_lower = keyword.lower()
 
-    matched_node_ids: Set[str] = set()
+    matched_node_ids: set[str] = set()
     for nid, node in nodes_dict.items():
         if keyword_lower in node.name.lower():
             matched_node_ids.add(nid)
@@ -895,12 +923,12 @@ def search_graph(
         return [], [], 0
 
     # Multi-hop neighbor expansion
-    result_node_ids: Set[str] = set(matched_node_ids)
-    result_links: List[GraphLink] = []
+    result_node_ids: set[str] = set(matched_node_ids)
+    result_links: list[GraphLink] = []
     all_links_list = list(links_dict.values())
 
     for _ in range(depth):
-        new_ids: Set[str] = set()
+        new_ids: set[str] = set()
         for link in all_links_list:
             src_in = link.source in result_node_ids
             tgt_in = link.target in result_node_ids
@@ -918,8 +946,12 @@ def search_graph(
 
     # Apply type filter
     allowed = set(types)
-    filtered_node_ids = {nid for nid in result_node_ids if nid in nodes_dict and nodes_dict[nid].type in allowed}
-    filtered_links = [l for l in result_links if l.source in filtered_node_ids and l.target in filtered_node_ids]
+    filtered_node_ids = {
+        nid for nid in result_node_ids if nid in nodes_dict and nodes_dict[nid].type in allowed
+    }
+    filtered_links = [
+        l for l in result_links if l.source in filtered_node_ids and l.target in filtered_node_ids
+    ]
 
     result_nodes = [nodes_dict[nid] for nid in filtered_node_ids if nid in nodes_dict]
 
@@ -929,7 +961,7 @@ def search_graph(
 def get_node_detail(
     db: Session,
     node_id: str,
-) -> Optional[Tuple[GraphNode, List[GraphLink], List[GraphNode]]]:
+) -> tuple[GraphNode, list[GraphLink], list[GraphNode]] | None:
     """
     获取单个节点的详情及其直接关系和邻居。
 
@@ -981,8 +1013,8 @@ def get_node_detail(
 
     node = nodes_dict[sqlite_node_id]
 
-    related_links: List[GraphLink] = []
-    neighbor_ids: Set[str] = set()
+    related_links: list[GraphLink] = []
+    neighbor_ids: set[str] = set()
 
     for link in links_dict.values():
         if link.source == sqlite_node_id or link.target == sqlite_node_id:

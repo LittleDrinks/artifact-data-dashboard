@@ -3,10 +3,7 @@ Application configuration module.
 Reads settings from environment variables with sensible defaults.
 """
 
-import os
 from pathlib import Path
-
-from typing import List
 
 from pydantic_settings import BaseSettings
 
@@ -37,7 +34,7 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost"]
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost"]
 
     # AI / LLM — Chat Q&A
     # User-configured OpenAI-compatible API
@@ -77,7 +74,6 @@ class Settings(BaseSettings):
 
         if not self.LIGHTRAG_DIR:
             self.LIGHTRAG_DIR = str(Path(__file__).parent.parent / "data" / "lightrag")
-
 
 
 settings = Settings()

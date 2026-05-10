@@ -20,4 +20,11 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['e2e/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 ])

@@ -17,16 +17,15 @@ Finish:
 import json
 import logging
 import time
-from typing import Optional
 
-from openai import OpenAI
 import httpx
+from openai import OpenAI
 from sqlalchemy.orm import Session, joinedload
 
-from app.config import settings
-from app.models.chat import ChatSession, ChatMessage
-from app.schemas.chat import ChatSessionCreate
 from app.ai.tools import TOOL_DEFINITIONS, execute_tool
+from app.config import settings
+from app.models.chat import ChatMessage, ChatSession
+from app.schemas.chat import ChatSessionCreate
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ SYSTEM_PROMPT = (
 # OpenAI client (lazy singleton)
 # ---------------------------------------------------------------------------
 
-_client: Optional[OpenAI] = None
+_client: OpenAI | None = None
 
 
 def _get_client() -> OpenAI:
@@ -76,6 +75,7 @@ def _get_client() -> OpenAI:
 # ---------------------------------------------------------------------------
 # Session / message helpers
 # ---------------------------------------------------------------------------
+
 
 def create_session(db: Session, user_id: int, data: ChatSessionCreate) -> ChatSession:
     """Create a new chat session."""
@@ -107,14 +107,16 @@ def get_user_sessions(
     return sessions, total
 
 
-def get_session_messages(
-    db: Session, session_id: int, user_id: int
-) -> list[ChatMessage] | None:
+def get_session_messages(db: Session, session_id: int, user_id: int) -> list[ChatMessage] | None:
     """Get all messages for a session, ordered by id. Returns None if session not found."""
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_id,
-        ChatSession.user_id == user_id,
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == user_id,
+        )
+        .first()
+    )
     if not session:
         return None
     return session.messages  # type: ignore[return-value]
@@ -125,9 +127,9 @@ def save_message(
     session_id: int,
     role: str,
     content: str,
-    tool_calls: Optional[str] = None,
-    reasoning_content: Optional[str] = None,
-    tool_call_id: Optional[str] = None,
+    tool_calls: str | None = None,
+    reasoning_content: str | None = None,
+    tool_call_id: str | None = None,
 ) -> ChatMessage:
     """Save a message to the database."""
     msg = ChatMessage(
@@ -155,6 +157,7 @@ def update_session_title(db: Session, session_id: int, title: str) -> None:
 def delete_sessions(db: Session, user_id: int, session_ids: list[int]) -> int:
     """Delete sessions by IDs (only if they belong to the user). Returns count deleted."""
     from sqlalchemy import text
+
     if not session_ids:
         return 0
     placeholders = ",".join(f":id{i}" for i in range(len(session_ids)))
@@ -179,6 +182,7 @@ def delete_sessions(db: Session, user_id: int, session_ids: list[int]) -> int:
 # ---------------------------------------------------------------------------
 # History loader
 # ---------------------------------------------------------------------------
+
 
 def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
     """Load recent chat history as OpenAI-compatible message dicts.
@@ -233,6 +237,7 @@ def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
 # SSE helper
 # ---------------------------------------------------------------------------
 
+
 def _sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event."""
     payload = {"type": event_type, **data}
@@ -242,6 +247,7 @@ def _sse_event(event_type: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Main streaming generator
 # ---------------------------------------------------------------------------
+
 
 def stream_chat_response(db: Session, query: str, session_id: int, new_session: bool = False):
     """Generator that yields SSE events for the chat flow (ReAct Tool Calling).
@@ -272,11 +278,15 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     if history and history[-1]["role"] == "user" and history[-1]["content"] == query:
         history = history[:-1]
 
-    messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-    ] + history + [
-        {"role": "user", "content": query},
-    ]
+    messages: list[dict] = (
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+        ]
+        + history
+        + [
+            {"role": "user", "content": query},
+        ]
+    )
 
     all_tool_calls_log: list[dict] = []
     all_thinking_rounds: list[str] = []  # Accumulate thinking text for DB persistence
@@ -287,7 +297,9 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
 
     if use_llm:
         try:
-            answer_text = yield from _react_gen(db, messages, all_tool_calls_log, all_thinking_rounds)
+            answer_text = yield from _react_gen(
+                db, messages, all_tool_calls_log, all_thinking_rounds
+            )
         except Exception as exc:
             logger.error("ReAct loop failed: %s", str(exc)[:300], exc_info=True)
             yield _sse_event("thinking_start", {})
@@ -316,13 +328,18 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
 
     # Save AI reply with reasoning_content
     tool_calls_json = (
-        json.dumps(all_tool_calls_log, ensure_ascii=False)
-        if all_tool_calls_log
-        else None
+        json.dumps(all_tool_calls_log, ensure_ascii=False) if all_tool_calls_log else None
     )
     # Combine all thinking rounds into a single reasoning_content string for persistence
     combined_reasoning = "\n\n".join(all_thinking_rounds) if all_thinking_rounds else None
-    save_message(db, session_id, "assistant", answer_text, tool_calls=tool_calls_json, reasoning_content=combined_reasoning)
+    save_message(
+        db,
+        session_id,
+        "assistant",
+        answer_text,
+        tool_calls=tool_calls_json,
+        reasoning_content=combined_reasoning,
+    )
 
     # Update session title if still the default
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
@@ -334,23 +351,37 @@ def stream_chat_response(db: Session, query: str, session_id: int, new_session: 
     for tc_log in all_tool_calls_log:
         if tc_log.get("tool") == "search_artifacts":
             for r in tc_log.get("result", {}).get("results", []):
-                sources.append({"name": r["name"], "source": "文物数据库", "artifact_id": r.get("id")})
+                sources.append(
+                    {"name": r["name"], "source": "文物数据库", "artifact_id": r.get("id")}
+                )
         elif tc_log.get("tool") == "get_artifact_detail":
             detail = tc_log.get("result", {})
             if "error" not in detail:
-                sources.append({"name": detail.get("name", ""), "source": "文物数据库", "artifact_id": detail.get("id")})
+                sources.append(
+                    {
+                        "name": detail.get("name", ""),
+                        "source": "文物数据库",
+                        "artifact_id": detail.get("id"),
+                    }
+                )
 
-    yield _sse_event("done", {
-        "elapsed": total_elapsed,
-        "sources": sources,
-    })
+    yield _sse_event(
+        "done",
+        {
+            "elapsed": total_elapsed,
+            "sources": sources,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
 # ReAct loop generator
 # ---------------------------------------------------------------------------
 
-def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], thinking_rounds: list[str]):
+
+def _react_gen(
+    db: Session, messages: list[dict], tool_calls_log: list[dict], thinking_rounds: list[str]
+):
     """ReAct loop generator. Yields SSE event strings, returns final answer text.
 
     Up to MAX_REACT_ROUNDS iterations:
@@ -371,12 +402,12 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
         in_answer = False
 
         try:
-            kwargs = dict(
-                model=settings.AI_MODEL_NAME,
-                messages=messages,
-                stream=True,
-                max_tokens=4096,
-            )
+            kwargs = {
+                "model": settings.AI_MODEL_NAME,
+                "messages": messages,
+                "stream": True,
+                "max_tokens": 4096,
+            }
             if use_tools:
                 kwargs["tools"] = TOOL_DEFINITIONS
             stream = client.chat.completions.create(**kwargs)
@@ -385,9 +416,7 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
             err_msg = str(exc)[:300]
             logger.warning("LLM network error: %s", err_msg)
             yield _sse_event("answer_start", {})
-            yield _sse_event("answer_delta", {
-                "content": "抱歉，AI 服务暂时响应超时，请稍后重试。"
-            })
+            yield _sse_event("answer_delta", {"content": "抱歉，AI 服务暂时响应超时，请稍后重试。"})
             yield _sse_event("answer_end", {})
             return content_text
         except Exception as exc:
@@ -397,21 +426,31 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
             if "reasoning_content" in err_msg and "must be passed back" in err_msg:
                 logger.error("DeepSeek reasoning_content not passed back: %s", err_msg)
                 yield _sse_event("answer_start", {})
-                yield _sse_event("answer_delta", {
-                    "content": "抱歉，AI 服务出现内部错误（reasoning_content 未正确传递），请联系开发者。"
-                })
+                yield _sse_event(
+                    "answer_delta",
+                    {
+                        "content": "抱歉，AI 服务出现内部错误（reasoning_content 未正确传递），请联系开发者。"
+                    },
+                )
                 yield _sse_event("answer_end", {})
                 return content_text
-            if use_tools and ("tool" in err_msg.lower() or "function" in err_msg.lower() or "does not support" in err_msg.lower() or "400" in err_msg):
-                logger.warning("Model %s may not support tools, retrying without: %s", settings.AI_MODEL_NAME, err_msg)
+            if use_tools and (
+                "tool" in err_msg.lower()
+                or "function" in err_msg.lower()
+                or "does not support" in err_msg.lower()
+                or "400" in err_msg
+            ):
+                logger.warning(
+                    "Model %s may not support tools, retrying without: %s",
+                    settings.AI_MODEL_NAME,
+                    err_msg,
+                )
                 use_tools = False
                 continue
             # Other unexpected errors - log full traceback and return generic message
             logger.error("LLM stream creation failed unexpectedly: %s", err_msg, exc_info=True)
             yield _sse_event("answer_start", {})
-            yield _sse_event("answer_delta", {
-                "content": "抱歉，AI 服务出现异常，请稍后重试。"
-            })
+            yield _sse_event("answer_delta", {"content": "抱歉，AI 服务出现异常，请稍后重试。"})
             yield _sse_event("answer_end", {})
             return content_text
 
@@ -469,14 +508,16 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
             assistant_tc_list = []
             for idx in sorted(tc_buffers.keys()):
                 buf = tc_buffers[idx]
-                assistant_tc_list.append({
-                    "id": f"call_{idx}",
-                    "type": "function",
-                    "function": {
-                        "name": buf["name"],
-                        "arguments": buf["arguments"],
-                    },
-                })
+                assistant_tc_list.append(
+                    {
+                        "id": f"call_{idx}",
+                        "type": "function",
+                        "function": {
+                            "name": buf["name"],
+                            "arguments": buf["arguments"],
+                        },
+                    }
+                )
 
             # Append assistant message (with tool_calls) to conversation
             # CRITICAL: DeepSeek v4-flash requires reasoning_content in assistant message
@@ -511,10 +552,13 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                     or fn_args.get("artifact_id", "")
                     or fn_args_str[:100]
                 )
-                yield _sse_event("tool_call_start", {
-                    "tool": fn_name,
-                    "query": str(display_query),
-                })
+                yield _sse_event(
+                    "tool_call_start",
+                    {
+                        "tool": fn_name,
+                        "query": str(display_query),
+                    },
+                )
 
                 # Execute tool
                 tool_start_time = time.time()
@@ -522,49 +566,62 @@ def _react_gen(db: Session, messages: list[dict], tool_calls_log: list[dict], th
                 tool_elapsed = round(time.time() - tool_start_time, 2)
 
                 # Log for DB storage
-                tool_calls_log.append({
-                    "tool": fn_name,
-                    "args": fn_args,
-                    "result": result,
-                })
+                tool_calls_log.append(
+                    {
+                        "tool": fn_name,
+                        "args": fn_args,
+                        "result": result,
+                    }
+                )
 
                 # Emit tool_call_result - different format based on tool type
                 if fn_name == "get_artifact_detail":
-                    yield _sse_event("tool_call_result", {
-                        "tool": fn_name,
-                        "query": result.get("name", str(fn_args.get("artifact_id", ""))),
-                        "artifactDetail": result,  # Send full artifact detail (camelCase for frontend)
-                        "count": 1 if "error" not in result else 0,
-                        "elapsed": tool_elapsed,
-                    })
+                    yield _sse_event(
+                        "tool_call_result",
+                        {
+                            "tool": fn_name,
+                            "query": result.get("name", str(fn_args.get("artifact_id", ""))),
+                            "artifactDetail": result,  # Send full artifact detail (camelCase for frontend)
+                            "count": 1 if "error" not in result else 0,
+                            "elapsed": tool_elapsed,
+                        },
+                    )
                 elif fn_name == "query_knowledge_graph":
-                    yield _sse_event("tool_call_result", {
-                        "tool": fn_name,
-                        "query": fn_args.get("keyword", ""),
-                        "entities": result.get("entities", []),
-                        "relations": result.get("relations", []),
-                        "count": result.get("count", 0),
-                        "elapsed": tool_elapsed,
-                    })
+                    yield _sse_event(
+                        "tool_call_result",
+                        {
+                            "tool": fn_name,
+                            "query": fn_args.get("keyword", ""),
+                            "entities": result.get("entities", []),
+                            "relations": result.get("relations", []),
+                            "count": result.get("count", 0),
+                            "elapsed": tool_elapsed,
+                        },
+                    )
                 else:
                     # Default: search_artifacts and other tools
-                    yield _sse_event("tool_call_result", {
-                        "tool": fn_name,
-                        "query": fn_args.get("keyword", fn_args_str[:100]),
-                        "results": result.get("results", []),
-                        "count": result.get("count", 0),
-                        "elapsed": tool_elapsed,
-                    })
+                    yield _sse_event(
+                        "tool_call_result",
+                        {
+                            "tool": fn_name,
+                            "query": fn_args.get("keyword", fn_args_str[:100]),
+                            "results": result.get("results", []),
+                            "count": result.get("count", 0),
+                            "elapsed": tool_elapsed,
+                        },
+                    )
 
                 # Append tool result to conversation
                 tool_result_content = json.dumps(result, ensure_ascii=False)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": tool_result_content,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": tool_result_content,
+                    }
+                )
                 # Persist tool result to database for session continuity
-                save_message(db, session_id, "tool", tool_result_content, tool_call_id=tc["id"])
+                save_message(db, session_id, "tool", tool_result_content, tool_call_id=tc["id"])  # noqa: F821
 
             # Continue to next round
             continue

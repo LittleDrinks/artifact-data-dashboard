@@ -5,22 +5,27 @@ import csv
 import io
 import logging
 import threading
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from neo4j import GraphDatabase
 from sqlalchemy.orm import Session
 
+from app.ai.lightrag_service import get_lightrag_service
 from app.config import settings
 from app.database import get_db
 from app.schemas.graph import (
-    GraphDataResponse, NodeDetailResponse, ImportResponse,
-    ExtractRequest, ExtractResponse, ExtractedEntity, ExtractedRelation,
-    KnowledgeQueryRequest, KnowledgeQueryResponse,
+    ExtractedEntity,
+    ExtractedRelation,
+    ExtractRequest,
+    ExtractResponse,
+    GraphDataResponse,
+    ImportResponse,
+    KnowledgeQueryRequest,
+    KnowledgeQueryResponse,
+    NodeDetailResponse,
 )
 from app.services import graph as graph_service
-from app.ai.lightrag_service import get_lightrag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,7 +35,7 @@ router = APIRouter()
 def get_full_graph(
     limit: int = Query(100, ge=1, le=1000, description="返回前 N 个文物的图谱数据"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    node_types: Optional[str] = Query(
+    node_types: str | None = Query(
         "artifact,era,category,location,tag",
         description="逗号分隔的节点类型，如 artifact,era,category,location,tag",
     ),
@@ -50,7 +55,7 @@ def get_full_graph(
 @router.get("/search", response_model=GraphDataResponse)
 def search_graph(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
-    node_types: Optional[str] = Query(
+    node_types: str | None = Query(
         "artifact,era,category,location,tag",
         description="逗号分隔的节点类型",
     ),
@@ -59,7 +64,9 @@ def search_graph(
 ):
     """搜索图谱节点，返回匹配节点及其多跳邻居构成的子图"""
     types = [t.strip() for t in node_types.split(",") if t.strip()] if node_types else ["artifact"]
-    nodes, links, matched_count = graph_service.search_graph(db, keyword=keyword, node_types=types, depth=depth)
+    nodes, links, matched_count = graph_service.search_graph(
+        db, keyword=keyword, node_types=types, depth=depth
+    )
     return GraphDataResponse(
         nodes=nodes,
         links=links,
@@ -158,14 +165,11 @@ async def import_graph_csv(
 
     missing_cols = [c for c in required_cols if c not in reader.fieldnames]
     if missing_cols:
-        raise HTTPException(
-            status_code=400,
-            detail=f"CSV 缺少必需列: {', '.join(missing_cols)}"
-        )
+        raise HTTPException(status_code=400, detail=f"CSV 缺少必需列: {', '.join(missing_cols)}")
 
     # Collect triples
     triples = []
-    errors: List[str] = []
+    errors: list[str] = []
     row_num = 1
 
     for row in reader:
@@ -180,13 +184,15 @@ async def import_graph_csv(
             errors.append(f"行 {row_num}: 缺少必需字段")
             continue
 
-        triples.append({
-            "source_name": src_name,
-            "relation": relation,
-            "target_name": tgt_name,
-            "source_type": src_type,
-            "target_type": tgt_type,
-        })
+        triples.append(
+            {
+                "source_name": src_name,
+                "relation": relation,
+                "target_name": tgt_name,
+                "source_type": src_type,
+                "target_type": tgt_type,
+            }
+        )
 
     if not triples:
         return ImportResponse(
@@ -212,6 +218,7 @@ async def import_graph_csv(
             """Sanitize Neo4j label to prevent Cypher injection."""
             # Only allow alphanumeric and underscore characters
             import re
+
             sanitized = re.sub(r"[^a-zA-Z0-9_]", "", label)
             return sanitized if sanitized else "Unknown"
 
@@ -249,7 +256,9 @@ async def import_graph_csv(
                 nodes_imported += 1
 
                 # MERGE relationship (sanitize relation type)
-                rel_type_sanitized = sanitize_label(triple["relation"].replace(" ", "_").replace("-", "_"))
+                rel_type_sanitized = sanitize_label(
+                    triple["relation"].replace(" ", "_").replace("-", "_")
+                )
                 session.run(
                     f"""
                     MATCH (s:`{src_type_sanitized}` {{id: $src_id}})
@@ -272,10 +281,7 @@ async def import_graph_csv(
 
     except Exception as e:
         logger.exception("Neo4j import failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Neo4j 导入失败: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Neo4j 导入失败: {str(e)}")
     finally:
         if driver:
             driver.close()
@@ -336,17 +342,11 @@ def extract_triples(
     # Wait for completion with timeout
     if not thread_completed.wait(timeout=120):
         # Timeout
-        raise HTTPException(
-            status_code=504,
-            detail="LightRAG 提取超时（120秒）— 文本可能过长"
-        )
+        raise HTTPException(status_code=504, detail="LightRAG 提取超时（120秒）— 文本可能过长")
 
     if not result_container["success"]:
         error_msg = result_container["error"] or "未知错误"
-        raise HTTPException(
-            status_code=500,
-            detail=f"LightRAG 提取失败: {error_msg}"
-        )
+        raise HTTPException(status_code=500, detail=f"LightRAG 提取失败: {error_msg}")
 
     # Query Neo4j for newly added entities (LightRAG stores with entity_name property)
     driver = None
@@ -356,8 +356,8 @@ def extract_triples(
             auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
         )
 
-        entities: List[ExtractedEntity] = []
-        relations: List[ExtractedRelation] = []
+        entities: list[ExtractedEntity] = []
+        relations: list[ExtractedRelation] = []
 
         with driver.session() as session:
             # Query entities (LightRAG uses entity_name, entity_type properties)
@@ -371,11 +371,13 @@ def extract_triples(
             """
             entity_result = session.run(entity_query)
             for record in entity_result:
-                entities.append(ExtractedEntity(
-                    entity_name=record.get("name", ""),
-                    entity_type=record.get("type", "unknown"),
-                    description=record.get("desc"),
-                ))
+                entities.append(
+                    ExtractedEntity(
+                        entity_name=record.get("name", ""),
+                        entity_type=record.get("type", "unknown"),
+                        description=record.get("desc"),
+                    )
+                )
 
             # Query relations (LightRAG stores relations between entity_name nodes)
             rel_query = """
@@ -388,11 +390,13 @@ def extract_triples(
             """
             rel_result = session.run(rel_query)
             for record in rel_result:
-                relations.append(ExtractedRelation(
-                    src_name=record.get("src", ""),
-                    tgt_name=record.get("tgt", ""),
-                    relation=record.get("rel", "related"),
-                ))
+                relations.append(
+                    ExtractedRelation(
+                        src_name=record.get("src", ""),
+                        tgt_name=record.get("tgt", ""),
+                        relation=record.get("rel", "related"),
+                    )
+                )
 
         return ExtractResponse(
             success=True,
@@ -468,10 +472,7 @@ def knowledge_query(
 
     # Wait for completion with timeout
     if not thread_completed.wait(timeout=60):
-        raise HTTPException(
-            status_code=504,
-            detail="知识查询超时（60秒）"
-        )
+        raise HTTPException(status_code=504, detail="知识查询超时（60秒）")
 
     if result_container["error"]:
         logger.warning("LightRAG query failed: %s", result_container["error"])
