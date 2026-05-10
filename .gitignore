@@ -8,11 +8,19 @@ env/
 *.pyc
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # SQLite
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+.coverage.*
 
 # Node / Frontend
 node_modules/
@@ -20,6 +28,8 @@ dist/
 build/
 .vite/
 *.local
+.eslintcache
+tsconfig.tsbuildinfo
 
 # IDE
 .idea/
@@ -75,4 +85,3 @@ data/final/artifacts_list_clean.json
 data/final/benchmark_qa.json
 data/final/benchmark_qa_clean.json
 data/final/filter_report.json
-
