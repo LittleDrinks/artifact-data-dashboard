@@ -49,6 +49,10 @@ logs/
 # Claude Code / AI tools
 .claude/
 .playwright-mcp/
+deliverables/
+docs/report/
+.workbuddy/
+reviews/
 
 # Backend runtime
 backend/data/
