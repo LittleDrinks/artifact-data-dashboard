@@ -1,0 +1,29 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^backend/.*\.py$
+      - id: ruff-format
+        files: ^backend/.*\.py$
+
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.22.0
+    hooks:
+      - id: eslint
+        files: ^frontend/.*\.(ts|tsx)$
+        additional_dependencies:
+          - eslint@9.22.0
+          - typescript-eslint@8.26.0
+          - eslint-plugin-react-hooks@7.0.1
+          - eslint-plugin-react-refresh@0.5.2
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1000]
