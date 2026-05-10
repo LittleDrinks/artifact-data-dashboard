@@ -24,16 +24,8 @@ jobs:
         uses: qodo-ai/pr-agent@v0.34.3
         env:
           # DeepSeek API 配置
-          CONFIG.MODEL: "deepseek/deepseek-v4-pro"
-          CONFIG.FALLBACK_MODELS: "[deepseek/deepseek-v4-pro]"
-          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "64000"
           OPENAI_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI.API_BASE: "https://api.deepseek.com/v1"
 
           # GitHub 配置
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # PR-Agent 行为配置
-          PR_REVIEWER.EXTRA_INSTRUCTIONS: "请用中文进行代码审查"
-          PR_DESCRIPTION.EXTRA_INSTRUCTIONS: "请用中文生成 PR 描述"
-          PR_CODE_SUGGESTIONS.EXTRA_INSTRUCTIONS: "请用中文提供代码改进建议"
