@@ -467,6 +467,7 @@ export default function Graph() {
         if (node !== hoveredNode) {
           setHoveredNode(node);
           tooltipPosRef.current = { x: mx, y: my };
+          drawCanvas();
         }
         canvas.style.cursor = node ? 'pointer' : 'grab';
       }
