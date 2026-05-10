@@ -78,5 +78,8 @@ class Settings(BaseSettings):
         if not self.LIGHTRAG_DIR:
             self.LIGHTRAG_DIR = str(Path(__file__).parent.parent / "data" / "lightrag")
 
+        if self.JWT_SECRET_KEY == "your-secret-key-change-in-production" and not self.DEBUG:
+            raise ValueError("JWT_SECRET_KEY must be changed from default in production")
+
 
 settings = Settings()
