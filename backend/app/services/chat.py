@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 MAX_REACT_ROUNDS = 5
 
+# Models that officially support reasoning_content in the API
+REASONER_MODELS = {"deepseek-reasoner"}
+
 SYSTEM_PROMPT = (
     "你是一个专业的文物知识助手，服务于「文物大数据与人工智能集成系统」。\n"
     "你可以使用以下工具来获取文物数据：\n"
@@ -220,8 +223,8 @@ def load_history(db: Session, session_id: int, limit: int = 10) -> list[dict]:
                         msg_dict["tool_calls"] = tc_data
                 except (json.JSONDecodeError, TypeError):
                     pass
-            # Restore reasoning_content for DeepSeek v4-flash
-            if m.reasoning_content:
+            # Restore reasoning_content only for official reasoner models
+            if m.reasoning_content and settings.AI_MODEL_NAME in REASONER_MODELS:
                 msg_dict["reasoning_content"] = m.reasoning_content
             result.append(msg_dict)
         elif m.role == "tool":
@@ -520,15 +523,15 @@ def _react_gen(
                 )
 
             # Append assistant message (with tool_calls) to conversation
-            # CRITICAL: DeepSeek v4-flash requires reasoning_content in assistant message
-            # when it was present in the streaming response. Without it, the API returns:
-            # "The reasoning_content in the thinking mode must be passed back to the API."
+            # CRITICAL: Only pass reasoning_content back to the API for official reasoner
+            # models. Non-reasoner models (e.g. deepseek-v4-flash) return 400 if this field
+            # is present in the assistant message.
             assistant_msg: dict = {
                 "role": "assistant",
                 "content": content_text or None,
                 "tool_calls": assistant_tc_list,
             }
-            if thinking_text:
+            if thinking_text and settings.AI_MODEL_NAME in REASONER_MODELS:
                 assistant_msg["reasoning_content"] = thinking_text
             messages.append(assistant_msg)
 
