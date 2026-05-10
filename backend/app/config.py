@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost"]
+    # CORS — must be explicitly configured; empty means no CORS (same-origin only)
+    CORS_ORIGINS: list[str] = []
 
     # AI / LLM — Chat Q&A
     # User-configured OpenAI-compatible API
