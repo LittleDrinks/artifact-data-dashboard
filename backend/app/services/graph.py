@@ -256,7 +256,7 @@ def _query_neo4j_base_layer(
                     node_id = record.get("id")
                     name = record.get("name")
                     node_type_raw = record.get("type", neo4j_label)
-                    props = dict(record.get("props", {}))
+                    props = dict(record.get("props") or {})
 
                     if node_id and name:
                         # Build properties dict
@@ -357,7 +357,7 @@ def _search_neo4j_base_layer(
                     node_id = record.get("id")
                     name = record.get("name")
                     node_type_raw = record.get("type", neo4j_label)
-                    props = dict(record.get("props", {}))
+                    props = dict(record.get("props") or {})
 
                     if node_id and name:
                         matched_ids.add(node_id)
@@ -471,7 +471,7 @@ def _get_node_detail_from_neo4j(
             node_id_found = record.get("id")
             name = record.get("name")
             node_type = record.get("type", "unknown")
-            props = dict(record.get("props", {}))
+            props = dict(record.get("props") or {})
 
             properties = {}
             if node_type == "artifact":

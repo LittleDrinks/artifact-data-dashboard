@@ -259,7 +259,11 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
         try:
             nodes, links = graph_service._query_neo4j_entities(driver, limit=limit, keyword=keyword)
             entities = [
-                {"name": n.name, "type": n.type, "description": n.properties.get("description", "")}
+                {
+                    "name": n.name,
+                    "type": n.type,
+                    "description": (n.properties or {}).get("description", ""),
+                }
                 for n in nodes
             ]
             relations = [
@@ -364,7 +368,7 @@ def _tool_query_knowledge_graph(args: dict[str, Any], db: Session) -> dict[str, 
         # Build entity list with type labels and descriptions from node properties
         entities = []
         for n in nodes[:limit]:
-            desc = n.properties.get("description", "")
+            desc = (n.properties or {}).get("description", "")
             type_label = type_labels.get(n.type, n.type)
             entity_info = {"name": n.name, "type": type_label}
             if desc:
