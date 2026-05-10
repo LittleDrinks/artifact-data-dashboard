@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import requests
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from PIL import Image
 from sqlalchemy.orm import Session
@@ -135,7 +136,7 @@ async def repair_image(
     - 返回修复后的图片 base64 编码
     """
     # 获取文物信息
-    artifact = artifact_service.get_artifact_by_id(db, artifact_id)
+    artifact = await run_in_threadpool(lambda: artifact_service.get_artifact_by_id(db, artifact_id))
     if not artifact:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

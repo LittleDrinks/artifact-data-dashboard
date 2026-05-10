@@ -4,6 +4,7 @@ import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -129,13 +130,13 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
+async def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Authenticate user and return JWT access token."""
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
     try:
-        token_response = auth_service.authenticate_user(db, data)
+        token_response = await run_in_threadpool(lambda: auth_service.authenticate_user(db, data))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

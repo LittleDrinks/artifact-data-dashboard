@@ -5,6 +5,7 @@ import io
 import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -23,7 +24,7 @@ router = APIRouter()
 
 
 @router.get("", response_model=ArtifactListResponse)
-def list_artifacts(
+async def list_artifacts(
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页条数"),
     keyword: str | None = Query(None, description="搜索关键词（匹配名称/描述/标签）"),
@@ -33,14 +34,16 @@ def list_artifacts(
     db: Session = Depends(get_db),
 ):
     """获取文物列表（分页、搜索、筛选）"""
-    artifacts, total = artifact_service.get_artifacts(
-        db,
-        page=page,
-        page_size=size,
-        search=keyword,
-        category=category,
-        era=era,
-        location=location,
+    artifacts, total = await run_in_threadpool(
+        lambda: artifact_service.get_artifacts(
+            db,
+            page=page,
+            page_size=size,
+            search=keyword,
+            category=category,
+            era=era,
+            location=location,
+        )
     )
     total_pages = math.ceil(total / size) if total > 0 else 0
     return ArtifactListResponse(
@@ -114,9 +117,9 @@ def export_artifacts_csv(
 
 
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
-def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
+async def get_artifact(artifact_id: int, db: Session = Depends(get_db)):
     """获取文物详情"""
-    artifact = artifact_service.get_artifact_by_id(db, artifact_id)
+    artifact = await run_in_threadpool(lambda: artifact_service.get_artifact_by_id(db, artifact_id))
     if not artifact:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
