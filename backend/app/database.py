@@ -59,12 +59,17 @@ def _ensure_admin_user():
     from app.models.user import User
     from app.services.auth import hash_password
 
+    default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD")
+    if not default_password:
+        raise ValueError("ADMIN_DEFAULT_PASSWORD environment variable is required")
+    if len(default_password) < 8:
+        raise ValueError("ADMIN_DEFAULT_PASSWORD must be at least 8 characters")
+
     db = SessionLocal()
     try:
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
             # Create new admin user
-            default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
             admin = User(
                 username="admin",
                 email="admin@heritage.cn",
