@@ -54,12 +54,10 @@ def get_db() -> Generator[Session, None, None]:
 
 def _ensure_admin_user():
     """Create a default admin user if one does not already exist, or fix role if wrong."""
-    import os
-
     from app.models.user import User
-    from app.services.auth import hash_password
+    from app.services.auth import hash_password, verify_password
 
-    default_password = os.environ.get("ADMIN_DEFAULT_PASSWORD")
+    default_password = settings.ADMIN_DEFAULT_PASSWORD
     if not default_password:
         raise ValueError("ADMIN_DEFAULT_PASSWORD environment variable is required")
     if len(default_password) < 8:
@@ -82,6 +80,11 @@ def _ensure_admin_user():
             # Fix existing admin user with wrong role
             admin.role = "admin"
             db.commit()
+        else:
+            # Update password if env var has changed
+            if not verify_password(default_password, admin.password_hash):
+                admin.password_hash = hash_password(default_password)
+                db.commit()
     finally:
         db.close()
 

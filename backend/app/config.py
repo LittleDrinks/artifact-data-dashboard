@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "文物大数据与人工智能集成系统"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    ADMIN_DEFAULT_PASSWORD: str = ""
 
     # Server
     HOST: str = "0.0.0.0"
