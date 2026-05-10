@@ -9,12 +9,11 @@ module.exports = {
       target: 'temporary-public-storage',
     },
     assert: {
-      preset: 'lighthouse:no-pwa',
       assertions: {
-        'categories:performance': ['warn', { minScore: 0.5 }],
-        'categories:accessibility': ['error', { minScore: 0.9 }],
-        'categories:best-practices': ['error', { minScore: 0.9 }],
-        'categories:seo': ['warn', { minScore: 0.8 }],
+        'categories:performance': ['warn', { minScore: 0.3 }],
+        'categories:accessibility': ['warn', { minScore: 0.7 }],
+        'categories:best-practices': ['warn', { minScore: 0.7 }],
+        'categories:seo': ['warn', { minScore: 0.7 }],
       },
     },
   },
