@@ -2,7 +2,6 @@
 Application configuration module.
 Reads settings from environment variables with sensible defaults.
 """
-# Test comment for CodeRabbit review verification
 
 from pathlib import Path
 
@@ -11,8 +10,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-
-    # Test comment for PR-Agent (Kimi) review verification v2
 
     # Application
     APP_NAME: str = "文物大数据与人工智能集成系统"

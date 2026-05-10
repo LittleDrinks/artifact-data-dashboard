@@ -6,7 +6,7 @@ import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -163,4 +163,4 @@ def delete_artifact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"文物 ID {artifact_id} 不存在或已被删除",
         )
-    return {"success": True, "deleted_id": artifact_id}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
