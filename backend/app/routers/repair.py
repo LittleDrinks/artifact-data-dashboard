@@ -45,7 +45,7 @@ def _validate_image_url(url: str) -> None:
     """
     parsed = urlparse(url)
 
-    if parsed.scheme not in ("http", "https"):
+    if parsed.scheme and parsed.scheme not in ("http", "https"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="仅支持 HTTP/HTTPS 协议",
