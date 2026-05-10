@@ -2,6 +2,9 @@
 
 import base64
 import io
+import ipaddress
+import re
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -18,17 +21,95 @@ from app.services import artifact as artifact_service
 
 router = APIRouter()
 
+# Maximum image size: 10 MB
+_MAX_IMAGE_SIZE = 10 * 1024 * 1024
+# Stream read chunk size: 1 MB
+_READ_CHUNK_SIZE = 1024 * 1024
+
+# Denied private IP patterns (CIDR ranges expressed as regex for hostname matching)
+_PRIVATE_HOST_PATTERNS = [
+    re.compile(r"^localhost$", re.IGNORECASE),
+    re.compile(r"^127\."),
+    re.compile(r"^10\."),
+    re.compile(r"^192\.168\."),
+    re.compile(r"^172\.(1[6-9]|2[0-9]|3[01])\."),
+    re.compile(r"\.local$", re.IGNORECASE),
+]
+
+
+def _validate_image_url(url: str) -> None:
+    """Validate image URL against SSRF: hostname/IP, size, Content-Type.
+
+    Raises HTTPException with 400 if validation fails.
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+
+    if not hostname:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无效的 URL: 无法解析主机名",
+        )
+
+    # 1. IP check: reject private / loopback IPs
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="禁止访问内网或回环地址",
+            )
+    except ValueError:
+        # Not an IP, proceed to domain check
+        pass
+
+    # 2. Domain check: reject internal domains
+    for pattern in _PRIVATE_HOST_PATTERNS:
+        if pattern.search(hostname):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="禁止访问内网域名",
+            )
+
 
 def download_image(url: str) -> np.ndarray:
-    """Download image from URL and return as numpy array."""
+    """Download image from URL with SSRF protection and return as numpy array."""
+    _validate_image_url(url)
+
     try:
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(
+            url,
+            timeout=(5, 10),
+            headers={"User-Agent": "Mozilla/5.0"},
+            stream=True,
+        )
         resp.raise_for_status()
-        pil_img = Image.open(io.BytesIO(resp.content))
+
+        # 3. Content-Type check: only allow image/*
+        content_type = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无效的 Content-Type: {content_type}，只允许 image/*",
+            )
+
+        # 4. Size check: stream and cap at 10 MB
+        content = b""
+        for chunk in resp.iter_content(chunk_size=_READ_CHUNK_SIZE):
+            content += chunk
+            if len(content) > _MAX_IMAGE_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"图片大小超过最大限制 {_MAX_IMAGE_SIZE // (1024 * 1024)} MB",
+                )
+
+        pil_img = Image.open(io.BytesIO(content))
         # Convert to RGB if necessary (handles RGBA, grayscale, etc.)
         if pil_img.mode != "RGB":
             pil_img = pil_img.convert("RGB")
         return np.array(pil_img)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
