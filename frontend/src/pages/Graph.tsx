@@ -404,8 +404,12 @@ export default function Graph() {
       return null;
     };
 
-    // Zoom with wheel
-    canvas.addEventListener('wheel', (e: WheelEvent) => {
+    // Pan and drag state
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
+    // --- Named event handlers for proper cleanup ---
+    const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { x: ttx, y: tty, k: ttk } = transformRef.current;
       const factor = e.deltaY > 0 ? 0.92 : 1.08;
@@ -420,13 +424,9 @@ export default function Graph() {
         k: newK,
       };
       drawCanvas();
-    }, { passive: false });
+    };
 
-    // Pan and drag
-    let isPanning = false;
-    let panStart = { x: 0, y: 0 };
-
-    canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    const handleMouseDown = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -443,9 +443,9 @@ export default function Graph() {
         isPanning = true;
         panStart = { x: e.clientX - transformRef.current.x, y: e.clientY - transformRef.current.y };
       }
-    });
+    };
 
-    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+    const handleMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -468,9 +468,9 @@ export default function Graph() {
         }
         canvas.style.cursor = node ? 'pointer' : 'grab';
       }
-    });
+    };
 
-    canvas.addEventListener('mouseup', () => {
+    const handleMouseUp = () => {
       if (isDraggingRef.current && dragNodeRef.current) {
         isDraggingRef.current = false;
         dragNodeRef.current.fx = null;
@@ -479,9 +479,9 @@ export default function Graph() {
         simulation.alphaTarget(0);
       }
       isPanning = false;
-    });
+    };
 
-    canvas.addEventListener('click', (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent) => {
       if (isDraggingRef.current) return;
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -490,13 +490,24 @@ export default function Graph() {
       if (node) {
         handleNodeClick(node.id);
       }
-    });
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('click', handleClick);
 
     // Initial draw
     drawCanvas();
 
     return () => {
       simulation.stop();
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('click', handleClick);
     };
   }, [graphData, activeSearchKeyword, matchedNodeIds]);
 
