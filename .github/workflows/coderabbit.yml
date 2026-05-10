@@ -28,8 +28,8 @@ jobs:
           review_simple_changes: true
           review_comment_lgtm: false
           openai_base_url: https://api.deepseek.com/v1
-          openai_light_model: deepseek-v4-pro
-          openai_heavy_model: deepseek-v4-pro
+          openai_light_model: deepseek-v4-flash
+          openai_heavy_model: deepseek-v4-flash
           openai_timeout_ms: 120000
           language: zh-CN
           system_message: |
