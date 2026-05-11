@@ -614,7 +614,8 @@ class TestGraphExtractTriples:
             assert resp.status_code == 200
             data = resp.json()
             assert data["success"] is True
-            assert len(data["entities"]) >= 0
+            assert len(data["entities"]) > 0
+            assert any(e.get("entity_name") == "越王勾践剑" for e in data["entities"])
 
 
 # ── Test: Graph Knowledge Query ───────────────────────────────────────

@@ -79,5 +79,11 @@ class Settings(BaseSettings):
         if self.JWT_SECRET_KEY == "your-secret-key-change-in-production" and not self.DEBUG:
             raise ValueError("JWT_SECRET_KEY must be changed from default in production")
 
+        if not self.DEBUG and self.CORS_ORIGINS == [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]:
+            raise ValueError("CORS_ORIGINS must be explicitly configured in production")
+
 
 settings = Settings()

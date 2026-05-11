@@ -7,6 +7,7 @@ from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
@@ -216,7 +217,7 @@ async def ask_question(
     return StreamingResponse(
         chat_service.stream_chat_response(db, data.question, session_id, new_session, collector),
         media_type="text/event-stream",
-        background=background_tasks.add_task(_persist_chat_response, session_id, collector),
+        background=BackgroundTask(_persist_chat_response, session_id, collector),
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
