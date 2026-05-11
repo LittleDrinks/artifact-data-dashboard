@@ -41,14 +41,21 @@ jobs:
 
       - name: Wait for Neo4j
         run: |
+          neo4j_ready=false
           for i in {1..60}; do
             if docker compose exec -T neo4j cypher-shell -u neo4j -p password "RETURN 1" 2>/dev/null; then
               echo "Neo4j is ready"
+              neo4j_ready=true
               break
             fi
             echo "Waiting for Neo4j... ($i/60)"
             sleep 2
           done
+          if [ "$neo4j_ready" != "true" ]; then
+            echo "ERROR: Neo4j failed to become ready within 120s"
+            docker compose logs neo4j
+            exit 1
+          fi
 
       - name: Check containers status
         run: docker compose ps
