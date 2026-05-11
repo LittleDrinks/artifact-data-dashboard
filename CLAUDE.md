@@ -153,16 +153,18 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 处理 Copilot / CodeRabbit PR review 时遵循以下顺序：
 
 1. **逐条 reply** — 在每条 review comment 下直接回复，不在 PR 发 summary comment。
-2. **修了标注 commit** — 回复格式：`✅ Fixed in commit <hash>: <根因说明>`。
-3. **不用修就 rebuttal** — 在代码对应位置加注释声明原因，回复格式：`📝 Rebuttal — <解释>`。
-4. **用户有权喊停** — 如果用户说"先这样，我不想改了"，尊重判断，不再纠缠，继续推进主线任务。
+2. **修了标注 commit** — 回复格式
+3. ：`✅ Fixed in commit <hash>: <根因说明>`。
+4. **不用修就 rebuttal** — 在代码对应位置加注释声明原因，回复格式：`📝 Rebuttal — <解释>`。
+5. **用户有权喊停** — 如果用户说"先这样，我不想改了"，尊重判断，不再纠缠，继续推进主线任务。
 
 ### PR 管理
 
 - **聚焦 merge** — 当前 PR 的首要目标是合并，不要引入不相关的改动。
 - **无关改动拆 PR** — workflow、文档更新、工具配置等非功能改动，单独开分支和 PR。
 - **技术债务同步** — 发现的技术债务记录到 `.planning/technical-debt.md`，并同步到 GitHub Issues。
-- **新建 PR 后必须等 review** — push 后不要立刻告诉用户"完成了"。等待 Copilot / CodeRabbit 跑完 review，逐条处理建议（修复或 rebuttal），直到没有新的 blocking 评论，再通知用户检查并 merge。
+- **新建 PR 后必须等 review** — push 后不要立刻告诉用户"完成了"。等待 Copilot / CodeRabbit 跑完 review，逐条处理建议（
+- 修复或 rebuttal），直到没有新的 blocking 评论，再通知用户检查并 merge。
 - **AI Review 语言** — 已通过 `.coderabbit.yaml` 和 `.github/copilot-instructions.md` 要求 CodeRabbit / Copilot 用**简体中文**回复。如果 review 仍用英文，在首条 rebuttal 中追加提醒：`请用中文回复。`
 
 ---
