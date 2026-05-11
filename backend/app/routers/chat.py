@@ -7,6 +7,7 @@ from collections import defaultdict
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.database import SessionLocal, get_db
@@ -165,7 +166,7 @@ def _persist_chat_response(
 
 
 @router.post("/ask")
-def ask_question(
+async def ask_question(
     data: ChatAskRequest,
     request: Request,
     background_tasks: BackgroundTasks,
@@ -185,13 +186,15 @@ def ask_question(
     # Create a new session if none provided
     if session_id is None:
         title = data.question[:50] + ("..." if len(data.question) > 50 else "")
-        session = chat_service.create_session(db, current_user.id, ChatSessionCreate(title=title))
+        session = await run_in_threadpool(
+            chat_service.create_session, db, current_user.id, ChatSessionCreate(title=title)
+        )
         session_id = session.id
         new_session = True
     else:
         # Verify session belongs to user
-        session = (
-            db.query(ChatSession)
+        session = await run_in_threadpool(
+            lambda: db.query(ChatSession)
             .filter(
                 ChatSession.id == session_id,
                 ChatSession.user_id == current_user.id,
@@ -204,8 +207,8 @@ def ask_question(
                 detail="会话不存在",
             )
 
-    # Save user message BEFORE streaming (synchronous, part of request transaction)
-    chat_service.save_message(db, session_id, "user", data.question)
+    # Save user message BEFORE streaming
+    await run_in_threadpool(chat_service.save_message, db, session_id, "user", data.question)
 
     # Collector gathers metadata during streaming for post-stream persistence
     collector: dict = {}
