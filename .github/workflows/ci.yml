@@ -24,7 +24,12 @@ jobs:
       - run: ruff check app/
       - run: ruff format --check app/
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest tests/ -v --tb=short
+      - run: pytest tests/ -v --tb=short --cov=app --cov-report=xml --cov-fail-under=60
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: pytest-report
+          path: backend/pytest-report.xml
 
   frontend:
     runs-on: ubuntu-latest
@@ -42,3 +47,5 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
