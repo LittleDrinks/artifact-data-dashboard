@@ -66,7 +66,7 @@ docs/              # PRD, pitfalls, technical-debt（只读参考）
 ## GitHub 仓库配置
 
 **仓库**: https://github.com/LittleDrinks/artifact-data-dashboard
-**默认分支**: `main`（无分支保护规则，暂未启用 required checks）
+**默认分支**: `main`
 
 ### CI/CD 工作流
 
@@ -86,13 +86,24 @@ docs/              # PRD, pitfalls, technical-debt（只读参考）
 | Secret | 用途 |
 |--------|------|
 | `DEEPSEEK_API_KEY` | CodeRabbit AI review |
-| `LHCI_GITHUB_APP_TOKEN` | Lighthouse CI（保留，当前未使用） |
+| `LHCI_GITHUB_APP_TOKEN` | Lighthouse CI PR 评论 |
+
+### 分支保护规则
+
+| 规则 | 说明 |
+|------|------|
+| 禁止删除/force push | 保护 main 分支历史 |
+| 必须通过 PR merge | 不允许直接 push 到 main |
+| 必须 resolve review conversations | 所有 PR review comments 需标记 resolved |
+| 必须 pass status checks | backend + frontend CI 全绿 |
+| dismiss stale reviews on push | push 新代码后旧 review 自动失效 |
 
 ### PR 流程
 
 1. 从 `main` 切功能分支
 2. push 后 CodeRabbit 自动 review
-3. CI 通过后手动 merge（暂无不允许直接 push 到 main 的限制）
+3. **手动 resolve Copilot/CodeRabbit 的 review conversations**
+4. CI 全绿后手动 merge
 
 ---
 
@@ -108,7 +119,7 @@ LightRAG KV Store ────> AI 问答 (/chat)
 Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互通
 ```
 
-**关键问题**: Neo4j 和 LightRAG 是两套独立系统。详见 `docs/technical-debt.md`。
+**技术债务**: 见 `.planning/technical-debt.md`。
 
 ---
 

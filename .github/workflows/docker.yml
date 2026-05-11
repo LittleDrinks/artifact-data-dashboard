@@ -1,0 +1,55 @@
+name: Docker CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create test env files
+        run: |
+          cat > .env << 'EOF'
+          JWT_SECRET_KEY=ci-test-secret-not-for-production
+          ADMIN_DEFAULT_PASSWORD=admin123
+          NEO4J_URI=bolt://neo4j:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=password
+          EOF
+          cat > frontend/.env << 'EOF'
+          VITE_API_BASE_URL=http://localhost:8000
+          EOF
+
+      - name: Build Docker images
+        run: |
+          # Override pip index to default for CI (GitHub runners are outside China)
+          docker compose build --build-arg PIP_INDEX_URL=https://pypi.org/simple
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for Neo4j
+        run: |
+          for i in {1..60}; do
+            if docker compose exec -T neo4j cypher-shell -u neo4j -p password "RETURN 1" 2>/dev/null; then
+              echo "Neo4j is ready"
+              break
+            fi
+            echo "Waiting for Neo4j... ($i/60)"
+            sleep 2
+          done
+
+      - name: Check containers status
+        run: docker compose ps
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

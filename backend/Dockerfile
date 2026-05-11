@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip config set global.index-url ${PIP_INDEX_URL}
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --timeout=120 --retries=5 -r requirements.txt
