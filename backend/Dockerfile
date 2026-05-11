@@ -10,9 +10,14 @@ RUN pip install --no-cache-dir --timeout=120 --retries=5 -r requirements.txt
 
 # Install modelscope for faster download in China, then download bge-m3
 RUN pip install --no-cache-dir modelscope
+ARG SKIP_MODEL_DOWNLOAD=false
 COPY download_model.py .
-RUN python download_model.py || \
-    echo "WARNING: Model download failed, will retry at runtime"
+RUN if [ "$SKIP_MODEL_DOWNLOAD" != "true" ]; then \
+        python download_model.py || \
+        echo "WARNING: Model download failed, will retry at runtime"; \
+    else \
+        echo "SKIP_MODEL_DOWNLOAD=true, skipping model download"; \
+    fi
 
 COPY . .
 

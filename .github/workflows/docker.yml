@@ -31,7 +31,10 @@ jobs:
       - name: Build Docker images
         run: |
           # Override pip index to default for CI (GitHub runners are outside China)
-          docker compose build --build-arg PIP_INDEX_URL=https://pypi.org/simple
+          # Skip model download in CI — models are not needed for build verification
+          docker compose build \
+            --build-arg SKIP_MODEL_DOWNLOAD=true \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple
 
       - name: Start services
         run: docker compose up -d
