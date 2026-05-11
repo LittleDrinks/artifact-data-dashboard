@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
-    # CORS — must be explicitly configured; empty means no CORS (same-origin only)
-    CORS_ORIGINS: list[str] = []
+    # CORS — development defaults; production must override via .env
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     # AI / LLM — Chat Q&A
     # User-configured OpenAI-compatible API
@@ -78,6 +78,13 @@ class Settings(BaseSettings):
 
         if self.JWT_SECRET_KEY == "your-secret-key-change-in-production" and not self.DEBUG:
             raise ValueError("JWT_SECRET_KEY must be changed from default in production")
+
+        if not self.DEBUG:
+            for origin in self.CORS_ORIGINS:
+                if "localhost" in origin or "127.0.0.1" in origin:
+                    raise ValueError(
+                        "CORS_ORIGINS must not contain localhost/127.0.0.1 in production"
+                    )
 
 
 settings = Settings()

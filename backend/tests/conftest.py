@@ -18,6 +18,9 @@ from app.services.auth import create_access_token, hash_password
 @pytest.fixture(scope="function")
 def test_engine():
     """Create a test database engine with SQLite file (shared across connections)."""
+    # Import all models so they register with Base.metadata for test table creation
+    from app.models import artifact, attachment, chat  # noqa: F401
+
     # Use a temporary file for SQLite to ensure all connections see the same tables
     # In-memory SQLite (:memory:) is per-connection, not shared
     temp_db_fd, temp_db_path = tempfile.mkstemp(suffix=".db")

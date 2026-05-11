@@ -1,0 +1,31 @@
+name: Copilot Review Required
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+jobs:
+  check-copilot-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Copilot review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const copilotReview = reviews.data.find(
+              review => review.user.login === 'copilot-pull-request-reviewer[bot]'
+            );
+
+            if (!copilotReview) {
+              core.setFailed('Copilot review is required before merging this PR.');
+            } else {
+              console.log('Copilot review found:', copilotReview.state);
+            }
