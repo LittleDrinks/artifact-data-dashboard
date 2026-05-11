@@ -26,11 +26,14 @@ class TestChatSSE:
 
     def test_sse_stream_format(self, client: TestClient, auth_header: dict):
         """SSE response should have correct format and all expected events."""
-        with patch(
-            "app.routers.chat.chat_service.stream_chat_response",
-            side_effect=lambda db, query, sid, new_session, collector: self._mock_stream(
-                sid, new_session
+        with (
+            patch(
+                "app.routers.chat.chat_service.stream_chat_response",
+                side_effect=lambda db, query, sid, new_session, collector: self._mock_stream(
+                    sid, new_session
+                ),
             ),
+            patch("app.routers.chat._persist_chat_response", return_value=None),
         ):
             resp = client.post(
                 "/api/chat/ask",
@@ -68,7 +71,10 @@ class TestChatSSE:
             captured_session_id = sid
             yield from self._mock_stream(sid, new_session)
 
-        with patch("app.routers.chat.chat_service.stream_chat_response", side_effect=mock_stream):
+        with (
+            patch("app.routers.chat.chat_service.stream_chat_response", side_effect=mock_stream),
+            patch("app.routers.chat._persist_chat_response", return_value=None),
+        ):
             resp = client.post(
                 "/api/chat/ask",
                 headers=auth_header,
@@ -93,11 +99,14 @@ class TestChatSSE:
         db_session.commit()
         db_session.refresh(session)
 
-        with patch(
-            "app.routers.chat.chat_service.stream_chat_response",
-            side_effect=lambda db, query, sid, new_session, collector: self._mock_stream(
-                sid, new_session
+        with (
+            patch(
+                "app.routers.chat.chat_service.stream_chat_response",
+                side_effect=lambda db, query, sid, new_session, collector: self._mock_stream(
+                    sid, new_session
+                ),
             ),
+            patch("app.routers.chat._persist_chat_response", return_value=None),
         ):
             resp = client.post(
                 "/api/chat/ask",

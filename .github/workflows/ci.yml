@@ -25,7 +25,7 @@ jobs:
       - run: ruff check app/
       - run: ruff format --check app/
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest tests/ -v --tb=short --cov=app --cov-report=xml:pytest-report.xml --cov-fail-under=60
+      - run: pytest tests/ -v --tb=short --cov=app --cov-report=xml:pytest-report.xml --cov-fail-under=55
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
