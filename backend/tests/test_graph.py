@@ -537,3 +537,126 @@ class TestGraphImportMockNeo4j:
             assert len(data["errors"]) > 0
             assert data["nodes_imported"] == 0
             assert data["relations_imported"] == 0
+
+
+# ── Test: Graph Extract Triples ───────────────────────────────────────
+
+
+class TestGraphExtractTriples:
+    """Tests for POST /api/graph/extract endpoint."""
+
+    def test_extract_empty_text_returns_400(self, client: TestClient):
+        """Empty text should return 400."""
+        resp = client.post("/api/graph/extract", json={"text": "", "title": "test"})
+        assert resp.status_code == 400
+        assert "不能为空" in resp.json()["detail"]
+
+    def test_extract_whitespace_text_returns_400(self, client: TestClient):
+        """Whitespace-only text should return 400."""
+        resp = client.post("/api/graph/extract", json={"text": "   ", "title": "test"})
+        assert resp.status_code == 400
+
+    def test_extract_lightrag_unavailable_returns_empty(self, client: TestClient, mock_neo4j_empty):
+        """When LightRAG is unavailable, return empty result gracefully (BUG-2 fix)."""
+        with patch("app.routers.graph.get_lightrag_service", return_value=None):
+            resp = client.post(
+                "/api/graph/extract",
+                json={"text": "越王勾践剑是春秋晚期越国青铜器", "title": "test"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["entities"] == []
+            assert data["relations"] == []
+            assert "未配置" in data["message"]
+
+    def test_extract_lightrag_success(self, client: TestClient):
+        """Successful extraction with mocked LightRAG and Neo4j."""
+        mock_service = MagicMock()
+
+        async def mock_ainsert(texts):
+            pass
+
+        mock_service.ainsert = mock_ainsert
+
+        with (
+            patch("app.routers.graph.get_lightrag_service", return_value=mock_service),
+            patch("app.routers.graph.GraphDatabase.driver") as mock_driver_class,
+        ):
+            mock_driver = MagicMock()
+            mock_session = MagicMock()
+            mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+            mock_driver_class.return_value = mock_driver
+
+            # Mock Neo4j query results
+            mock_entity_result = MagicMock()
+            mock_entity_result.__iter__ = MagicMock(
+                return_value=iter(
+                    [
+                        {
+                            "name": "越王勾践剑",
+                            "type": "artifact",
+                            "desc": "春秋晚期越国青铜器",
+                        }
+                    ]
+                )
+            )
+            mock_rel_result = MagicMock()
+            mock_rel_result.__iter__ = MagicMock(return_value=iter([]))
+
+            mock_session.run.side_effect = [mock_entity_result, mock_rel_result]
+
+            resp = client.post(
+                "/api/graph/extract",
+                json={"text": "越王勾践剑是春秋晚期越国青铜器", "title": "test"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert len(data["entities"]) >= 0
+
+
+# ── Test: Graph Knowledge Query ───────────────────────────────────────
+
+
+class TestGraphKnowledgeQuery:
+    """Tests for POST /api/graph/knowledge-query endpoint."""
+
+    def test_knowledge_query_empty_question_returns_400(self, client: TestClient):
+        """Empty question should return 400."""
+        resp = client.post("/api/graph/knowledge-query", json={"question": ""})
+        assert resp.status_code == 400
+        assert "不能为空" in resp.json()["detail"]
+
+    def test_knowledge_query_lightrag_unavailable_returns_empty(self, client: TestClient):
+        """When LightRAG is unavailable, return empty result gracefully."""
+        with patch("app.routers.graph.get_lightrag_service", return_value=None):
+            resp = client.post(
+                "/api/graph/knowledge-query",
+                json={"question": "越王勾践剑是什么朝代的？"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert data["answer"] == ""
+            assert "未配置" in data["message"]
+
+    def test_knowledge_query_success(self, client: TestClient):
+        """Successful knowledge query with mocked LightRAG."""
+        mock_service = MagicMock()
+
+        async def mock_aquery(question):
+            return "越王勾践剑是春秋晚期越国青铜器。"
+
+        mock_service.aquery = mock_aquery
+
+        with patch("app.routers.graph.get_lightrag_service", return_value=mock_service):
+            resp = client.post(
+                "/api/graph/knowledge-query",
+                json={"question": "越王勾践剑是什么朝代的？"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["success"] is True
+            assert "春秋" in data["answer"]
