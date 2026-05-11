@@ -153,9 +153,9 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 处理 Copilot / CodeRabbit PR review 时遵循以下顺序：
 
 1. **逐条 reply** — 在每条 review comment 下直接回复，不在 PR 发 summary comment。
-2. **修了标注 commit** — 回复格式
-3. ：`✅ Fixed in commit <hash>: <根因说明>`。
-4. **不用修就 rebuttal** — 在代码对应位置加注释声明原因，回复格式：`📝 Rebuttal — <解释>`。
+2. **修了标注 commit** — 回复格式：`✅ 已在 commit <hash> 修复：<根因说明>`。
+3. **不用修就 rebuttal** — 在代码对应位置加注释声明原因，回复格式：`📝 Rebuttal — <解释>`。
+4. **语言要求** — 所有 reply **必须用中文**，包括 Fixed / Rebuttal / 解释说明。
 5. **用户有权喊停** — 如果用户说"先这样，我不想改了"，尊重判断，不再纠缠，继续推进主线任务。
 
 ### PR 管理

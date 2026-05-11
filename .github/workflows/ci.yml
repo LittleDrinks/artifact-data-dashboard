@@ -15,6 +15,7 @@ jobs:
     env:
       JWT_SECRET_KEY: "ci-test-secret-key-not-for-production"
       ADMIN_DEFAULT_PASSWORD: "admin123"
+      DEBUG: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
