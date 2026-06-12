@@ -42,35 +42,9 @@
 
 ---
 
-## 2. 数据模型
+## 2. API 接口
 
-### 2.1 artifacts 表（15 字段）
-
-| 字段 | 类型 | 说明 | 覆盖率 |
-|------|------|------|--------|
-| id | INTEGER (PK) | 自增主键 | 100% |
-| name | VARCHAR(255) | 文物名称（必填） | 100% |
-| description | TEXT | 文物描述 | ~73% |
-| category | VARCHAR(50) | 类别（青铜器、陶瓷等） | 100% |
-| era | VARCHAR(50) | 年代（标准朝代名） | 80% |
-| location | VARCHAR(100) | 出土地点 | ~45% |
-| museum | VARCHAR(100) | 收藏机构 | 32.2% |
-| image_url | VARCHAR(500) | 图片链接 | 100% |
-| tags | TEXT | 标签（逗号分隔） | 100% |
-| material | VARCHAR(50) | 材质 | 30.9% |
-| source_url | VARCHAR(500) | Wikipedia 来源链接 | ~98% |
-| dimensions | VARCHAR(100) | 尺寸 | ~23% |
-| related_artifacts | TEXT | 关联文物（\| 分隔） | 预留字段 |
-| created_at | DATETIME | 创建时间 | 自动 |
-| updated_at | DATETIME | 更新时间 | 自动 |
-
-**模型位置**：`backend/app/models/artifact.py`
-
----
-
-## 3. API 接口
-
-### 3.1 端点列表
+### 2.1 端点列表
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -80,7 +54,7 @@
 | `/api/artifacts/:id` | PUT | 更新文物 |
 | `/api/artifacts/:id` | DELETE | 删除文物 |
 
-### 3.2 列表接口参数
+### 2.2 列表接口参数
 
 ```
 GET /api/artifacts
@@ -94,87 +68,44 @@ GET /api/artifacts
   &sort_order=asc      # 排序方向
 ```
 
-### 3.3 搜索实现
+### 2.3 搜索实现
 
-当前使用 SQLAlchemy ILIKE 模糊匹配：
-
-```python
-# backend/app/services/artifact.py
-search_term = f"%{keyword}%"
-query = query.filter(
-    Artifact.name.ilike(search_term)
-    | Artifact.description.ilike(search_term)
-    | Artifact.tags.ilike(search_term)
-)
-```
+当前使用 SQLAlchemy ILIKE 模糊匹配 `name`、`description`、`tags` 字段。
 
 > **已知限制**：未使用 SQLite FTS5 全文检索，大数据量时性能可能下降。
 
 ---
 
-## 4. 前端实现
+## 3. 前端实现
 
-### 4.1 文物列表页
+### 3.1 文物列表页
 
 **位置**：`frontend/src/pages/Artifacts.tsx`
 
-组件：
 - Ant Design `Table` — 分页列表
 - `Input.Search` — 搜索栏
 - `Select` 筛选器 — era、category、location 下拉选择
 - `Button` 操作栏 — 新建、编辑、删除
-
-功能：
-- 搜索触发 reload
-- 筛选器联动
 - 点击行跳转详情页
 
-### 4.2 文物详情页
+### 3.2 文物详情页
 
 **位置**：`frontend/src/pages/ArtifactDetail.tsx`
 
-组件：
 - Ant Design `Descriptions` — 元数据展示
 - `Image` 组件 — 图片预览
 - `Button` 操作栏 — 编辑、删除、图像修复入口
+- 新字段显示：material（材质）、museum（馆藏）、dimensions（尺寸）
 
-新字段显示（`ArtifactDetail.tsx:312-326`）：
-- material（材质）
-- museum（馆藏）
-- dimensions（尺寸）
-
-### 4.3 API 调用层
+### 3.3 API 调用层
 
 **位置**：`frontend/src/api/artifacts.ts`
 
-```typescript
-export interface Artifact {
-  id: number
-  name: string
-  description?: string
-  category?: string
-  era?: string
-  location?: string
-  museum?: string
-  image_url?: string
-  tags?: string
-  material?: string
-  source_url?: string
-  dimensions?: string
-  created_at: string
-  updated_at: string
-}
-
-export function getArtifacts(params: ArtifactQuery): Promise<ArtifactListResponse>
-export function getArtifactById(id: number): Promise<Artifact>
-export function createArtifact(data: ArtifactFormData): Promise<Artifact>
-export function updateArtifact(id: number, data: ArtifactFormData): Promise<Artifact>
-export function deleteArtifact(id: number): Promise<void>
-```
+接口：`getArtifacts`、`getArtifactById`、`createArtifact`、`updateArtifact`、`deleteArtifact`。
 
 ---
 
-## 5. 已知问题
+## 4. 已知问题
 
 | ID | 问题 | 来源 | 优先级 | 说明 |
 |-----|------|------|--------|------|
@@ -185,7 +116,7 @@ export function deleteArtifact(id: number): Promise<void>
 
 ---
 
-## 6. 验收标准
+## 5. 验收标准
 
 | 检查项 | 标准 | 当前状态 |
 |--------|------|---------|
@@ -198,41 +129,7 @@ export function deleteArtifact(id: number): Promise<void>
 
 ---
 
-## 7. Schema 定义
-
-**位置**：`backend/app/schemas/artifact.py`
-
-```python
-class ArtifactBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    category: Optional[str] = None
-    era: Optional[str] = None
-    location: Optional[str] = None
-    museum: Optional[str] = None
-    image_url: Optional[str] = None
-    tags: Optional[str] = None
-    material: Optional[str] = None
-    source_url: Optional[str] = None
-    dimensions: Optional[str] = None
-
-class ArtifactCreate(ArtifactBase):
-    pass
-
-class ArtifactUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    # ... 其他字段可选
-
-class ArtifactResponse(ArtifactBase):
-    id: int
-    created_at: datetime
-    updated_at: datetime
-```
-
----
-
-## 8. 关键文件索引
+## 6. 关键文件索引
 
 | 文件 | 负责内容 |
 |------|---------|

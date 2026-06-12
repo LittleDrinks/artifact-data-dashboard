@@ -68,15 +68,6 @@
 
 **模型位置**：`backend/app/models/artifact.py:12-39`
 
-新增字段（数据质量修复）：
-```python
-material: Mapped[Optional[str]] = mapped_column(String(50), index=True)
-museum: Mapped[Optional[str]] = mapped_column(String(100), index=True)
-source_url: Mapped[Optional[str]] = mapped_column(String(500))
-dimensions: Mapped[Optional[str]] = mapped_column(String(100))
-related_artifacts: Mapped[Optional[str]] = mapped_column(Text)  # 预留字段
-```
-
 ### 2.2 年代归一化规则
 
 将原始年代值归一化为 15 种标准朝代：
@@ -167,14 +158,6 @@ related_artifacts: Mapped[Optional[str]] = mapped_column(Text)  # 预留字段
 
 **脚本**：`scripts/build_lightrag_index.py`
 
-配置：
-```python
-LightRAG(
-    working_dir=settings.LIGHTRAG_DIR,
-    llm_model_func=lambda prompt: call_glm_api(prompt),
-)
-```
-
 > **已知问题**：索引规模较小，可能与输入语料不足或抽取参数有关。需要进一步优化。
 
 ---
@@ -210,19 +193,7 @@ LightRAG(
 
 ---
 
-## 7. API 接口
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/artifacts` | GET | 文物列表（分页+搜索+筛选） |
-| `/api/artifacts` | POST | 创建文物 |
-| `/api/artifacts/:id` | GET | 文物详情（含新字段） |
-| `/api/artifacts/:id` | PUT | 更新文物 |
-| `/api/artifacts/:id` | DELETE | 删除文物 |
-
----
-
-## 8. 验收标准
+## 7. 验收标准
 
 | 检查项 | 标准 | 当前状态 |
 |--------|------|---------|
@@ -235,7 +206,7 @@ LightRAG(
 
 ---
 
-## 9. 关键文件索引
+## 8. 关键文件索引
 
 | 文件 | 负责内容 |
 |------|---------|

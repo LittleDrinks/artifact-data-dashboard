@@ -51,60 +51,16 @@
 | `/api/auth/login` | POST | 无 | 用户登录，返回 JWT |
 | `/api/auth/me` | GET | 需要 | 获取当前用户信息 |
 
-### 2.2 注册请求
+### 2.2 注册与登录
 
-```json
-POST /api/auth/register
-{
-  "username": "testuser",
-  "email": "test@example.com",
-  "password": "password123"
-}
-```
+- **注册**：POST `/api/auth/register`，Body 包含 `username`、`email`、`password`
+- **登录**：POST `/api/auth/login`，Body 包含 `username`（或 `email`）、`password`
+- **响应**：`{ access_token, token_type: "bearer" }`
 
-响应：
-```json
-{
-  "id": 1,
-  "username": "testuser",
-  "email": "test@example.com",
-  "role": "user",
-  "created_at": "2026-04-16T..."
-}
-```
+### 2.3 当前用户
 
-### 2.3 登录请求
-
-```json
-POST /api/auth/login
-{
-  "username": "testuser",  // 或 email
-  "password": "password123"
-}
-```
-
-响应：
-```json
-{
-  "access_token": "eyJhbG...",
-  "token_type": "bearer"
-}
-```
-
-### 2.4 当前用户
-
-```json
-GET /api/auth/me
-Authorization: Bearer eyJhbG...
-
-响应：
-{
-  "id": 1,
-  "username": "testuser",
-  "email": "test@example.com",
-  "role": "user"
-}
-```
+- **请求**：GET `/api/auth/me`，Header 携带 `Authorization: Bearer <token>`
+- **响应**：`{ id, username, email, role }`
 
 ---
 
@@ -114,11 +70,6 @@ Authorization: Bearer eyJhbG...
 
 **位置**：`backend/app/services/auth.py`
 
-使用：
-- `PyJWT` — JWT 编解码
-- `bcrypt` — 密码哈希
-
-Token 配置：
 - 算法：HS256
 - 过期时间：24h（配置可调）
 - 密钥：`JWT_SECRET_KEY`（从 settings 读取）
@@ -127,43 +78,18 @@ Token 配置：
 
 **位置**：`backend/app/routers/auth.py:18-43`
 
-```python
-_login_attempts: dict[str, list[float]] = defaultdict(list)
-_RATE_LIMIT_WINDOW = 60  # seconds
-_RATE_LIMIT_MAX = 5  # attempts per window
-
-def _check_rate_limit(client_ip: str):
-    # 60s 内超过 5 次尝试 → 429 Too Many Requests
-```
+- 60s 内超过 5 次尝试 → 429 Too Many Requests
 
 ### 3.3 管理员账户
 
 **位置**：`backend/app/database.py:64`
 
-```python
-admin_password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
-```
-
-管理员账户在数据库初始化时自动创建：
-- username: "admin"
-- role: "admin"
-- 密码从环境变量读取，回退值 "admin123"
-
-> **修复历史**：Round 2 审查发现密码硬编码，已改为环境变量读取。
+- 初始化时自动创建 username="admin"、role="admin"
+- 密码从环境变量 `ADMIN_DEFAULT_PASSWORD` 读取，回退值 "admin123"
 
 ### 3.4 get_current_user 依赖
 
 **位置**：`backend/app/routers/auth.py:46-93`
-
-```python
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-) -> User:
-    # 解析 Bearer token
-    # 验证有效性
-    # 返回 User 对象
-```
 
 用于保护需要认证的端点，如 `/api/chat/sessions`、`/api/artifacts/:id/repair-image`。
 
@@ -175,93 +101,31 @@ def get_current_user(
 
 **位置**：`frontend/src/hooks/useAuth.ts`
 
-```typescript
-export function useAuth() {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  // 登录
-  const login = async (username: string, password: string) => { ... }
-  
-  // 注册
-  const register = async (data: RegisterData) => { ... }
-  
-  // 登出
-  const logout = () => {
-    localStorage.removeItem('token')
-    setUser(null)
-  }
-
-  return { user, loading, login, register, logout }
-}
-```
+管理登录、注册、登出，以及用户状态。
 
 ### 4.2 Token 存储
 
-```typescript
-// 登录成功后存储 token
-localStorage.setItem('token', response.access_token)
-
-// 请求时携带
-headers: { Authorization: `Bearer ${token}` }
-```
+- 登录成功后：`localStorage.setItem('token', response.access_token)`
+- 请求时携带：`headers: { Authorization: Bearer ${token} }`
 
 ### 4.3 axios 拦截器
 
 **位置**：`frontend/src/api/client.ts`
 
-```typescript
-// 请求拦截器：添加 Authorization header
-client.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-// 响应拦截器：401 自动跳转登录
-client.interceptors.response.use(
-  response => response,
-  error => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/login'
-    }
-    return Promise.reject(error)
-  }
-)
-```
+- 请求拦截器：自动附加 Authorization header
+- 响应拦截器：401 时清除 token 并跳转登录页
 
 ### 4.4 PrivateRoute 组件
 
 **位置**：`frontend/src/App.tsx:33-39`（内联定义）
 
-```tsx
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
-}
-```
-
-> **注意**：路由守卫基于 `localStorage.getItem('token')` 检查，非 `useAuth` hook 的 `user` 状态。组件直接定义在 `App.tsx` 中，没有独立的 `ProtectedRoute.tsx` 文件。
-```
+基于 `localStorage.getItem('token')` 检查，未登录则跳转 `/login`。
 
 ### 4.5 SSE 401 处理
 
 **位置**：`frontend/src/api/chat.ts:142-147`
 
-```typescript
-// SSE fetch 需手动处理 401（不经过 axios 拦截器）
-if (response.status === 401) {
-  localStorage.removeItem('token')
-  window.location.href = '/login'
-  return
-}
-```
+SSE fetch 需手动处理 401（不经过 axios 拦截器），清除 token 并跳转登录页。
 
 ---
 
@@ -271,14 +135,6 @@ if (response.status === 401) {
 |------|------|------|
 | admin | `admin` | 全部权限 + 系统配置 |
 | user | `user` | 文物查看、图谱、问答、图像修复 |
-
-### 5.1 角色字段
-
-```python
-# backend/app/models/user.py
-role: Mapped[str] = mapped_column(String(20), default="user")
-# CHECK(role IN ('admin', 'user'))
-```
 
 ---
 
@@ -307,22 +163,7 @@ role: Mapped[str] = mapped_column(String(20), default="user")
 
 ---
 
-## 8. 数据模型
-
-```sql
-CREATE TABLE users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT DEFAULT 'user' CHECK(role IN ('admin','user')),
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
----
-
-## 9. 关键文件索引
+## 8. 关键文件索引
 
 | 文件 | 负责内容 |
 |------|---------|
