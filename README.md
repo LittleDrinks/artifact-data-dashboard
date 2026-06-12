@@ -69,15 +69,16 @@ npm run dev                    # http://localhost:5173
 │   └── requirements.txt
 ├── frontend/          # React 前端
 │   ├── src/
-│   │   ├── features/  # 功能模块
+│   │   ├── pages/     # 页面
 │   │   ├── api/       # API 调用层
-│   │   └── router/    # 路由
+│   │   └── layouts/   # 布局
 │   └── package.json
 ├── data/              # 数据资产
 ├── scripts/           # 数据脚本
 └── docs/              # 文档
     ├── PRD.md         # 产品需求
-    ├── specs/         # API 与页面规格
-    ├── stripe/        # 前端设计规范
-    └── 背景调研.md
+    ├── architecture.md # 系统架构
+    ├── pitfalls.md    # 踩坑记录
+    ├── 背景调研.md     # 项目背景调研
+    └── specs/         # 功能模块规格
 ```

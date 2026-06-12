@@ -8,8 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **文物大数据与人工智能集成系统** — 大创项目，人机协作的文化遗产数据平台。核心功能：数据管理、知识图谱、AI 智能问答。
 
-项目规划与阶段状态详见 `.planning/` 目录。
-
 ---
 
 ## 技术栈
@@ -27,18 +25,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 常用命令
 
-```bash
-# 后端
-cd backend && .venv\Scripts\activate  # Windows
-uvicorn app.main:app --reload --port 8000
-pytest tests/ -v
+### Docker 开发（唯一环境）
 
-# 前端
-cd frontend
-npm run dev      # http://localhost:5173
-npm run build
-npm run lint
+```bash
+# 1. 复制环境变量并填入 API Key
+cp .env.example .env
+
+# 2. 一键启动全部服务（Neo4j + backend + frontend）
+docker compose up -d
+
+# 3. 访问
+# 前端：http://localhost
+# 后端：http://localhost:8000/docs
+# Neo4j Browser：http://localhost:7474
+
+# 4. 跑后端测试
+docker compose exec backend pytest tests/ -v
+
+# 5. 查看日志
+docker compose logs -f backend
+docker compose logs -f frontend
 ```
+
+> Docker 是项目唯一的开发/运行环境。如果 `docker compose up` 失败，必须先解决环境阻塞，再继续开发。
 
 ---
 
@@ -57,8 +66,7 @@ frontend/src/
   pages/           # 页面（Chat, Graph, Artifacts...）
   api/             # API 封装
 data/final/        # 771 条清洗后的文物数据
-docs/              # PRD, pitfalls, technical-debt（只读参考）
-.planning/         # GSD 规划、roadmap、phase 状态
+docs/              # PRD, architecture, pitfalls, 背景调研（只读参考）
 ```
 
 ---
@@ -119,7 +127,7 @@ LightRAG KV Store ────> AI 问答 (/chat)
 Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互通
 ```
 
-**技术债务**: 见 `.planning/technical-debt.md`。
+**技术债务**: 见 GitHub Issues（原 `.planning/technical-debt.md` 已归档清理）。
 
 ---
 
@@ -136,7 +144,7 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 
 ## 关键约束
 
-1. **本地开发优先**：直接跑 FastAPI + Vite dev，不用 Docker
+1. **开发环境：必须使用 Docker Compose** — 统一 Neo4j / backend / frontend 环境。如果 `docker compose up` 失败，视为阻塞项，先解决环境再推进工作。
 2. **不要问用户**：参考 docs/ 文档，拿不准按最简方案
 3. **不要修改 docs/ 和 demo/**
 4. **数据已有**：`data/final/` 有 771 条文物数据
@@ -162,7 +170,7 @@ Neo4j + LightRAG ────> 知识抽取 (/knowledge) — ⚠️ 数据不互
 
 - **聚焦 merge** — 当前 PR 的首要目标是合并，不要引入不相关的改动。
 - **无关改动拆 PR** — workflow、文档更新、工具配置等非功能改动，单独开分支和 PR。
-- **技术债务同步** — 发现的技术债务记录到 `.planning/technical-debt.md`，并同步到 GitHub Issues。
+- **技术债务同步** — 发现的技术债务直接记录到 GitHub Issues。
 - **新建 PR 后必须等 review** — push 后不要立刻告诉用户"完成了"。等待 Copilot / CodeRabbit 跑完 review，逐条处理建议（
 - 修复或 rebuttal），直到没有新的 blocking 评论，再通知用户检查并 merge。
 - **AI Review 语言** — 已通过 `.coderabbit.yaml` 和 `.github/copilot-instructions.md` 要求 CodeRabbit / Copilot 用**简体中文**回复。如果 review 仍用英文，在首条 rebuttal 中追加提醒：`请用中文回复。`

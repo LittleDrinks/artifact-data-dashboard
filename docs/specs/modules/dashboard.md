@@ -52,33 +52,9 @@ Dashboard 是系统的首页入口，展示文物数据的统计概览，为用�
 
 ### 2.2 响应格式
 
-**Overview**：
-```json
-{
-  "total_artifacts": 771,
-  "categories": [
-    {"category": "青铜器", "count": 100},
-    {"category": "陶瓷", "count": 50}
-  ]
-}
-```
-
-**by-era**：
-```json
-[
-  {"era": "商", "count": 50},
-  {"era": "唐", "count": 30},
-  {"era": "宋", "count": 40}
-]
-```
-
-**wordcloud**：
-```json
-[
-  {"word": "青铜", "frequency": 100},
-  {"word": "纹饰", "frequency": 80}
-]
-```
+- **Overview**：`{ total_artifacts, categories: [{category, count}] }`
+- **by-era**：`[{era, count}]`
+- **wordcloud**：`[{word, frequency}]`
 
 ---
 
@@ -117,17 +93,7 @@ Dashboard 是系统的首页入口，展示文物数据的统计概览，为用�
 
 **位置**：`frontend/src/pages/Dashboard.tsx:345-406`
 
-当前实现：
-```tsx
-// 使用 HTML span + flex 布局
-<span style={{
-  fontSize: fontSize,
-  fontWeight: fontWeight,
-  margin: '4px',
-}}>
-  {word}
-</span>
-```
+当前使用 HTML span + flex 布局，按词频大小排列。
 
 > **已知问题**：排列是顺序的，不是传统词云的密集/交错排列。
 
@@ -139,14 +105,7 @@ Dashboard 是系统的首页入口，展示文物数据的统计概览，为用�
 
 **位置**：`backend/app/services/stats.py:20-53`
 
-```python
-def get_wordcloud_data(db: Session, limit: int = 100):
-    """使用 jieba 分词统计词频。"""
-    # 合并所有文物描述
-    # jieba 分词
-    # 过滤停用词 + 短词 + 纯数字
-    # 统计词频，返回 top N
-```
+使用 jieba 分词统计词频：合并所有文物描述 → jieba 分词 → 过滤停用词 + 短词 + 纯数字 → 统计词频，返回 top N。
 
 ### 4.2 停用词列表（已扩展）
 
@@ -176,9 +135,7 @@ def get_wordcloud_data(db: Session, limit: int = 100):
 
 | ID | 问题 | 来源 | 优先级 | 说明 |
 |-----|------|------|--------|------|
-| WORDCLOUD-1 | ~~词云含垃圾词~~ | [设计] | ~~P2~~ | **2026-04-17 已解决**：扩展停用词列表，包含文物领域高频无意义词。 |
 | WORDCLOUD-2 | 词云非传统效果 | [review-round-1 P2-5] | P2 | 使用 HTML span flex 布局，排列顺序，不是传统密集词云。建议使用 `react-wordcloud` 或 `d3-cloud`。 |
-| CHART-1 | ~~朝代柱状图排序不按时间~~ | [设计] | ~~已修复~~ | 已在 `Dashboard.tsx` 实现 `ERA_ORDER` 历史排序 |
 | UX-1 | 无"最近活动表" | [PRD] | P3 | PRD 要求展示最近操作记录，当前未实现 |
 
 ---
@@ -195,17 +152,7 @@ def get_wordcloud_data(db: Session, limit: int = 100):
 
 ---
 
-## 7. 设计系统遵循
-
-Dashboard 遵循 Stripe 风格设计系统：
-- 白色背景 #ffffff
-- 深色标题 #061b31
-- 紫色主色 #533afd
-- 卡片阴影和圆角
-
----
-
-## 8. 关键文件索引
+## 7. 关键文件索引
 
 | 文件 | 负责内容 |
 |------|---------|

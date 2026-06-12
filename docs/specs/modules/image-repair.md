@@ -73,17 +73,7 @@ Content-Type: multipart/form-data
 
 **位置**：`backend/app/routers/repair.py:48`
 
-```python
-@router.post("/{artifact_id}/repair-image")
-async def repair_image(
-    artifact_id: int,
-    mask: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),  # 认证依赖
-    ...
-):
-```
-
-> **修复历史**：Round 2 审查发现端点缺少认证，已添加 `Depends(get_current_user)`。
+通过 `Depends(get_current_user)` 保护端点。
 
 ---
 
@@ -93,15 +83,6 @@ async def repair_image(
 
 **位置**：`backend/app/routers/repair.py:78-107`
 
-```python
-# TELEA 算法
-cv2.INPAINT_TELEA
-
-# Navier-Stokes 算法
-cv2.INPAINT_NS
-```
-
-两种算法对比：
 - TELEA：基于快速行进法，速度快
 - Navier-Stokes：基于流体动力学，大面积修复效果好
 
@@ -118,12 +99,7 @@ cv2.INPAINT_NS
 
 **位置**：`backend/app/routers/repair.py:24-38`
 
-```python
-def download_image(url: str) -> np.ndarray:
-    resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-    pil_img = Image.open(io.BytesIO(resp.content))
-    return np.array(pil_img)
-```
+从外部 URL 下载原图，15s 超时。
 
 > **已知限制**：从外部 URL 下载原图，网络延迟可能导致响应较慢。
 
@@ -135,7 +111,6 @@ def download_image(url: str) -> np.ndarray:
 
 **位置**：`frontend/src/pages/ImageRepair.tsx`
 
-功能：
 - Canvas 绘制遮罩（鼠标涂抹）
 - 遮罩下载（PNG 格式）
 - 上传遮罩调用 API
@@ -143,31 +118,11 @@ def download_image(url: str) -> np.ndarray:
 
 ### 4.2 Canvas 绘制
 
-```tsx
-// 绘制白色遮罩
-canvas.onmousedown = startDraw
-canvas.onmousemove = draw
-canvas.onmouseup = endDraw
-
-// 导出 PNG
-const maskUrl = canvas.toDataURL('image/png')
-```
+绘制白色遮罩，导出 PNG。
 
 ### 4.3 API 调用
 
-```typescript
-// 上传遮罩 + 获取修复结果
-const formData = new FormData()
-formData.append('mask', maskFile)
-formData.append('radius', '3')
-formData.append('method', 'telea')
-
-const response = await fetch(`/api/artifacts/${artifactId}/repair-image`, {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${token}` },
-  body: formData,
-})
-```
+上传遮罩 + 获取修复结果，Header 携带 `Authorization: Bearer <token>`。
 
 ---
 
@@ -187,7 +142,7 @@ const response = await fetch(`/api/artifacts/${artifactId}/repair-image`, {
 |--------|------|---------|
 | 遮罩绘制 | Canvas 涂抹生成遮罩 | ✅ 已实现 |
 | Inpainting | OpenCV TELEA/NS 算法 | ✅ 已实现 |
-| 认证保护 | JWT required | ✅ 已实现（Round 2 修复） |
+| 认证保护 | JWT required | ✅ 已实现 |
 | 前后对比 | 修复结果展示 | ✅ 已实现 |
 | 响应格式 | base64 PNG 返回 | ✅ 已实现 |
 
